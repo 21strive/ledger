@@ -1,0 +1,6 @@
+.idea
+.DS_Store
+.zed
+node_modules
+dist
+.env
