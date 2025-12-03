@@ -36,12 +36,12 @@ type LedgerAccountRepositoryInterface interface {
 
 type ledgerAccountRepository struct {
 	dbRead  *sqlx.DB
-	dbWrite *sqlx.Tx
+	dbWrite *sqlx.DB
 }
 
 func NewLedgerAccountRepository(
 	dbRead *sqlx.DB,
-	dbWrite *sqlx.Tx,
+	dbWrite *sqlx.DB,
 	redis redis.UniversalClient,
 ) LedgerAccountRepositoryInterface {
 

@@ -40,12 +40,12 @@ type LedgerPaymentRepositoryInterface interface {
 
 type ledgerPaymentRepository struct {
 	dbRead  *sqlx.DB
-	dbWrite *sqlx.Tx
+	dbWrite *sqlx.DB
 }
 
 func NewLedgerPaymentRepository(
 	dbRead *sqlx.DB,
-	dbWrite *sqlx.Tx,
+	dbWrite *sqlx.DB,
 ) LedgerPaymentRepositoryInterface {
 
 	// create the table if not exists

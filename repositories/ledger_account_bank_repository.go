@@ -38,12 +38,12 @@ type LedgerAccountBankRepositoryInterface interface {
 
 type ledgerAccountBankRepository struct {
 	dbRead  *sqlx.DB
-	dbWrite *sqlx.Tx
+	dbWrite *sqlx.DB
 }
 
 func NewLedgerAccountBankRepository(
 	dbRead *sqlx.DB,
-	dbWrite *sqlx.Tx,
+	dbWrite *sqlx.DB,
 ) LedgerAccountBankRepositoryInterface {
 
 	// create the table if not exists

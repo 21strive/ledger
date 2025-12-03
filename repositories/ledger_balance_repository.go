@@ -40,12 +40,12 @@ type LedgerBalanceRepositoryInterface interface {
 
 type ledgerBalanceRepository struct {
 	dbRead  *sqlx.DB
-	dbWrite *sqlx.Tx
+	dbWrite *sqlx.DB
 }
 
 func NewLedgerBalanceRepository(
 	dbRead *sqlx.DB,
-	dbWrite *sqlx.Tx,
+	dbWrite *sqlx.DB,
 ) LedgerBalanceRepositoryInterface {
 
 	// create the table if not exists
