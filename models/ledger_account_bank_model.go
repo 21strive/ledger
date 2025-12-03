@@ -1,10 +1,12 @@
 package models
 
-import "time"
+import (
+	"github.com/21strive/redifu"
+)
 
 type LedgerAccountBank struct {
-	UUID              string     `json:"uuid" db:"uuid"`
-	CreatedAt         *time.Time `json:"createdAt" db:"created_at"`
-	LedgerAccountUUID string     `json:"ledgerAccountUuid" db:"ledger_account_uuid"`
-	BankAccountNumber string     `json:"bankAccountNumber" db:"bank_account_number"`
+	*redifu.Record
+	LedgerAccountUUID string `json:"ledger_account_uuid" db:"ledger_account_uuid"`
+	BankAccountNumber string `json:"bank_account_number" db:"bank_account_number"`
+	BankName          string `json:"bank_name" db:"bank_name"`
 }

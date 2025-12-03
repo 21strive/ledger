@@ -1,16 +1,18 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/21strive/redifu"
+)
 
 type LedgerBalance struct {
-	UUID                 string     `json:"uuid" db:"uuid"`
-	CreatedAt            time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt            time.Time  `json:"updatedAt" db:"updated_at"`
-	LedgerAccountUUID    string     `json:"ledgerAccountUuid" db:"ledger_account_uuid"`
+	*redifu.Record
+	LedgerAccountUUID    string     `json:"ledger_account_uuid" db:"ledger_account_uuid"`
 	Balance              int64      `json:"balance" db:"balance"`
-	LastReceive          *time.Time `json:"lastReceive" db:"last_receive"`
-	LastWithdraw         *time.Time `json:"lastWithdraw" db:"last_withdraw"`
-	IncomeAccumulation   int64      `json:"incomeAccumulation" db:"income_accumulation"`
-	WithdrawAccumulation int64      `json:"withdrawAccumulation" db:"withdraw_accumulation"`
+	LastReceive          *time.Time `json:"last_receive" db:"last_receive"`
+	LastWithdraw         *time.Time `json:"last_withdraw" db:"last_withdraw"`
+	IncomeAccumulation   int64      `json:"income_accumulation" db:"income_accumulation"`
+	WithdrawAccumulation int64      `json:"withdraw_accumulation" db:"withdraw_accumulation"`
 	Currency             string     `json:"currency" db:"currency"`
 }
