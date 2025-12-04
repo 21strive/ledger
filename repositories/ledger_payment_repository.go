@@ -19,15 +19,22 @@ var ledgerPaymentRepositorySchema = `
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		ledger_account_uuid VARCHAR(255) NOT NULL,
+		ledger_wallet_uuid VARCHAR(255) NOT NULL,
+		ledger_settlement_uuid VARCHAR(255) NULL,
+		ledger_transaction_uuid VARCHAR(255) NULL,
+		invoice_number VARCHAR(255) NOT NULL,
 		amount BIGINT NOT NULL,
-		balance_uuid VARCHAR(255) NOT NULL,
+		payment_method VARCHAR(50) NOT NULL,
+		payment_date TIMESTAMP NULL,
 		status VARCHAR(50) NOT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_uuid ON ledger_payments(uuid);
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_randid ON ledger_payments(randid);
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_account_uuid ON ledger_payments(ledger_account_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_balance_uuid ON ledger_payments(balance_uuid);
+	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_wallet_uuid ON ledger_payments(ledger_wallet_uuid);
+	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_settlement_uuid ON ledger_payments(ledger_settlement_uuid);
+	CREATE INDEX IF NOT EXISTS idx_ledger_payments_invoice_number ON ledger_payments(invoice_number);
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_status ON ledger_payments(status);
 `
 
@@ -35,7 +42,11 @@ type LedgerPaymentRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerPayment) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerPayment) *models.ErrorLog
 	GetByUUID(uuid string) (*models.LedgerPayment, *models.ErrorLog)
+	GetByInvoiceNumber(invoiceNumber string) (*models.LedgerPayment, *models.ErrorLog)
 	GetByLedgerAccountUUID(ledgerAccountUUID string) ([]*models.LedgerPayment, *models.ErrorLog)
+	GetByLedgerWalletUUID(ledgerWalletUUID string) ([]*models.LedgerPayment, *models.ErrorLog)
+	GetByLedgerSettlementUUID(ledgerSettlementUUID string) ([]*models.LedgerPayment, *models.ErrorLog)
+	GetByStatus(status string) ([]*models.LedgerPayment, *models.ErrorLog)
 }
 
 type ledgerPaymentRepository struct {
@@ -87,11 +98,32 @@ func (r *ledgerPaymentRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 	// ledger_account_uuid
 	queryBuilder("ledger_account_uuid", data.LedgerAccountUUID)
 
+	// ledger_wallet_uuid
+	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
+
+	// ledger_settlement_uuid (nullable)
+	if data.LedgerSettlementUUID != nil {
+		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
+	}
+
+	// ledger_transaction_uuid
+	if data.LedgerTransactionUUID != "" {
+		queryBuilder("ledger_transaction_uuid", data.LedgerTransactionUUID)
+	}
+
+	// invoice_number
+	queryBuilder("invoice_number", data.InvoiceNumber)
+
 	// amount
 	queryBuilder("amount", data.Amount)
 
-	// balance_uuid
-	queryBuilder("balance_uuid", data.BalanceUUID)
+	// payment_method
+	queryBuilder("payment_method", data.PaymentMethod)
+
+	// payment_date (nullable)
+	if data.PaymentDate != nil {
+		queryBuilder("payment_date", data.PaymentDate)
+	}
 
 	// status
 	queryBuilder("status", data.Status)
@@ -110,6 +142,12 @@ func (r *ledgerPaymentRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 	// Execute the query
 	_, err := sqlTransaction.Exec(query, rawSqlValues...)
 	if err != nil {
+		// Check for duplicate invoice_number error (Postgres unique violation)
+		if strings.Contains(err.Error(), "duplicate key value") && strings.Contains(err.Error(), "invoice_number") {
+			logData := helper.WriteLog(err, http.StatusConflict, "Invoice number already exists")
+			return logData
+		}
+
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return logData
 	}
@@ -138,11 +176,32 @@ func (r *ledgerPaymentRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	// ledger_account_uuid
 	queryBuilder("ledger_account_uuid", data.LedgerAccountUUID)
 
+	// ledger_wallet_uuid
+	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
+
+	// ledger_settlement_uuid (nullable)
+	if data.LedgerSettlementUUID != nil {
+		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
+	}
+
+	// ledger_transaction_uuid
+	if data.LedgerTransactionUUID != "" {
+		queryBuilder("ledger_transaction_uuid", data.LedgerTransactionUUID)
+	}
+
+	// invoice_number
+	queryBuilder("invoice_number", data.InvoiceNumber)
+
 	// amount
 	queryBuilder("amount", data.Amount)
 
-	// balance_uuid
-	queryBuilder("balance_uuid", data.BalanceUUID)
+	// payment_method
+	queryBuilder("payment_method", data.PaymentMethod)
+
+	// payment_date (nullable)
+	if data.PaymentDate != nil {
+		queryBuilder("payment_date", data.PaymentDate)
+	}
 
 	// status
 	queryBuilder("status", data.Status)
@@ -175,8 +234,13 @@ func (r *ledgerPaymentRepository) GetByUUID(uuid string) (*models.LedgerPayment,
 			lp.created_at,
 			lp.updated_at,
 			lp.ledger_account_uuid,
+			lp.ledger_wallet_uuid,
+			lp.ledger_settlement_uuid,
+			lp.ledger_transaction_uuid,
+			lp.invoice_number,
 			lp.amount,
-			lp.balance_uuid,
+			lp.payment_method,
+			lp.payment_date,
 			lp.status
 		FROM
 			ledger_payments lp
@@ -186,6 +250,47 @@ func (r *ledgerPaymentRepository) GetByUUID(uuid string) (*models.LedgerPayment,
 	`
 
 	err := r.dbRead.QueryRowx(sqlQuery, uuid).StructScan(&ledgerPayment)
+	if err != nil {
+		var logData *models.ErrorLog
+		if err == sql.ErrNoRows {
+			logData = helper.WriteLog(err, http.StatusNotFound, "Ledger Payment not found")
+		} else {
+			logData = helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		}
+
+		return nil, logData
+	}
+
+	return ledgerPayment, nil
+}
+
+func (r *ledgerPaymentRepository) GetByInvoiceNumber(invoiceNumber string) (*models.LedgerPayment, *models.ErrorLog) {
+
+	var ledgerPayment *models.LedgerPayment
+
+	sqlQuery := `
+		SELECT
+			lp.uuid,
+			lp.randid,
+			lp.created_at,
+			lp.updated_at,
+			lp.ledger_account_uuid,
+			lp.ledger_wallet_uuid,
+			lp.ledger_settlement_uuid,
+			lp.ledger_transaction_uuid,
+			lp.invoice_number,
+			lp.amount,
+			lp.payment_method,
+			lp.payment_date,
+			lp.status
+		FROM
+			ledger_payments lp
+		WHERE
+			lp.invoice_number = $1
+		LIMIT 1
+	`
+
+	err := r.dbRead.QueryRowx(sqlQuery, invoiceNumber).StructScan(&ledgerPayment)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {
@@ -211,8 +316,13 @@ func (r *ledgerPaymentRepository) GetByLedgerAccountUUID(ledgerAccountUUID strin
 			lp.created_at,
 			lp.updated_at,
 			lp.ledger_account_uuid,
+			lp.ledger_wallet_uuid,
+			lp.ledger_settlement_uuid,
+			lp.ledger_transaction_uuid,
+			lp.invoice_number,
 			lp.amount,
-			lp.balance_uuid,
+			lp.payment_method,
+			lp.payment_date,
 			lp.status
 		FROM
 			ledger_payments lp
@@ -222,24 +332,116 @@ func (r *ledgerPaymentRepository) GetByLedgerAccountUUID(ledgerAccountUUID strin
 			lp.created_at DESC
 	`
 
-	rows, err := r.dbRead.Queryx(sqlQuery, ledgerAccountUUID)
+	err := r.dbRead.Select(&ledgerPayments, sqlQuery, ledgerAccountUUID)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return nil, logData
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var ledgerPayment models.LedgerPayment
-		err := rows.StructScan(&ledgerPayment)
-		if err != nil {
-			logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-			return nil, logData
-		}
-		ledgerPayments = append(ledgerPayments, &ledgerPayment)
+	return ledgerPayments, nil
+}
+
+func (r *ledgerPaymentRepository) GetByLedgerWalletUUID(ledgerWalletUUID string) ([]*models.LedgerPayment, *models.ErrorLog) {
+
+	var ledgerPayments []*models.LedgerPayment
+
+	sqlQuery := `
+		SELECT
+			lp.uuid,
+			lp.randid,
+			lp.created_at,
+			lp.updated_at,
+			lp.ledger_account_uuid,
+			lp.ledger_wallet_uuid,
+			lp.ledger_settlement_uuid,
+			lp.ledger_transaction_uuid,
+			lp.invoice_number,
+			lp.amount,
+			lp.payment_method,
+			lp.payment_date,
+			lp.status
+		FROM
+			ledger_payments lp
+		WHERE
+			lp.ledger_wallet_uuid = $1
+		ORDER BY
+			lp.created_at DESC
+	`
+
+	err := r.dbRead.Select(&ledgerPayments, sqlQuery, ledgerWalletUUID)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
 	}
 
-	if err := rows.Err(); err != nil {
+	return ledgerPayments, nil
+}
+
+func (r *ledgerPaymentRepository) GetByLedgerSettlementUUID(ledgerSettlementUUID string) ([]*models.LedgerPayment, *models.ErrorLog) {
+
+	var ledgerPayments []*models.LedgerPayment
+
+	sqlQuery := `
+		SELECT
+			lp.uuid,
+			lp.randid,
+			lp.created_at,
+			lp.updated_at,
+			lp.ledger_account_uuid,
+			lp.ledger_wallet_uuid,
+			lp.ledger_settlement_uuid,
+			lp.ledger_transaction_uuid,
+			lp.invoice_number,
+			lp.amount,
+			lp.payment_method,
+			lp.payment_date,
+			lp.status
+		FROM
+			ledger_payments lp
+		WHERE
+			lp.ledger_settlement_uuid = $1
+		ORDER BY
+			lp.created_at DESC
+	`
+
+	err := r.dbRead.Select(&ledgerPayments, sqlQuery, ledgerSettlementUUID)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	return ledgerPayments, nil
+}
+
+func (r *ledgerPaymentRepository) GetByStatus(status string) ([]*models.LedgerPayment, *models.ErrorLog) {
+
+	var ledgerPayments []*models.LedgerPayment
+
+	sqlQuery := `
+		SELECT
+			lp.uuid,
+			lp.randid,
+			lp.created_at,
+			lp.updated_at,
+			lp.ledger_account_uuid,
+			lp.ledger_wallet_uuid,
+			lp.ledger_settlement_uuid,
+			lp.ledger_transaction_uuid,
+			lp.invoice_number,
+			lp.amount,
+			lp.payment_method,
+			lp.payment_date,
+			lp.status
+		FROM
+			ledger_payments lp
+		WHERE
+			lp.status = $1
+		ORDER BY
+			lp.created_at DESC
+	`
+
+	err := r.dbRead.Select(&ledgerPayments, sqlQuery, status)
+	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return nil, logData
 	}

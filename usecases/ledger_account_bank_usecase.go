@@ -3,6 +3,7 @@ package usecases
 import (
 	"net/http"
 
+	"github.com/21strive/redifu"
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/faizauthar12/ledger/utils/helper"
@@ -48,5 +49,16 @@ func (u *ledgerAccountBankUseCase) CreateLedgerAccountBank(sqlTransaction *sqlx.
 	}
 
 	ledgerAccountBank := &models.LedgerAccountBank{}
+	redifu.InitRecord(ledgerAccountBank)
 
+	ledgerAccountBank.LedgerAccountUUID = ledgerAccount.UUID
+	ledgerAccountBank.BankAccountNumber = bankAccountNumber
+	ledgerAccountBank.BankName = bankName
+
+	errorLog := u.ledgerAccountBankRepository.Insert(sqlTransaction, ledgerAccountBank)
+	if errorLog != nil {
+		return nil, errorLog
+	}
+
+	return ledgerAccountBank, nil
 }

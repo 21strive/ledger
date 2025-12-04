@@ -19,15 +19,19 @@ var ledgerTransactionRepositorySchema = `
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		transaction_type VARCHAR(50) NOT NULL,
-		ledger_payment_uuid VARCHAR(255) NOT NULL,
-		ledger_balance_uuid VARCHAR(255) NOT NULL
+		ledger_payment_uuid VARCHAR(255) NULL,
+		ledger_settlement_uuid VARCHAR(255) NULL,
+		ledger_wallet_uuid VARCHAR(255) NOT NULL,
+		amount BIGINT NOT NULL,
+		description TEXT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_uuid ON ledger_transactions(uuid);
 	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_randid ON ledger_transactions(randid);
 	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_transaction_type ON ledger_transactions(transaction_type);
 	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_ledger_payment_uuid ON ledger_transactions(ledger_payment_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_ledger_balance_uuid ON ledger_transactions(ledger_balance_uuid);
+	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_ledger_settlement_uuid ON ledger_transactions(ledger_settlement_uuid);
+	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_ledger_wallet_uuid ON ledger_transactions(ledger_wallet_uuid);
 `
 
 type LedgerTransactionRepositoryInterface interface {
@@ -35,7 +39,9 @@ type LedgerTransactionRepositoryInterface interface {
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerTransaction) *models.ErrorLog
 	GetByUUID(uuid string) (*models.LedgerTransaction, *models.ErrorLog)
 	GetByLedgerPaymentUUID(ledgerPaymentUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
-	GetByLedgerBalanceUUID(ledgerBalanceUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
+	GetByLedgerSettlementUUID(ledgerSettlementUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
+	GetByLedgerWalletUUID(ledgerWalletUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
+	GetByTransactionType(transactionType string) ([]*models.LedgerTransaction, *models.ErrorLog)
 }
 
 type ledgerTransactionRepository struct {
@@ -87,11 +93,26 @@ func (r *ledgerTransactionRepository) Insert(sqlTransaction *sqlx.Tx, data *mode
 	// transaction_type
 	queryBuilder("transaction_type", data.TransactionType)
 
-	// ledger_payment_uuid
-	queryBuilder("ledger_payment_uuid", data.LedgerPaymentUUID)
+	// ledger_payment_uuid (nullable)
+	if data.LedgerPaymentUUID != nil {
+		queryBuilder("ledger_payment_uuid", *data.LedgerPaymentUUID)
+	}
 
-	// ledger_balance_uuid
-	queryBuilder("ledger_balance_uuid", data.LedgerBalanceUUID)
+	// ledger_settlement_uuid (nullable)
+	if data.LedgerSettlementUUID != nil {
+		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
+	}
+
+	// ledger_wallet_uuid
+	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
+
+	// amount
+	queryBuilder("amount", data.Amount)
+
+	// description (nullable)
+	if data.Description != nil {
+		queryBuilder("description", *data.Description)
+	}
 
 	// Generate placeholders for PostgreSQL ($1, $2, ...)
 	rawSqlPlaceholders := []string{}
@@ -135,11 +156,26 @@ func (r *ledgerTransactionRepository) Update(sqlTransaction *sqlx.Tx, data *mode
 	// transaction_type
 	queryBuilder("transaction_type", data.TransactionType)
 
-	// ledger_payment_uuid
-	queryBuilder("ledger_payment_uuid", data.LedgerPaymentUUID)
+	// ledger_payment_uuid (nullable)
+	if data.LedgerPaymentUUID != nil {
+		queryBuilder("ledger_payment_uuid", *data.LedgerPaymentUUID)
+	}
 
-	// ledger_balance_uuid
-	queryBuilder("ledger_balance_uuid", data.LedgerBalanceUUID)
+	// ledger_settlement_uuid (nullable)
+	if data.LedgerSettlementUUID != nil {
+		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
+	}
+
+	// ledger_wallet_uuid
+	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
+
+	// amount
+	queryBuilder("amount", data.Amount)
+
+	// description (nullable)
+	if data.Description != nil {
+		queryBuilder("description", *data.Description)
+	}
 
 	// Add condition for WHERE clause
 	// uuid always the last $n
@@ -170,7 +206,10 @@ func (r *ledgerTransactionRepository) GetByUUID(uuid string) (*models.LedgerTran
 			lt.updated_at,
 			lt.transaction_type,
 			lt.ledger_payment_uuid,
-			lt.ledger_balance_uuid
+			lt.ledger_settlement_uuid,
+			lt.ledger_wallet_uuid,
+			lt.amount,
+			lt.description
 		FROM
 			ledger_transactions lt
 		WHERE
@@ -205,7 +244,10 @@ func (r *ledgerTransactionRepository) GetByLedgerPaymentUUID(ledgerPaymentUUID s
 			lt.updated_at,
 			lt.transaction_type,
 			lt.ledger_payment_uuid,
-			lt.ledger_balance_uuid
+			lt.ledger_settlement_uuid,
+			lt.ledger_wallet_uuid,
+			lt.amount,
+			lt.description
 		FROM
 			ledger_transactions lt
 		WHERE
@@ -223,7 +265,7 @@ func (r *ledgerTransactionRepository) GetByLedgerPaymentUUID(ledgerPaymentUUID s
 	return ledgerTransactions, nil
 }
 
-func (r *ledgerTransactionRepository) GetByLedgerBalanceUUID(ledgerBalanceUUID string) ([]*models.LedgerTransaction, *models.ErrorLog) {
+func (r *ledgerTransactionRepository) GetByLedgerSettlementUUID(ledgerSettlementUUID string) ([]*models.LedgerTransaction, *models.ErrorLog) {
 
 	var ledgerTransactions []*models.LedgerTransaction
 
@@ -235,16 +277,85 @@ func (r *ledgerTransactionRepository) GetByLedgerBalanceUUID(ledgerBalanceUUID s
 			lt.updated_at,
 			lt.transaction_type,
 			lt.ledger_payment_uuid,
-			lt.ledger_balance_uuid
+			lt.ledger_settlement_uuid,
+			lt.ledger_wallet_uuid,
+			lt.amount,
+			lt.description
 		FROM
 			ledger_transactions lt
 		WHERE
-			lt.ledger_balance_uuid = $1
+			lt.ledger_settlement_uuid = $1
 		ORDER BY
 			lt.created_at DESC
 	`
 
-	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, ledgerBalanceUUID)
+	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, ledgerSettlementUUID)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	return ledgerTransactions, nil
+}
+
+func (r *ledgerTransactionRepository) GetByLedgerWalletUUID(ledgerWalletUUID string) ([]*models.LedgerTransaction, *models.ErrorLog) {
+
+	var ledgerTransactions []*models.LedgerTransaction
+
+	sqlQuery := `
+		SELECT
+			lt.uuid,
+			lt.randid,
+			lt.created_at,
+			lt.updated_at,
+			lt.transaction_type,
+			lt.ledger_payment_uuid,
+			lt.ledger_settlement_uuid,
+			lt.ledger_wallet_uuid,
+			lt.amount,
+			lt.description
+		FROM
+			ledger_transactions lt
+		WHERE
+			lt.ledger_wallet_uuid = $1
+		ORDER BY
+			lt.created_at DESC
+	`
+
+	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, ledgerWalletUUID)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	return ledgerTransactions, nil
+}
+
+func (r *ledgerTransactionRepository) GetByTransactionType(transactionType string) ([]*models.LedgerTransaction, *models.ErrorLog) {
+
+	var ledgerTransactions []*models.LedgerTransaction
+
+	sqlQuery := `
+		SELECT
+			lt.uuid,
+			lt.randid,
+			lt.created_at,
+			lt.updated_at,
+			lt.transaction_type,
+			lt.ledger_payment_uuid,
+			lt.ledger_settlement_uuid,
+			lt.ledger_wallet_uuid,
+			lt.amount,
+			lt.description
+		FROM
+			ledger_transactions lt
+		WHERE
+			lt.transaction_type = $1
+		ORDER BY
+			lt.created_at DESC
+	`
+
+	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, transactionType)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return nil, logData
