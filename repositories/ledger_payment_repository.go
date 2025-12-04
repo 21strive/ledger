@@ -18,15 +18,30 @@ var ledgerPaymentRepositorySchema = `
 		randid VARCHAR(255) UNIQUE NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+		-- Relationships
 		ledger_account_uuid VARCHAR(255) NOT NULL,
 		ledger_wallet_uuid VARCHAR(255) NOT NULL,
 		ledger_settlement_uuid VARCHAR(255) NULL,
-		ledger_transaction_uuid VARCHAR(255) NULL,
+
+		-- Invoice & Amount
 		invoice_number VARCHAR(255) NOT NULL,
 		amount BIGINT NOT NULL,
-		payment_method VARCHAR(50) NOT NULL,
+		currency VARCHAR(10) NOT NULL DEFAULT 'IDR',
+
+		-- Payment Info
+		payment_method VARCHAR(100) NULL,
 		payment_date TIMESTAMP NULL,
-		status VARCHAR(50) NOT NULL
+		expires_at TIMESTAMP NOT NULL,
+
+		-- Gateway References (agnostic)
+		gateway_request_id VARCHAR(255) NOT NULL,
+		gateway_token_id VARCHAR(255) NOT NULL,
+		gateway_payment_url TEXT NOT NULL,
+		gateway_reference_number VARCHAR(255) NULL,
+
+		-- Status
+		status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_uuid ON ledger_payments(uuid);
@@ -35,7 +50,9 @@ var ledgerPaymentRepositorySchema = `
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_wallet_uuid ON ledger_payments(ledger_wallet_uuid);
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_settlement_uuid ON ledger_payments(ledger_settlement_uuid);
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_invoice_number ON ledger_payments(invoice_number);
+	CREATE INDEX IF NOT EXISTS idx_ledger_payments_gateway_request_id ON ledger_payments(gateway_request_id);
 	CREATE INDEX IF NOT EXISTS idx_ledger_payments_status ON ledger_payments(status);
+	CREATE INDEX IF NOT EXISTS idx_ledger_payments_expires_at ON ledger_payments(expires_at);
 `
 
 type LedgerPaymentRepositoryInterface interface {
@@ -47,6 +64,9 @@ type LedgerPaymentRepositoryInterface interface {
 	GetByLedgerWalletUUID(ledgerWalletUUID string) ([]*models.LedgerPayment, *models.ErrorLog)
 	GetByLedgerSettlementUUID(ledgerSettlementUUID string) ([]*models.LedgerPayment, *models.ErrorLog)
 	GetByStatus(status string) ([]*models.LedgerPayment, *models.ErrorLog)
+	GetByGatewayRequestId(gatewayRequestId string) (*models.LedgerPayment, *models.ErrorLog)
+	GetPendingByInvoiceNumber(invoiceNumber string) (*models.LedgerPayment, *models.ErrorLog)
+	GetExpiredPendingPayments(now time.Time) ([]*models.LedgerPayment, *models.ErrorLog)
 }
 
 type ledgerPaymentRepository struct {
@@ -106,23 +126,40 @@ func (r *ledgerPaymentRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
 	}
 
-	// ledger_transaction_uuid
-	if data.LedgerTransactionUUID != "" {
-		queryBuilder("ledger_transaction_uuid", data.LedgerTransactionUUID)
-	}
-
 	// invoice_number
 	queryBuilder("invoice_number", data.InvoiceNumber)
 
 	// amount
 	queryBuilder("amount", data.Amount)
 
-	// payment_method
-	queryBuilder("payment_method", data.PaymentMethod)
+	// currency
+	queryBuilder("currency", data.Currency)
+
+	// payment_method (nullable)
+	if data.PaymentMethod != nil {
+		queryBuilder("payment_method", *data.PaymentMethod)
+	}
 
 	// payment_date (nullable)
 	if data.PaymentDate != nil {
 		queryBuilder("payment_date", data.PaymentDate)
+	}
+
+	// expires_at
+	queryBuilder("expires_at", data.ExpiresAt)
+
+	// gateway_request_id
+	queryBuilder("gateway_request_id", data.GatewayRequestId)
+
+	// gateway_token_id
+	queryBuilder("gateway_token_id", data.GatewayTokenId)
+
+	// gateway_payment_url
+	queryBuilder("gateway_payment_url", data.GatewayPaymentUrl)
+
+	// gateway_reference_number (nullable)
+	if data.GatewayReferenceNumber != nil {
+		queryBuilder("gateway_reference_number", *data.GatewayReferenceNumber)
 	}
 
 	// status
@@ -184,23 +221,40 @@ func (r *ledgerPaymentRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
 	}
 
-	// ledger_transaction_uuid
-	if data.LedgerTransactionUUID != "" {
-		queryBuilder("ledger_transaction_uuid", data.LedgerTransactionUUID)
-	}
-
 	// invoice_number
 	queryBuilder("invoice_number", data.InvoiceNumber)
 
 	// amount
 	queryBuilder("amount", data.Amount)
 
-	// payment_method
-	queryBuilder("payment_method", data.PaymentMethod)
+	// currency
+	queryBuilder("currency", data.Currency)
+
+	// payment_method (nullable)
+	if data.PaymentMethod != nil {
+		queryBuilder("payment_method", *data.PaymentMethod)
+	}
 
 	// payment_date (nullable)
 	if data.PaymentDate != nil {
 		queryBuilder("payment_date", data.PaymentDate)
+	}
+
+	// expires_at
+	queryBuilder("expires_at", data.ExpiresAt)
+
+	// gateway_request_id
+	queryBuilder("gateway_request_id", data.GatewayRequestId)
+
+	// gateway_token_id
+	queryBuilder("gateway_token_id", data.GatewayTokenId)
+
+	// gateway_payment_url
+	queryBuilder("gateway_payment_url", data.GatewayPaymentUrl)
+
+	// gateway_reference_number (nullable)
+	if data.GatewayReferenceNumber != nil {
+		queryBuilder("gateway_reference_number", *data.GatewayReferenceNumber)
 	}
 
 	// status
@@ -223,31 +277,40 @@ func (r *ledgerPaymentRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	return nil
 }
 
+// selectFields returns the common SELECT fields for ledger_payments queries
+func selectFields() string {
+	return `
+		lp.uuid,
+		lp.randid,
+		lp.created_at,
+		lp.updated_at,
+		lp.ledger_account_uuid,
+		lp.ledger_wallet_uuid,
+		lp.ledger_settlement_uuid,
+		lp.invoice_number,
+		lp.amount,
+		lp.currency,
+		lp.payment_method,
+		lp.payment_date,
+		lp.expires_at,
+		lp.gateway_request_id,
+		lp.gateway_token_id,
+		lp.gateway_payment_url,
+		lp.gateway_reference_number,
+		lp.status
+	`
+}
+
 func (r *ledgerPaymentRepository) GetByUUID(uuid string) (*models.LedgerPayment, *models.ErrorLog) {
 
-	var ledgerPayment *models.LedgerPayment
+	var ledgerPayment models.LedgerPayment
 
-	sqlQuery := `
-		SELECT
-			lp.uuid,
-			lp.randid,
-			lp.created_at,
-			lp.updated_at,
-			lp.ledger_account_uuid,
-			lp.ledger_wallet_uuid,
-			lp.ledger_settlement_uuid,
-			lp.ledger_transaction_uuid,
-			lp.invoice_number,
-			lp.amount,
-			lp.payment_method,
-			lp.payment_date,
-			lp.status
-		FROM
-			ledger_payments lp
-		WHERE
-			lp.uuid = $1
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.uuid = $1
 		LIMIT 1
-	`
+	`, selectFields())
 
 	err := r.dbRead.QueryRowx(sqlQuery, uuid).StructScan(&ledgerPayment)
 	if err != nil {
@@ -261,34 +324,19 @@ func (r *ledgerPaymentRepository) GetByUUID(uuid string) (*models.LedgerPayment,
 		return nil, logData
 	}
 
-	return ledgerPayment, nil
+	return &ledgerPayment, nil
 }
 
 func (r *ledgerPaymentRepository) GetByInvoiceNumber(invoiceNumber string) (*models.LedgerPayment, *models.ErrorLog) {
 
-	var ledgerPayment *models.LedgerPayment
+	var ledgerPayment models.LedgerPayment
 
-	sqlQuery := `
-		SELECT
-			lp.uuid,
-			lp.randid,
-			lp.created_at,
-			lp.updated_at,
-			lp.ledger_account_uuid,
-			lp.ledger_wallet_uuid,
-			lp.ledger_settlement_uuid,
-			lp.ledger_transaction_uuid,
-			lp.invoice_number,
-			lp.amount,
-			lp.payment_method,
-			lp.payment_date,
-			lp.status
-		FROM
-			ledger_payments lp
-		WHERE
-			lp.invoice_number = $1
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.invoice_number = $1
 		LIMIT 1
-	`
+	`, selectFields())
 
 	err := r.dbRead.QueryRowx(sqlQuery, invoiceNumber).StructScan(&ledgerPayment)
 	if err != nil {
@@ -302,35 +350,94 @@ func (r *ledgerPaymentRepository) GetByInvoiceNumber(invoiceNumber string) (*mod
 		return nil, logData
 	}
 
-	return ledgerPayment, nil
+	return &ledgerPayment, nil
+}
+
+func (r *ledgerPaymentRepository) GetByGatewayRequestId(gatewayRequestId string) (*models.LedgerPayment, *models.ErrorLog) {
+
+	var ledgerPayment models.LedgerPayment
+
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.gateway_request_id = $1
+		LIMIT 1
+	`, selectFields())
+
+	err := r.dbRead.QueryRowx(sqlQuery, gatewayRequestId).StructScan(&ledgerPayment)
+	if err != nil {
+		var logData *models.ErrorLog
+		if err == sql.ErrNoRows {
+			logData = helper.WriteLog(err, http.StatusNotFound, "Ledger Payment not found")
+		} else {
+			logData = helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		}
+
+		return nil, logData
+	}
+
+	return &ledgerPayment, nil
+}
+
+func (r *ledgerPaymentRepository) GetPendingByInvoiceNumber(invoiceNumber string) (*models.LedgerPayment, *models.ErrorLog) {
+
+	var ledgerPayment models.LedgerPayment
+
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.invoice_number = $1
+		  AND lp.status = $2
+		ORDER BY lp.created_at DESC
+		LIMIT 1
+	`, selectFields())
+
+	err := r.dbRead.QueryRowx(sqlQuery, invoiceNumber, models.PaymentStatusPending).StructScan(&ledgerPayment)
+	if err != nil {
+		var logData *models.ErrorLog
+		if err == sql.ErrNoRows {
+			logData = helper.WriteLog(err, http.StatusNotFound, "Pending Ledger Payment not found")
+		} else {
+			logData = helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		}
+
+		return nil, logData
+	}
+
+	return &ledgerPayment, nil
+}
+
+func (r *ledgerPaymentRepository) GetExpiredPendingPayments(now time.Time) ([]*models.LedgerPayment, *models.ErrorLog) {
+
+	var ledgerPayments []*models.LedgerPayment
+
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.status = $1
+		  AND lp.expires_at < $2
+		ORDER BY lp.created_at ASC
+	`, selectFields())
+
+	err := r.dbRead.Select(&ledgerPayments, sqlQuery, models.PaymentStatusPending, now)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	return ledgerPayments, nil
 }
 
 func (r *ledgerPaymentRepository) GetByLedgerAccountUUID(ledgerAccountUUID string) ([]*models.LedgerPayment, *models.ErrorLog) {
 
 	var ledgerPayments []*models.LedgerPayment
 
-	sqlQuery := `
-		SELECT
-			lp.uuid,
-			lp.randid,
-			lp.created_at,
-			lp.updated_at,
-			lp.ledger_account_uuid,
-			lp.ledger_wallet_uuid,
-			lp.ledger_settlement_uuid,
-			lp.ledger_transaction_uuid,
-			lp.invoice_number,
-			lp.amount,
-			lp.payment_method,
-			lp.payment_date,
-			lp.status
-		FROM
-			ledger_payments lp
-		WHERE
-			lp.ledger_account_uuid = $1
-		ORDER BY
-			lp.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.ledger_account_uuid = $1
+		ORDER BY lp.created_at DESC
+	`, selectFields())
 
 	err := r.dbRead.Select(&ledgerPayments, sqlQuery, ledgerAccountUUID)
 	if err != nil {
@@ -345,28 +452,12 @@ func (r *ledgerPaymentRepository) GetByLedgerWalletUUID(ledgerWalletUUID string)
 
 	var ledgerPayments []*models.LedgerPayment
 
-	sqlQuery := `
-		SELECT
-			lp.uuid,
-			lp.randid,
-			lp.created_at,
-			lp.updated_at,
-			lp.ledger_account_uuid,
-			lp.ledger_wallet_uuid,
-			lp.ledger_settlement_uuid,
-			lp.ledger_transaction_uuid,
-			lp.invoice_number,
-			lp.amount,
-			lp.payment_method,
-			lp.payment_date,
-			lp.status
-		FROM
-			ledger_payments lp
-		WHERE
-			lp.ledger_wallet_uuid = $1
-		ORDER BY
-			lp.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.ledger_wallet_uuid = $1
+		ORDER BY lp.created_at DESC
+	`, selectFields())
 
 	err := r.dbRead.Select(&ledgerPayments, sqlQuery, ledgerWalletUUID)
 	if err != nil {
@@ -381,28 +472,12 @@ func (r *ledgerPaymentRepository) GetByLedgerSettlementUUID(ledgerSettlementUUID
 
 	var ledgerPayments []*models.LedgerPayment
 
-	sqlQuery := `
-		SELECT
-			lp.uuid,
-			lp.randid,
-			lp.created_at,
-			lp.updated_at,
-			lp.ledger_account_uuid,
-			lp.ledger_wallet_uuid,
-			lp.ledger_settlement_uuid,
-			lp.ledger_transaction_uuid,
-			lp.invoice_number,
-			lp.amount,
-			lp.payment_method,
-			lp.payment_date,
-			lp.status
-		FROM
-			ledger_payments lp
-		WHERE
-			lp.ledger_settlement_uuid = $1
-		ORDER BY
-			lp.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.ledger_settlement_uuid = $1
+		ORDER BY lp.created_at DESC
+	`, selectFields())
 
 	err := r.dbRead.Select(&ledgerPayments, sqlQuery, ledgerSettlementUUID)
 	if err != nil {
@@ -417,28 +492,12 @@ func (r *ledgerPaymentRepository) GetByStatus(status string) ([]*models.LedgerPa
 
 	var ledgerPayments []*models.LedgerPayment
 
-	sqlQuery := `
-		SELECT
-			lp.uuid,
-			lp.randid,
-			lp.created_at,
-			lp.updated_at,
-			lp.ledger_account_uuid,
-			lp.ledger_wallet_uuid,
-			lp.ledger_settlement_uuid,
-			lp.ledger_transaction_uuid,
-			lp.invoice_number,
-			lp.amount,
-			lp.payment_method,
-			lp.payment_date,
-			lp.status
-		FROM
-			ledger_payments lp
-		WHERE
-			lp.status = $1
-		ORDER BY
-			lp.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_payments lp
+		WHERE lp.status = $1
+		ORDER BY lp.created_at DESC
+	`, selectFields())
 
 	err := r.dbRead.Select(&ledgerPayments, sqlQuery, status)
 	if err != nil {
