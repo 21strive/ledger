@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/faizauthar12/ledger/responses"
+	"github.com/faizauthar12/ledger/utils/helper"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -97,18 +99,16 @@ func (u *ledgerDisbursementUseCase) CreateDisbursement(
 
 	// Check if sufficient balance
 	if wallet.Balance < amount {
-		return nil, &models.ErrorLog{
-			StatusCode: http.StatusBadRequest,
-			Message:    "Insufficient balance for disbursement",
-		}
+		errorMessage := "Insufficient balance: available %d, required %d"
+		errorLog := helper.WriteLog(errors.New(errorMessage), http.StatusBadRequest, errorMessage)
+		return nil, errorLog
 	}
 
 	// Validate currency matches
 	if wallet.Currency != currency {
-		return nil, &models.ErrorLog{
-			StatusCode: http.StatusBadRequest,
-			Message:    "Currency mismatch with wallet",
-		}
+		errorMessage := "Currency mismatch with wallet: wallet %s, disbursement %s"
+		errorLog := helper.WriteLog(errors.New(errorMessage), http.StatusBadRequest, errorMessage)
+		return nil, errorLog
 	}
 
 	// Deduct from wallet balance
@@ -158,10 +158,9 @@ func (u *ledgerDisbursementUseCase) ConfirmDisbursement(
 
 	// Validate status
 	if disbursement.Status != models.DisbursementStatusPending {
-		return nil, &models.ErrorLog{
-			StatusCode: http.StatusBadRequest,
-			Message:    "Disbursement is not in pending status",
-		}
+		errorMessage := "Disbursement is not in pending status"
+		errorLog := helper.WriteLog(errors.New(errorMessage), http.StatusBadRequest, errorMessage)
+		return nil, errorLog
 	}
 
 	timeNow := time.Now().UTC()
@@ -189,10 +188,9 @@ func (u *ledgerDisbursementUseCase) CompleteDisbursement(sqlTransaction *sqlx.Tx
 
 	// Validate status
 	if disbursement.Status != models.DisbursementStatusProcessing {
-		return nil, &models.ErrorLog{
-			StatusCode: http.StatusBadRequest,
-			Message:    "Disbursement is not in processing status",
-		}
+		errorMessage := "Disbursement is not in processing status"
+		errorLog := helper.WriteLog(errors.New(errorMessage), http.StatusBadRequest, errorMessage)
+		return nil, errorLog
 	}
 
 	timeNow := time.Now().UTC()
@@ -232,10 +230,10 @@ func (u *ledgerDisbursementUseCase) FailDisbursement(sqlTransaction *sqlx.Tx, uu
 
 	// Validate status - can only fail pending or processing disbursements
 	if disbursement.Status != models.DisbursementStatusPending && disbursement.Status != models.DisbursementStatusProcessing {
-		return nil, &models.ErrorLog{
-			StatusCode: http.StatusBadRequest,
-			Message:    "Disbursement cannot be failed in current status",
-		}
+		errorMessage := "Disbursement cannot be failed in current status"
+		errorLog := helper.WriteLog(errors.New(errorMessage), http.StatusBadRequest, errorMessage)
+
+		return nil, errorLog
 	}
 
 	timeNow := time.Now().UTC()
