@@ -192,7 +192,7 @@ func (r *ledgerWalletRepository) Update(sqlTransaction *sqlx.Tx, data *models.Le
 
 func (r *ledgerWalletRepository) GetByUUID(uuid string) (*models.LedgerWallet, *models.ErrorLog) {
 
-	var ledgerWallet *models.LedgerWallet
+	ledgerWallet := &models.LedgerWallet{}
 
 	sqlQuery := `
 		SELECT
@@ -215,7 +215,7 @@ func (r *ledgerWalletRepository) GetByUUID(uuid string) (*models.LedgerWallet, *
 		LIMIT 1
 	`
 
-	err := r.dbRead.QueryRowx(sqlQuery, uuid).StructScan(&ledgerWallet)
+	err := r.dbRead.QueryRowx(sqlQuery, uuid).StructScan(ledgerWallet)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {
@@ -232,7 +232,7 @@ func (r *ledgerWalletRepository) GetByUUID(uuid string) (*models.LedgerWallet, *
 
 func (r *ledgerWalletRepository) GetByLedgerAccountUUID(ledgerAccountUUID string) (*models.LedgerWallet, *models.ErrorLog) {
 
-	var ledgerWallet *models.LedgerWallet
+	ledgerWallet := &models.LedgerWallet{}
 
 	sqlQuery := `
 		SELECT
@@ -255,7 +255,7 @@ func (r *ledgerWalletRepository) GetByLedgerAccountUUID(ledgerAccountUUID string
 		LIMIT 1
 	`
 
-	err := r.dbRead.QueryRowx(sqlQuery, ledgerAccountUUID).StructScan(&ledgerWallet)
+	err := r.dbRead.QueryRowx(sqlQuery, ledgerAccountUUID).StructScan(ledgerWallet)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {
@@ -272,7 +272,7 @@ func (r *ledgerWalletRepository) GetByLedgerAccountUUID(ledgerAccountUUID string
 
 func (r *ledgerWalletRepository) GetByLedgerAccountUUIDAndCurrency(ledgerAccountUUID, currency string) (*models.LedgerWallet, *models.ErrorLog) {
 
-	var ledgerWallet *models.LedgerWallet
+	ledgerWallet := &models.LedgerWallet{}
 
 	sqlQuery := `
 		SELECT
@@ -296,7 +296,7 @@ func (r *ledgerWalletRepository) GetByLedgerAccountUUIDAndCurrency(ledgerAccount
 		LIMIT 1
 	`
 
-	err := r.dbRead.QueryRowx(sqlQuery, ledgerAccountUUID, currency).StructScan(&ledgerWallet)
+	err := r.dbRead.QueryRowx(sqlQuery, ledgerAccountUUID, currency).StructScan(ledgerWallet)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {

@@ -54,7 +54,7 @@ func (u *ledgerAccountUseCase) CreateLedgerAccount(sqlTransaction *sqlx.Tx, name
 	ledgerAccount.Name = name
 	ledgerAccount.Email = email
 
-	errorLog := u.LedgerAccountRepository.Insert(nil, ledgerAccount)
+	errorLog := u.LedgerAccountRepository.Insert(sqlTransaction, ledgerAccount)
 	if errorLog != nil {
 		return nil, errorLog
 	}

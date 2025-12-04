@@ -157,7 +157,7 @@ func (r *ledgerAccountRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 
 func (r *ledgerAccountRepository) GetByEmail(email string) (*models.LedgerAccount, *models.ErrorLog) {
 
-	var ledgerAccount *models.LedgerAccount
+	ledgerAccount := &models.LedgerAccount{}
 
 	sqlQuery := `
 		SELECT
@@ -170,7 +170,7 @@ func (r *ledgerAccountRepository) GetByEmail(email string) (*models.LedgerAccoun
 		FROM ledger_accounts la
 		WHERE la.email = $1`
 
-	err := r.dbRead.QueryRowx(sqlQuery, email).StructScan(&ledgerAccount)
+	err := r.dbRead.QueryRowx(sqlQuery, email).StructScan(ledgerAccount)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {
