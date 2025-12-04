@@ -8,35 +8,16 @@ import (
 	"github.com/21strive/redifu"
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
+	"github.com/faizauthar12/ledger/requests"
 	"github.com/faizauthar12/ledger/utils/helper"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
 
 type LedgerPaymentUseCaseInterface interface {
-	CreatePayment(
-		sqlTransaction *sqlx.Tx,
-		ledgerAccountUUID string,
-		invoiceNumber string,
-		amount int64,
-		currency string,
-		gatewayRequestId string,
-		gatewayTokenId string,
-		gatewayPaymentUrl string,
-		expiresAt time.Time,
-	) (*models.LedgerPayment, *models.ErrorLog)
-	ConfirmPayment(
-		sqlTransaction *sqlx.Tx,
-		gatewayRequestId string,
-		paymentMethod string,
-		paymentDate time.Time,
-		gatewayReferenceNumber string,
-	) (*models.LedgerPayment, *models.ErrorLog)
-	FailPayment(
-		sqlTransaction *sqlx.Tx,
-		invoiceNumber string,
-		reason string,
-	) (*models.LedgerPayment, *models.ErrorLog)
+	CreatePayment(sqlTransaction *sqlx.Tx, request *requests.LedgerPaymentCreatePaymentRequest) (*models.LedgerPayment, *models.ErrorLog)
+	ConfirmPayment(sqlTransaction *sqlx.Tx, request *requests.LedgerPaymentConfirmPaymentRequest) (*models.LedgerPayment, *models.ErrorLog)
+	FailPayment(sqlTransaction *sqlx.Tx, request *requests.LedgerPaymentFailPaymentRequest) (*models.LedgerPayment, *models.ErrorLog)
 	ExpirePayments(sqlTransaction *sqlx.Tx) (int, *models.ErrorLog)
 	GetPaymentByUUID(uuid string) (*models.LedgerPayment, *models.ErrorLog)
 	GetPaymentByInvoiceNumber(invoiceNumber string) (*models.LedgerPayment, *models.ErrorLog)
@@ -79,22 +60,12 @@ func NewLedgerPaymentUseCase(
 // CreatePayment creates a new payment record with PENDING status
 // If an existing PENDING payment for the same invoice exists and is not expired,
 // it returns the existing payment (so caller can reuse the payment URL)
-func (u *ledgerPaymentUseCase) CreatePayment(
-	sqlTransaction *sqlx.Tx,
-	ledgerAccountUUID string,
-	invoiceNumber string,
-	amount int64,
-	currency string,
-	gatewayRequestId string,
-	gatewayTokenId string,
-	gatewayPaymentUrl string,
-	expiresAt time.Time,
-) (*models.LedgerPayment, *models.ErrorLog) {
+func (u *ledgerPaymentUseCase) CreatePayment(sqlTransaction *sqlx.Tx, request *requests.LedgerPaymentCreatePaymentRequest) (*models.LedgerPayment, *models.ErrorLog) {
 
 	now := time.Now().UTC()
 
 	// 1. Check for existing PENDING payment with same invoice
-	existing, _ := u.ledgerPaymentRepository.GetPendingByInvoiceNumber(invoiceNumber)
+	existing, _ := u.ledgerPaymentRepository.GetPendingByInvoiceNumber(request.InvoiceNumber)
 	if existing != nil {
 		// Check if not expired
 		if existing.ExpiresAt.After(now) {
@@ -110,7 +81,7 @@ func (u *ledgerPaymentUseCase) CreatePayment(
 	}
 
 	// 2. Get or Create LedgerWallet for this account + currency
-	wallet, errorLog := u.ledgerWalletUseCase.CreateWallet(sqlTransaction, ledgerAccountUUID, currency)
+	wallet, errorLog := u.ledgerWalletUseCase.CreateWallet(sqlTransaction, request.LedgerAccountUUID, request.Currency)
 	if errorLog != nil {
 		return nil, errorLog
 	}
@@ -119,24 +90,24 @@ func (u *ledgerPaymentUseCase) CreatePayment(
 	payment := &models.LedgerPayment{}
 	redifu.InitRecord(payment)
 
-	payment.LedgerAccountUUID = ledgerAccountUUID
+	payment.LedgerAccountUUID = request.LedgerAccountUUID
 	payment.LedgerWalletUUID = wallet.UUID
-	payment.InvoiceNumber = invoiceNumber
-	payment.Amount = amount
-	payment.Currency = currency
+	payment.InvoiceNumber = request.InvoiceNumber
+	payment.Amount = request.Amount
+	payment.Currency = request.Currency
 	payment.Status = models.PaymentStatusPending
-	payment.ExpiresAt = expiresAt
+	payment.ExpiresAt = request.ExpiresAt
 
 	// Gateway references (agnostic)
-	payment.GatewayRequestId = gatewayRequestId
-	payment.GatewayTokenId = gatewayTokenId
-	payment.GatewayPaymentUrl = gatewayPaymentUrl
+	payment.GatewayRequestId = request.GatewayRequestId
+	payment.GatewayTokenId = request.GatewayTokenId
+	payment.GatewayPaymentUrl = request.GatewayPaymentUrl
 
 	// These will be filled on confirm
-	payment.PaymentMethod = nil
+	payment.PaymentMethod = ""
 	payment.PaymentDate = nil
-	payment.GatewayReferenceNumber = nil
-	payment.LedgerSettlementUUID = nil
+	payment.GatewayReferenceNumber = ""
+	payment.LedgerSettlementUUID = ""
 
 	// 4. Insert to database
 	errorLog = u.ledgerPaymentRepository.Insert(sqlTransaction, payment)
@@ -151,16 +122,10 @@ func (u *ledgerPaymentUseCase) CreatePayment(
 // ConfirmPayment updates a PENDING payment to PAID status
 // It also creates a transaction record and updates the wallet balance
 // This method is idempotent - if payment is already PAID, it returns success
-func (u *ledgerPaymentUseCase) ConfirmPayment(
-	sqlTransaction *sqlx.Tx,
-	gatewayRequestId string,
-	paymentMethod string,
-	paymentDate time.Time,
-	gatewayReferenceNumber string,
-) (*models.LedgerPayment, *models.ErrorLog) {
+func (u *ledgerPaymentUseCase) ConfirmPayment(sqlTransaction *sqlx.Tx, request *requests.LedgerPaymentConfirmPaymentRequest) (*models.LedgerPayment, *models.ErrorLog) {
 
 	// 1. Find the payment by gateway request ID
-	payment, errorLog := u.ledgerPaymentRepository.GetByGatewayRequestId(gatewayRequestId)
+	payment, errorLog := u.ledgerPaymentRepository.GetByGatewayRequestId(request.GatewayRequestId)
 	if errorLog != nil {
 		return nil, errorLog
 	}
@@ -178,9 +143,9 @@ func (u *ledgerPaymentUseCase) ConfirmPayment(
 
 	// 4. Update payment status
 	payment.Status = models.PaymentStatusPaid
-	payment.PaymentMethod = &paymentMethod
-	payment.PaymentDate = &paymentDate
-	payment.GatewayReferenceNumber = &gatewayReferenceNumber
+	payment.PaymentMethod = request.PaymentMethod
+	payment.PaymentDate = request.PaymentDate
+	payment.GatewayReferenceNumber = request.GatewayReferenceNumber
 
 	errorLog = u.ledgerPaymentRepository.Update(sqlTransaction, payment)
 	if errorLog != nil {
@@ -192,11 +157,11 @@ func (u *ledgerPaymentUseCase) ConfirmPayment(
 	redifu.InitRecord(transaction)
 
 	transaction.TransactionType = models.TransactionTypePayment
-	transaction.LedgerPaymentUUID = &payment.UUID
+	transaction.LedgerPaymentUUID = payment.UUID
 	transaction.LedgerWalletUUID = payment.LedgerWalletUUID
 	transaction.Amount = payment.Amount
-	description := fmt.Sprintf("Payment received for invoice %s via %s", payment.InvoiceNumber, paymentMethod)
-	transaction.Description = &description
+	description := fmt.Sprintf("Payment received for invoice %s via %s", payment.InvoiceNumber, request.PaymentMethod)
+	transaction.Description = description
 
 	errorLog = u.ledgerTransactionRepository.Insert(sqlTransaction, transaction)
 	if errorLog != nil {
@@ -225,15 +190,11 @@ func (u *ledgerPaymentUseCase) ConfirmPayment(
 
 // FailPayment updates a PENDING payment to FAILED status
 // Only PENDING payments can be failed
-// will be used in scheduler or manual process when payment is not completed
-func (u *ledgerPaymentUseCase) FailPayment(
-	sqlTransaction *sqlx.Tx,
-	invoiceNumber string,
-	reason string,
-) (*models.LedgerPayment, *models.ErrorLog) {
+// Will be used in scheduler or manual process when payment is not completed
+func (u *ledgerPaymentUseCase) FailPayment(sqlTransaction *sqlx.Tx, request *requests.LedgerPaymentFailPaymentRequest) (*models.LedgerPayment, *models.ErrorLog) {
 
 	// 1. Find the payment
-	payment, errorLog := u.ledgerPaymentRepository.GetByInvoiceNumber(invoiceNumber)
+	payment, errorLog := u.ledgerPaymentRepository.GetByInvoiceNumber(request.InvoiceNumber)
 	if errorLog != nil {
 		return nil, errorLog
 	}

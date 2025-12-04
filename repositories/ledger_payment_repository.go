@@ -121,10 +121,8 @@ func (r *ledgerPaymentRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 	// ledger_wallet_uuid
 	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
 
-	// ledger_settlement_uuid (nullable)
-	if data.LedgerSettlementUUID != nil {
-		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
-	}
+	// ledger_settlement_uuid
+	queryBuilder("ledger_settlement_uuid", data.LedgerSettlementUUID)
 
 	// invoice_number
 	queryBuilder("invoice_number", data.InvoiceNumber)
@@ -135,15 +133,11 @@ func (r *ledgerPaymentRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 	// currency
 	queryBuilder("currency", data.Currency)
 
-	// payment_method (nullable)
-	if data.PaymentMethod != nil {
-		queryBuilder("payment_method", *data.PaymentMethod)
-	}
+	// payment_method
+	queryBuilder("payment_method", data.PaymentMethod)
 
-	// payment_date (nullable)
-	if data.PaymentDate != nil {
-		queryBuilder("payment_date", data.PaymentDate)
-	}
+	// payment_date
+	queryBuilder("payment_date", data.PaymentDate)
 
 	// expires_at
 	queryBuilder("expires_at", data.ExpiresAt)
@@ -157,10 +151,8 @@ func (r *ledgerPaymentRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 	// gateway_payment_url
 	queryBuilder("gateway_payment_url", data.GatewayPaymentUrl)
 
-	// gateway_reference_number (nullable)
-	if data.GatewayReferenceNumber != nil {
-		queryBuilder("gateway_reference_number", *data.GatewayReferenceNumber)
-	}
+	// gateway_reference_number
+	queryBuilder("gateway_reference_number", data.GatewayReferenceNumber)
 
 	// status
 	queryBuilder("status", data.Status)
@@ -216,10 +208,8 @@ func (r *ledgerPaymentRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	// ledger_wallet_uuid
 	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
 
-	// ledger_settlement_uuid (nullable)
-	if data.LedgerSettlementUUID != nil {
-		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
-	}
+	// ledger_settlement_uuid
+	queryBuilder("ledger_settlement_uuid", data.LedgerSettlementUUID)
 
 	// invoice_number
 	queryBuilder("invoice_number", data.InvoiceNumber)
@@ -230,15 +220,11 @@ func (r *ledgerPaymentRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	// currency
 	queryBuilder("currency", data.Currency)
 
-	// payment_method (nullable)
-	if data.PaymentMethod != nil {
-		queryBuilder("payment_method", *data.PaymentMethod)
-	}
+	// payment_method
+	queryBuilder("payment_method", data.PaymentMethod)
 
-	// payment_date (nullable)
-	if data.PaymentDate != nil {
-		queryBuilder("payment_date", data.PaymentDate)
-	}
+	// payment_date
+	queryBuilder("payment_date", data.PaymentDate)
 
 	// expires_at
 	queryBuilder("expires_at", data.ExpiresAt)
@@ -252,10 +238,8 @@ func (r *ledgerPaymentRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	// gateway_payment_url
 	queryBuilder("gateway_payment_url", data.GatewayPaymentUrl)
 
-	// gateway_reference_number (nullable)
-	if data.GatewayReferenceNumber != nil {
-		queryBuilder("gateway_reference_number", *data.GatewayReferenceNumber)
-	}
+	// gateway_reference_number
+	queryBuilder("gateway_reference_number", data.GatewayReferenceNumber)
 
 	// status
 	queryBuilder("status", data.Status)

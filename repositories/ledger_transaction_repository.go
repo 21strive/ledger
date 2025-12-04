@@ -93,15 +93,11 @@ func (r *ledgerTransactionRepository) Insert(sqlTransaction *sqlx.Tx, data *mode
 	// transaction_type
 	queryBuilder("transaction_type", data.TransactionType)
 
-	// ledger_payment_uuid (nullable)
-	if data.LedgerPaymentUUID != nil {
-		queryBuilder("ledger_payment_uuid", *data.LedgerPaymentUUID)
-	}
+	// ledger_payment_uuid
+	queryBuilder("ledger_payment_uuid", data.LedgerPaymentUUID)
 
-	// ledger_settlement_uuid (nullable)
-	if data.LedgerSettlementUUID != nil {
-		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
-	}
+	// ledger_settlement_uuid
+	queryBuilder("ledger_settlement_uuid", data.LedgerSettlementUUID)
 
 	// ledger_wallet_uuid
 	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
@@ -109,10 +105,8 @@ func (r *ledgerTransactionRepository) Insert(sqlTransaction *sqlx.Tx, data *mode
 	// amount
 	queryBuilder("amount", data.Amount)
 
-	// description (nullable)
-	if data.Description != nil {
-		queryBuilder("description", *data.Description)
-	}
+	// description
+	queryBuilder("description", data.Description)
 
 	// Generate placeholders for PostgreSQL ($1, $2, ...)
 	rawSqlPlaceholders := []string{}
@@ -156,15 +150,11 @@ func (r *ledgerTransactionRepository) Update(sqlTransaction *sqlx.Tx, data *mode
 	// transaction_type
 	queryBuilder("transaction_type", data.TransactionType)
 
-	// ledger_payment_uuid (nullable)
-	if data.LedgerPaymentUUID != nil {
-		queryBuilder("ledger_payment_uuid", *data.LedgerPaymentUUID)
-	}
+	// ledger_payment_uuid
+	queryBuilder("ledger_payment_uuid", data.LedgerPaymentUUID)
 
-	// ledger_settlement_uuid (nullable)
-	if data.LedgerSettlementUUID != nil {
-		queryBuilder("ledger_settlement_uuid", *data.LedgerSettlementUUID)
-	}
+	// ledger_settlement_uuid
+	queryBuilder("ledger_settlement_uuid", data.LedgerSettlementUUID)
 
 	// ledger_wallet_uuid
 	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
@@ -172,10 +162,8 @@ func (r *ledgerTransactionRepository) Update(sqlTransaction *sqlx.Tx, data *mode
 	// amount
 	queryBuilder("amount", data.Amount)
 
-	// description (nullable)
-	if data.Description != nil {
-		queryBuilder("description", *data.Description)
-	}
+	// description
+	queryBuilder("description", data.Description)
 
 	// Add condition for WHERE clause
 	// uuid always the last $n
@@ -194,28 +182,32 @@ func (r *ledgerTransactionRepository) Update(sqlTransaction *sqlx.Tx, data *mode
 	return nil
 }
 
+// selectFields returns the common SELECT fields for ledger_transactions queries
+func selectTransactionFields() string {
+	return `
+		lt.uuid,
+		lt.randid,
+		lt.created_at,
+		lt.updated_at,
+		lt.transaction_type,
+		lt.ledger_payment_uuid,
+		lt.ledger_settlement_uuid,
+		lt.ledger_wallet_uuid,
+		lt.amount,
+		lt.description
+	`
+}
+
 func (r *ledgerTransactionRepository) GetByUUID(uuid string) (*models.LedgerTransaction, *models.ErrorLog) {
 
 	var ledgerTransaction *models.LedgerTransaction
 
-	sqlQuery := `
-		SELECT
-			lt.uuid,
-			lt.randid,
-			lt.created_at,
-			lt.updated_at,
-			lt.transaction_type,
-			lt.ledger_payment_uuid,
-			lt.ledger_settlement_uuid,
-			lt.ledger_wallet_uuid,
-			lt.amount,
-			lt.description
-		FROM
-			ledger_transactions lt
-		WHERE
-			lt.uuid = $1
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_transactions lt
+		WHERE lt.uuid = $1
 		LIMIT 1
-	`
+	`, selectTransactionFields())
 
 	err := r.dbRead.QueryRowx(sqlQuery, uuid).StructScan(&ledgerTransaction)
 	if err != nil {
@@ -236,25 +228,12 @@ func (r *ledgerTransactionRepository) GetByLedgerPaymentUUID(ledgerPaymentUUID s
 
 	var ledgerTransactions []*models.LedgerTransaction
 
-	sqlQuery := `
-		SELECT
-			lt.uuid,
-			lt.randid,
-			lt.created_at,
-			lt.updated_at,
-			lt.transaction_type,
-			lt.ledger_payment_uuid,
-			lt.ledger_settlement_uuid,
-			lt.ledger_wallet_uuid,
-			lt.amount,
-			lt.description
-		FROM
-			ledger_transactions lt
-		WHERE
-			lt.ledger_payment_uuid = $1
-		ORDER BY
-			lt.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_transactions lt
+		WHERE lt.ledger_payment_uuid = $1
+		ORDER BY lt.created_at DESC
+	`, selectTransactionFields())
 
 	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, ledgerPaymentUUID)
 	if err != nil {
@@ -269,25 +248,12 @@ func (r *ledgerTransactionRepository) GetByLedgerSettlementUUID(ledgerSettlement
 
 	var ledgerTransactions []*models.LedgerTransaction
 
-	sqlQuery := `
-		SELECT
-			lt.uuid,
-			lt.randid,
-			lt.created_at,
-			lt.updated_at,
-			lt.transaction_type,
-			lt.ledger_payment_uuid,
-			lt.ledger_settlement_uuid,
-			lt.ledger_wallet_uuid,
-			lt.amount,
-			lt.description
-		FROM
-			ledger_transactions lt
-		WHERE
-			lt.ledger_settlement_uuid = $1
-		ORDER BY
-			lt.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_transactions lt
+		WHERE lt.ledger_settlement_uuid = $1
+		ORDER BY lt.created_at DESC
+	`, selectTransactionFields())
 
 	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, ledgerSettlementUUID)
 	if err != nil {
@@ -302,25 +268,12 @@ func (r *ledgerTransactionRepository) GetByLedgerWalletUUID(ledgerWalletUUID str
 
 	var ledgerTransactions []*models.LedgerTransaction
 
-	sqlQuery := `
-		SELECT
-			lt.uuid,
-			lt.randid,
-			lt.created_at,
-			lt.updated_at,
-			lt.transaction_type,
-			lt.ledger_payment_uuid,
-			lt.ledger_settlement_uuid,
-			lt.ledger_wallet_uuid,
-			lt.amount,
-			lt.description
-		FROM
-			ledger_transactions lt
-		WHERE
-			lt.ledger_wallet_uuid = $1
-		ORDER BY
-			lt.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_transactions lt
+		WHERE lt.ledger_wallet_uuid = $1
+		ORDER BY lt.created_at DESC
+	`, selectTransactionFields())
 
 	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, ledgerWalletUUID)
 	if err != nil {
@@ -335,25 +288,12 @@ func (r *ledgerTransactionRepository) GetByTransactionType(transactionType strin
 
 	var ledgerTransactions []*models.LedgerTransaction
 
-	sqlQuery := `
-		SELECT
-			lt.uuid,
-			lt.randid,
-			lt.created_at,
-			lt.updated_at,
-			lt.transaction_type,
-			lt.ledger_payment_uuid,
-			lt.ledger_settlement_uuid,
-			lt.ledger_wallet_uuid,
-			lt.amount,
-			lt.description
-		FROM
-			ledger_transactions lt
-		WHERE
-			lt.transaction_type = $1
-		ORDER BY
-			lt.created_at DESC
-	`
+	sqlQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_transactions lt
+		WHERE lt.transaction_type = $1
+		ORDER BY lt.created_at DESC
+	`, selectTransactionFields())
 
 	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, transactionType)
 	if err != nil {
