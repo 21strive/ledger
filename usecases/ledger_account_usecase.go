@@ -1,9 +1,13 @@
 package usecases
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/21strive/redifu"
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
+	"github.com/faizauthar12/ledger/utils/helper"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,15 +35,27 @@ func NewLedgerAccountUseCase(
 
 func (u *ledgerAccountUseCase) CreateLedgerAccount(sqlTransaction *sqlx.Tx, name, email string) (*models.LedgerAccount, *models.ErrorLog) {
 
+	if name == "" {
+		errorMessage := "name is required"
+		errorLog := helper.WriteLog(errors.New(errorMessage), http.StatusBadRequest, errorMessage)
+		return nil, errorLog
+	}
+
+	if email == "" {
+		errorMessage := "email is required"
+		errorLog := helper.WriteLog(errors.New(errorMessage), http.StatusBadRequest, errorMessage)
+		return nil, errorLog
+	}
+
 	ledgerAccount := &models.LedgerAccount{}
 	redifu.InitRecord(ledgerAccount)
 
 	ledgerAccount.Name = name
 	ledgerAccount.Email = email
 
-	errLog := u.LedgerAccountRepository.Insert(nil, ledgerAccount)
-	if errLog != nil {
-		return nil, errLog
+	errorLog := u.LedgerAccountRepository.Insert(nil, ledgerAccount)
+	if errorLog != nil {
+		return nil, errorLog
 	}
 
 	return ledgerAccount, nil
