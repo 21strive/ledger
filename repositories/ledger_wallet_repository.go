@@ -39,6 +39,7 @@ type LedgerWalletRepositoryInterface interface {
 	GetByUUID(uuid string) (*models.LedgerWallet, *models.ErrorLog)
 	GetByLedgerAccountUUID(ledgerAccountUUID string) (*models.LedgerWallet, *models.ErrorLog)
 	GetByLedgerAccountUUIDAndCurrency(ledgerAccountUUID, currency string) (*models.LedgerWallet, *models.ErrorLog)
+	GetAllByLedgerAccountUUID(ledgerAccountUUID string) ([]*models.LedgerWallet, *models.ErrorLog)
 }
 
 type ledgerWalletRepository struct {
@@ -308,4 +309,39 @@ func (r *ledgerWalletRepository) GetByLedgerAccountUUIDAndCurrency(ledgerAccount
 	}
 
 	return ledgerWallet, nil
+}
+
+func (r *ledgerWalletRepository) GetAllByLedgerAccountUUID(ledgerAccountUUID string) ([]*models.LedgerWallet, *models.ErrorLog) {
+
+	var ledgerWallets []*models.LedgerWallet
+
+	sqlQuery := `
+		SELECT
+			lw.uuid,
+			lw.randid,
+			lw.created_at,
+			lw.updated_at,
+			lw.ledger_account_uuid,
+			lw.balance,
+			lw.pending_balance,
+			lw.last_receive,
+			lw.last_withdraw,
+			lw.income_accumulation,
+			lw.withdraw_accumulation,
+			lw.currency
+		FROM
+			ledger_wallets lw
+		WHERE
+			lw.ledger_account_uuid = $1
+		ORDER BY
+			lw.currency ASC
+	`
+
+	err := r.dbRead.Select(&ledgerWallets, sqlQuery, ledgerAccountUUID)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	return ledgerWallets, nil
 }
