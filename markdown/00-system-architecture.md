@@ -357,3 +357,86 @@ ledger/
 - `PAYMENT` - Successful payment (affects pending_balance)
 - `SETTLEMENT` - Settlement processed (moves pending to available)
 - `WITHDRAW` - Disbursement to bank (affects balance)
+
+---
+
+## On-Demand Settlement Reconciliation
+
+### Overview
+
+DOKU settles payments daily at **1PM on weekdays**, but **does not provide a webhook** for settlement completion. To detect when settlements have been processed, the system uses an **on-demand reconciliation** approach.
+
+### Why On-Demand?
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Webhook (not available) | Real-time updates | DOKU doesn't offer this for settlements |
+| Scheduled Job | Predictable timing | Adds complexity, still has delay |
+| **On-Demand** ✓ | No extra infrastructure, updates when user needs it | Only updates when user checks balance |
+
+### How It Works
+
+When a user accesses their balance page, the backend:
+
+1. **Fetches DOKU Balance** - Calls `GetBalance` API to get real-time pending/available
+2. **Compares with Ledger** - Calculates delta between DOKU pending and our pending_balance
+3. **Detects Settlements** - If DOKU pending < Ledger pending, settlements occurred
+4. **Reconciles** - Processes settlements FIFO, updates ledger to match DOKU
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     ON-DEMAND RECONCILIATION                                     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  User visits Balance Page                                                       │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  Backend: Get DOKU Balance        │◀─── DOKU GetBalance API                  │
+│  │  (pending: 0, available: 95,560)  │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  Compare with Ledger Wallet       │                                          │
+│  │  (pending_balance: 100,000)       │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  Delta = 100,000 - 0 = 100,000    │                                          │
+│  │  Settlement detected!              │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  Process IN_PROGRESS settlements  │                                          │
+│  │  (FIFO order)                     │                                          │
+│  │  - Status → TRANSFERRED           │                                          │
+│  │  - pending_balance -= gross       │                                          │
+│  │  - balance += net                 │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  Return updated balance to user                                                 │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+| Step | DOKU State | Ledger State | Action |
+|------|------------|--------------|--------|
+| Payment confirmed | pending: +100K | pending_balance: +100K | Create settlement (IN_PROGRESS) |
+| DOKU settles (1PM) | pending: 0, available: +95.5K | pending_balance: 100K (stale) | No webhook - we don't know! |
+| User checks balance | pending: 0, available: 95.5K | pending_balance: 100K | Detect delta, reconcile |
+| After reconciliation | pending: 0, available: 95.5K | pending_balance: 0, balance: 95.5K | Ledger matches DOKU |
+
+### Implementation Location
+
+The reconciliation logic is implemented in:
+
+- **setter-service**: `app/usecases/wallet_usecase.go` → `GetBalance()` method
+- **Ledger**: `GetSettlementsByAccountAndStatus()` for querying IN_PROGRESS settlements
+
+See `02-settlement-flow.md` for detailed implementation documentation.

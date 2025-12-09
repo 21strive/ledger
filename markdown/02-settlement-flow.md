@@ -51,25 +51,59 @@ The settlement flow handles the process of DOKU settling payments to the merchan
 │                           FEE CALCULATION EXAMPLE                                │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
-│  Customer Payment:     IDR 50,000 (gross_amount)                               │
-│  DOKU Fee (3%):        IDR  1,500 (fee_amount)                                 │
-│  ─────────────────────────────────                                              │
-│  Net to Merchant:      IDR 48,500 (net_amount)                                 │
+│  Service Price (what provider wants to receive):  IDR 100,000 (net_amount)     │
+│                                                                                 │
+│  Step 1: Calculate gross amount (before payment link creation)                 │
+│    - Payment method: QRIS                                                       │
+│    - DOKU fee: IDR 700 (flat fee, no tax for QRIS)                             │
+│    - Gross amount = 100,000 + 700 = IDR 100,700                                │
+│                                                                                 │
+│  Step 2: Customer pays IDR 100,700 (gross_amount)                              │
+│                                                                                 │
+│  Step 3: On payment confirmation, create settlement:                           │
+│    - gross_amount = 100,700 (what customer paid)                               │
+│    - fee_amount = 700 (DOKU fee)                                               │
+│    - net_amount = 100,000 (what provider receives after settlement)            │
 │                                                                                 │
 │  Stored in LedgerSettlement:                                                    │
-│    - gross_amount = 50000                                                       │
-│    - net_amount = 48500                                                         │
-│    - fee_amount = 1500                                                          │
+│    - gross_amount = 100700                                                      │
+│    - net_amount = 100000                                                        │
+│    - fee_amount = 700                                                           │
+│                                                                                 │
+│  Wallet Impact:                                                                 │
+│    - On confirm: pending_balance += 100,700 (gross)                            │
+│    - On settle:  pending_balance -= 100,700, balance += 100,000 (net)          │
 │                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Amount Definitions
+
+| Term | Description | When Used |
+|------|-------------|-----------|
+| **Net Amount** | Service price / what provider wants to receive | Booking creation, after settlement |
+| **Gross Amount** | What customer pays (net + DOKU fees) | Payment link, LedgerPayment.Amount, pending_balance |
+| **Fee Amount** | DOKU transaction fee + tax (gross - net) | Settlement record |
 
 ---
 
 ## Create Settlement Flow
 
 ### When to Call
-Called when DOKU notifies that a settlement batch has been initiated. This typically happens automatically via DOKU's settlement notification or can be synced via DOKU API.
+
+**Important**: Settlements should be created when a payment is **confirmed** (DOKU webhook SUCCESS), NOT when the payment link is created.
+
+**Correct Timing:**
+- ✅ Create settlement in the DOKU notification/webhook handler after `ConfirmPayment()` succeeds
+- ❌ Do NOT create settlement when generating the payment link
+
+**Why?**
+1. **Customer may abandon payment**: Creating settlement at payment link creation results in orphaned records
+2. **Payment method may differ**: Customer might choose QRIS instead of VA, affecting fee calculation
+3. **Payment may expire**: Unused settlements require cleanup
+4. **Accurate fees**: The actual payment method from DOKU webhook determines the correct fee
+
+**Trigger**: Called in the payment notification handler (webhook) when `transaction.status == "SUCCESS"`.
 
 ### Flow Diagram
 
@@ -78,28 +112,88 @@ Called when DOKU notifies that a settlement batch has been initiated. This typic
 │                          CREATE SETTLEMENT FLOW                                  │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
-│  1. DOKU initiates settlement batch                                            │
-│     - Groups multiple payments from the past 1-2 days                          │
-│     - Calculates total gross and net amounts                                   │
-│     - Assigns batch_number                                                      │
+│  1. DOKU sends webhook notification (payment SUCCESS):                         │
+│     - transaction.status = "SUCCESS"                                           │
+│     - channel.id = actual payment method (e.g., "VIRTUAL_ACCOUNT_BCA", "QRIS") │
+│     - order.invoice_number = original invoice                                  │
+│     - order.amount = gross amount paid by customer                             │
 │                                                                                 │
-│  2. System receives settlement notification:                                    │
-│     - batch_number                                                              │
-│     - settlement_date                                                           │
-│     - gross_amount, net_amount                                                  │
-│     - destination bank info                                                     │
+│  2. Webhook handler confirms payment:                                          │
+│     - Calls LedgerPaymentUseCase.ConfirmPayment()                             │
+│     - Updates payment status to PAID                                           │
+│     - Adds amount to pending_balance and income_accumulation                  │
 │                                                                                 │
-│  3. Ledger creates LedgerSettlement record:                                    │
+│  3. Calculate settlement fee using actual payment method:                      │
+│     - Calls DokuSettlementUseCase.CalculateSettlementFee(paymentMethod, amount)│
+│     - Returns: grossAmount, netAmount, transactionFee, tax                    │
+│                                                                                 │
+│  4. Create LedgerSettlement record:                                            │
 │     - Status = IN_PROGRESS                                                      │
-│     - Calculate fee_amount = gross_amount - net_amount                         │
-│     - Store all settlement details                                              │
+│     - batch_number = invoice_number (for idempotency)                          │
+│     - settlement_date = estimated (next business day)                          │
+│     - gross_amount = customer paid amount                                       │
+│     - net_amount = amount after DOKU fees                                       │
+│     - fee_amount = gross_amount - net_amount                                   │
 │                                                                                 │
-│  4. Link related payments to this settlement:                                  │
-│     - Update LedgerPayment.ledger_settlement_uuid                              │
-│                                                                                 │
-│  Note: Wallet balance is NOT updated yet (still IN_PROGRESS)                   │
+│  Note: Wallet pending_balance is already updated in step 2.                    │
+│        When DOKU actually settles, reconciliation moves to TRANSFERRED.        │
 │                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Integration Example (Webhook Handler)
+
+```go
+func (h *webhookHandler) processSuccessfulPayment(notification *DokuNotification) error {
+    tx, err := h.db.BeginTx()
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback()
+    
+    // 1. Get actual payment method from DOKU notification
+    paymentMethod := notification.Channel.ID.String
+    
+    // 2. Confirm payment in ledger (updates wallet pending_balance)
+    confirmedPayment, err := h.ledgerPaymentUseCase.ConfirmPayment(tx, &ConfirmPaymentRequest{
+        GatewayRequestId: notification.Transaction.OriginalRequestID.String,
+        PaymentMethod:    paymentMethod,
+        PaymentDate:      time.Now(),
+    })
+    if err != nil {
+        return err
+    }
+    
+    // 3. Calculate fee using actual payment method
+    settlementResult, err := h.dokuSettlementUseCase.CalculateSettlementFee(
+        paymentMethod,
+        float64(confirmedPayment.Amount),
+    )
+    if err != nil {
+        return err
+    }
+    
+    // 4. Create settlement record
+    estimatedSettlementDate := time.Now().AddDate(0, 0, 1) // DOKU settles next day ~1 PM
+    
+    _, err = h.ledgerSettlementUseCase.CreateSettlement(
+        tx,
+        confirmedPayment.LedgerAccountUUID,
+        confirmedPayment.InvoiceNumber,  // Use as batch_number for idempotency
+        estimatedSettlementDate,
+        confirmedPayment.Currency,
+        int64(settlementResult.GrossAmount),
+        int64(settlementResult.NetAmount),
+        "", // bankName - filled during disbursement
+        "", // bankAccountNumber - filled during disbursement
+        AccountTypeSubAccount,
+    )
+    if err != nil {
+        return err
+    }
+    
+    return tx.Commit()
+}
 ```
 
 ### Implementation Logic
@@ -411,3 +505,219 @@ func (u *ledgerSettlementUseCase) GetPendingSettlements() ([]*models.LedgerSettl
 | `/ledger/settlements/batch/{batch_number}` | GET | Get settlement by batch number |
 | `/ledger/settlements/account/{account_uuid}` | GET | Get all settlements for account |
 | `/ledger/settlements/pending` | GET | Get all pending settlements |
+
+---
+
+## Settlement Reconciliation (On-Demand)
+
+### Overview
+
+DOKU settles payments daily at 1PM on weekdays, but **does not provide a webhook** for settlement completion. To detect when settlements have been processed, the system uses an **on-demand reconciliation** approach.
+
+When a user accesses their balance page, the backend:
+1. Fetches the real-time balance from DOKU's GetBalance API
+2. Compares DOKU's pending balance with our ledger's pending balance
+3. If DOKU's pending is lower, it means settlements have been processed
+4. Updates our ledger to reflect the completed settlements
+
+### Reconciliation Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     SETTLEMENT RECONCILIATION FLOW                               │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  User visits Balance Page                                                       │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  1. Call DOKU GetBalance API      │                                          │
+│  │     Returns: pending, available   │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  2. Get Ledger Wallet Balance     │                                          │
+│  │     Returns: pending_balance,     │                                          │
+│  │              balance              │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  3. Calculate Delta               │                                          │
+│  │     delta = ledger_pending -      │                                          │
+│  │             doku_pending          │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ├─── delta <= 0 ───▶ No reconciliation needed                          │
+│          │                                                                      │
+│          ▼ (delta > 0)                                                          │
+│  ┌───────────────────────────────────┐                                          │
+│  │  4. Get IN_PROGRESS Settlements   │                                          │
+│  │     (FIFO - oldest first)         │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  5. Process Settlements           │                                          │
+│  │     - Update status → TRANSFERRED │                                          │
+│  │     - pending_balance -= gross    │                                          │
+│  │     - balance += net              │                                          │
+│  └───────────────────────────────────┘                                          │
+│          │                                                                      │
+│          ▼                                                                      │
+│  ┌───────────────────────────────────┐                                          │
+│  │  6. Return Updated Balance        │                                          │
+│  └───────────────────────────────────┘                                          │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Query Method: Get Settlements by Account and Status
+
+This method is used for reconciliation to get all IN_PROGRESS settlements for a specific account, ordered by creation date (FIFO).
+
+```go
+// GetSettlementsByAccountAndStatus retrieves settlements for a specific account with a specific status
+// Used for settlement reconciliation - get all IN_PROGRESS settlements for an account (FIFO order)
+func (u *ledgerSettlementUseCase) GetSettlementsByAccountAndStatus(
+    ledgerAccountUUID string,
+    status string,
+) ([]*models.LedgerSettlement, *models.ErrorLog) {
+
+    settlements, errorLog := u.ledgerSettlementRepository.GetByLedgerAccountUUIDAndStatus(
+        ledgerAccountUUID,
+        status,
+    )
+    if errorLog != nil {
+        return nil, errorLog
+    }
+
+    return settlements, nil
+}
+```
+
+### Repository Implementation
+
+```go
+// GetByLedgerAccountUUIDAndStatus retrieves settlements for a specific account with a specific status
+// Results are ordered by created_at ASC (oldest first) for FIFO settlement processing
+func (r *ledgerSettlementRepository) GetByLedgerAccountUUIDAndStatus(
+    ledgerAccountUUID string,
+    status string,
+) ([]*models.LedgerSettlement, *models.ErrorLog) {
+
+    var ledgerSettlements []*models.LedgerSettlement
+
+    sqlQuery := `
+        SELECT
+            ls.uuid,
+            ls.randid,
+            ls.created_at,
+            ls.updated_at,
+            ls.ledger_account_uuid,
+            ls.batch_number,
+            ls.settlement_date,
+            ls.real_settlement_date,
+            ls.currency,
+            ls.gross_amount,
+            ls.net_amount,
+            ls.fee_amount,
+            ls.bank_name,
+            ls.bank_account_number,
+            ls.account_type,
+            ls.status
+        FROM
+            ledger_settlements ls
+        WHERE
+            ls.ledger_account_uuid = $1
+            AND ls.status = $2
+        ORDER BY
+            ls.created_at ASC
+    `
+
+    err := r.dbRead.Select(&ledgerSettlements, sqlQuery, ledgerAccountUUID, status)
+    if err != nil {
+        logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+        return nil, logData
+    }
+
+    return ledgerSettlements, nil
+}
+```
+
+### Timeline Example with Reconciliation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    SETTLEMENT TIMELINE WITH RECONCILIATION                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  Day 1 (Monday) 10:00 AM - Payment Confirmed                                    │
+│  ─────────────────────────────────────────────                                  │
+│  DOKU Balance:                                                                  │
+│    pending: 100,000                                                             │
+│    available: 0                                                                 │
+│                                                                                 │
+│  Ledger Wallet:                                                                 │
+│    pending_balance: 100,000                                                     │
+│    balance: 0                                                                   │
+│                                                                                 │
+│  LedgerSettlement:                                                              │
+│    status: IN_PROGRESS                                                          │
+│    gross_amount: 100,000                                                        │
+│    net_amount: 95,560 (after VA fee + tax)                                      │
+│                                                                                 │
+│  ═══════════════════════════════════════════════════════════════════════════    │
+│                                                                                 │
+│  Day 2 (Tuesday) 1:00 PM - DOKU Settlement (No Webhook)                         │
+│  ──────────────────────────────────────────────────────                         │
+│  DOKU Balance (real):                                                           │
+│    pending: 0                                                                   │
+│    available: 95,560                                                            │
+│                                                                                 │
+│  Ledger Wallet (stale - not yet updated):                                       │
+│    pending_balance: 100,000                                                     │
+│    balance: 0                                                                   │
+│                                                                                 │
+│  ═══════════════════════════════════════════════════════════════════════════    │
+│                                                                                 │
+│  Day 2 (Tuesday) 3:00 PM - User Visits Balance Page                             │
+│  ───────────────────────────────────────────────────                            │
+│  1. Backend calls DOKU GetBalance API                                           │
+│     → pending: 0, available: 95,560                                             │
+│                                                                                 │
+│  2. Compare with Ledger:                                                        │
+│     → delta = 100,000 - 0 = 100,000 (settlement detected!)                      │
+│                                                                                 │
+│  3. Get IN_PROGRESS settlements (FIFO)                                          │
+│     → Found 1 settlement with gross_amount: 100,000                             │
+│                                                                                 │
+│  4. Process settlement:                                                         │
+│     → Update status: IN_PROGRESS → TRANSFERRED                                  │
+│     → pending_balance: 100,000 → 0                                              │
+│     → balance: 0 → 95,560                                                       │
+│                                                                                 │
+│  5. Return to user:                                                             │
+│     available_balance: 95,560                                                   │
+│     pending_balance: 0                                                          │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Edge Cases
+
+| Scenario | Handling |
+|----------|----------|
+| DOKU API is down | Return cached ledger balance, log warning |
+| Multiple settlements same day | Process FIFO until delta is satisfied |
+| Delta exceeds available settlements | Process all available, log discrepancy |
+| DOKU pending > Ledger pending | Log data integrity warning, no action |
+| Concurrent balance requests | Database transaction ensures consistency |
+
+### Important Notes
+
+1. **FIFO Order**: Settlements are processed oldest-first based on `created_at`
+2. **Idempotency**: Only IN_PROGRESS settlements are processed; TRANSFERRED ones are skipped
+3. **Atomic Updates**: Settlement status and wallet balance are updated in a single transaction
+4. **Graceful Degradation**: If DOKU API fails, users still see cached ledger balance

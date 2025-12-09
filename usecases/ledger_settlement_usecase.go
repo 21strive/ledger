@@ -28,6 +28,7 @@ type LedgerSettlementUseCaseInterface interface {
 	GetSettlementByUUID(uuid string) (*models.LedgerSettlement, *models.ErrorLog)
 	GetSettlementByBatchNumber(batchNumber string) (*models.LedgerSettlement, *models.ErrorLog)
 	GetSettlementsByAccount(ledgerAccountUUID string) ([]*models.LedgerSettlement, *models.ErrorLog)
+	GetSettlementsByAccountAndStatus(ledgerAccountUUID string, status string) ([]*models.LedgerSettlement, *models.ErrorLog)
 	GetPendingSettlements() ([]*models.LedgerSettlement, *models.ErrorLog)
 }
 
@@ -150,6 +151,18 @@ func (u *ledgerSettlementUseCase) GetSettlementByBatchNumber(batchNumber string)
 func (u *ledgerSettlementUseCase) GetSettlementsByAccount(ledgerAccountUUID string) ([]*models.LedgerSettlement, *models.ErrorLog) {
 
 	settlements, errorLog := u.ledgerSettlementRepository.GetByLedgerAccountUUID(ledgerAccountUUID)
+	if errorLog != nil {
+		return nil, errorLog
+	}
+
+	return settlements, nil
+}
+
+// GetSettlementsByAccountAndStatus retrieves settlements for a specific account with a specific status
+// Used for settlement reconciliation - get all IN_PROGRESS settlements for an account (FIFO order)
+func (u *ledgerSettlementUseCase) GetSettlementsByAccountAndStatus(ledgerAccountUUID string, status string) ([]*models.LedgerSettlement, *models.ErrorLog) {
+
+	settlements, errorLog := u.ledgerSettlementRepository.GetByLedgerAccountUUIDAndStatus(ledgerAccountUUID, status)
 	if errorLog != nil {
 		return nil, errorLog
 	}

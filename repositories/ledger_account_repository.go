@@ -101,9 +101,9 @@ func (r *ledgerAccountRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 	// Execute the query
 	_, err := sqlTransaction.Exec(query, rawSqlValues...)
 	if err != nil {
-		// Check for duplicate booking_id error (Postgres unique violation)
-		if strings.Contains(err.Error(), "duplicate key value") && strings.Contains(err.Error(), "booking_id") {
-			logData := helper.WriteLog(err, http.StatusConflict, "Booking ID already exists")
+		// Check for duplicate email error (Postgres unique violation)
+		if strings.Contains(err.Error(), "duplicate key value") && strings.Contains(err.Error(), "email") {
+			logData := helper.WriteLog(err, http.StatusConflict, "Email already exists")
 			return logData
 		}
 
