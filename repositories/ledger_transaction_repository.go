@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/faizauthar12/ledger/models"
+	"github.com/faizauthar12/ledger/requests"
 	"github.com/faizauthar12/ledger/utils/helper"
 	"github.com/jmoiron/sqlx"
 )
@@ -22,6 +23,7 @@ var ledgerTransactionRepositorySchema = `
 		ledger_payment_uuid VARCHAR(255) NULL,
 		ledger_settlement_uuid VARCHAR(255) NULL,
 		ledger_wallet_uuid VARCHAR(255) NOT NULL,
+		ledger_disbursement_uuid VARCHAR(255) NULL,
 		amount BIGINT NOT NULL,
 		description TEXT NULL
 	);
@@ -42,6 +44,7 @@ type LedgerTransactionRepositoryInterface interface {
 	GetByLedgerSettlementUUID(ledgerSettlementUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
 	GetByLedgerWalletUUID(ledgerWalletUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
 	GetByTransactionType(transactionType string) ([]*models.LedgerTransaction, *models.ErrorLog)
+	Get(request *requests.LedgerTransactionGetRequest) ([]*models.LedgerTransaction, *models.ErrorLog)
 }
 
 type ledgerTransactionRepository struct {
@@ -102,6 +105,9 @@ func (r *ledgerTransactionRepository) Insert(sqlTransaction *sqlx.Tx, data *mode
 	// ledger_wallet_uuid
 	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
 
+	// ledger_disbursement_uuid
+	queryBuilder("ledger_disbursement_uuid", data.LedgerDisbursementUUID)
+
 	// amount
 	queryBuilder("amount", data.Amount)
 
@@ -159,6 +165,9 @@ func (r *ledgerTransactionRepository) Update(sqlTransaction *sqlx.Tx, data *mode
 	// ledger_wallet_uuid
 	queryBuilder("ledger_wallet_uuid", data.LedgerWalletUUID)
 
+	// ledger_disbursement_uuid
+	queryBuilder("ledger_disbursement_uuid", data.LedgerDisbursementUUID)
+
 	// amount
 	queryBuilder("amount", data.Amount)
 
@@ -193,6 +202,7 @@ func selectTransactionFields() string {
 		lt.ledger_payment_uuid,
 		lt.ledger_settlement_uuid,
 		lt.ledger_wallet_uuid,
+		lt.ledger_disbursement_uuid,
 		lt.amount,
 		lt.description
 	`
@@ -296,6 +306,83 @@ func (r *ledgerTransactionRepository) GetByTransactionType(transactionType strin
 	`, selectTransactionFields())
 
 	err := r.dbRead.Select(&ledgerTransactions, sqlQuery, transactionType)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	return ledgerTransactions, nil
+}
+
+func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGetRequest) ([]*models.LedgerTransaction, *models.ErrorLog) {
+
+	dollarSymbolIndex := 1
+	args := []interface{}{}
+
+	sqlWhere := `
+		WHERE 1=1 AND deleted_at IS NULL
+	`
+
+	sqlOrderBy := ` ORDER BY lt.created_at DESC `
+
+	// filters
+	if request.LedgerWalletUUID != "" {
+		sqlWhere += fmt.Sprintf(`AND lt.ledger_wallet_uuid = $%d`, dollarSymbolIndex)
+		args = append(args, request.LedgerWalletUUID)
+		dollarSymbolIndex++
+	}
+
+	if request.IsDisbursement {
+		sqlWhere += ` AND lt.ledger_disbursement_uuid IS NOT NULL`
+	}
+
+	if request.IsPayment {
+		sqlWhere += ` AND lt.ledger_payment_uuid IS NOT NULL`
+	}
+
+	// count
+	sqlQuery := `
+		SELECT COUNT(*) FROM ledger_transactions lt
+	`
+
+	sqlQuery += sqlWhere
+
+	var totalCount int64
+	err := r.dbRead.QueryRowx(sqlQuery, args).Scan(&totalCount)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	// get data
+	ledgerTransactions := []*models.LedgerTransaction{}
+
+	sqlQuery = fmt.Sprintf(`
+		SELECT
+			lt.uuid,
+			lt.randid,
+			lt.created_at,
+			lt.updated_at,
+			lt.transaction_type,
+			lt.ledger_payment_uuid,
+			lt.ledger_settlement_uuid,
+			lt.ledger_wallet_uuid,
+			lt.ledger_disbursement_uuid,
+			lt.amount,
+			lt.description
+		FROM ledger_transactions lt
+	`)
+
+	limit := request.PerPage
+	offset := (request.Page - 1) * request.PerPage
+	sqlLimitOffset := fmt.Sprintf(` LIMIT $%d OFFSET $%d `, dollarSymbolIndex, dollarSymbolIndex+1)
+
+	args = append(args, limit, offset)
+	dollarSymbolIndex += 2
+
+	sqlQuery = sqlQuery + sqlWhere + sqlOrderBy + sqlLimitOffset
+
+	err = r.dbRead.Select(ledgerTransactions, sqlQuery, args)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return nil, logData

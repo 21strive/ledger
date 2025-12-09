@@ -9,3 +9,13 @@ type LedgerTransactionCreateTransactionRequest struct {
 	LedgerPaymentUUID    string `json:"ledger_payment_uuid"`    // Nullable - only set for payment transactions
 	LedgerSettlementUUID string `json:"ledger_settlement_uuid"` // Nullable - only set for settlement transactions
 }
+
+type LedgerTransactionGetRequest struct {
+	LedgerWalletUUID string `json:"ledger_wallet_uuid"`
+	IsPayment        bool   `json:"is_payment"`
+	IsDisbursement   bool   `json:"is_disbursement"`
+	Page             int64  `json:"page"`
+	PerPage          int64  `json:"per_page"`
+	SortField        string `json:"sort_field"`
+	SortValue        string `json:"sort_value"`
+}
