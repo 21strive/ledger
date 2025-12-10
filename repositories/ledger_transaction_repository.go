@@ -316,73 +316,79 @@ func (r *ledgerTransactionRepository) GetByTransactionType(transactionType strin
 
 func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGetRequest) ([]*models.LedgerTransaction, *models.ErrorLog) {
 
-	dollarSymbolIndex := 1
+	// Dynamic WHERE clause builder
+	whereConditions := []string{"1=1", "deleted_at IS NULL"}
 	args := []interface{}{}
 
-	sqlWhere := `
-		WHERE 1=1 AND deleted_at IS NULL
-	`
+	// Helper function to build WHERE clause dynamically
+	addFilter := func(condition string, value interface{}) {
+		whereConditions = append(whereConditions, fmt.Sprintf(condition, len(args)+1))
+		args = append(args, value)
+	}
 
-	sqlOrderBy := ` ORDER BY lt.created_at DESC `
+	// Helper for conditions without parameters
+	addRawFilter := func(condition string) {
+		whereConditions = append(whereConditions, condition)
+	}
 
-	// filters
+	// Apply filters
 	if request.LedgerWalletUUID != "" {
-		sqlWhere += fmt.Sprintf(`AND lt.ledger_wallet_uuid = $%d`, dollarSymbolIndex)
-		args = append(args, request.LedgerWalletUUID)
-		dollarSymbolIndex++
+		addFilter("lt.ledger_wallet_uuid = $%d", request.LedgerWalletUUID)
 	}
 
 	if request.IsDisbursement {
-		sqlWhere += ` AND lt.ledger_disbursement_uuid IS NOT NULL`
+		addRawFilter("lt.ledger_disbursement_uuid IS NOT NULL")
 	}
 
 	if request.IsPayment {
-		sqlWhere += ` AND lt.ledger_payment_uuid IS NOT NULL`
+		addRawFilter("lt.ledger_payment_uuid IS NOT NULL")
 	}
 
-	// count
-	sqlQuery := `
-		SELECT COUNT(*) FROM ledger_transactions lt
-	`
+	// Build WHERE clause
+	sqlWhere := " WHERE " + strings.Join(whereConditions, " AND ")
 
-	sqlQuery += sqlWhere
+	// Build ORDER BY clause
+	sqlOrderBy := " ORDER BY lt.created_at DESC "
+	if request.SortField != "" && request.SortValue != "" {
+		// Whitelist allowed sort fields to prevent SQL injection
+		allowedSortFields := map[string]bool{
+			"created_at": true,
+			"updated_at": true,
+			"amount":     true,
+		}
+		allowedSortValues := map[string]bool{
+			"ASC":  true,
+			"DESC": true,
+		}
+		if allowedSortFields[request.SortField] && allowedSortValues[strings.ToUpper(request.SortValue)] {
+			sqlOrderBy = fmt.Sprintf(" ORDER BY lt.%s %s ", request.SortField, strings.ToUpper(request.SortValue))
+		}
+	}
+
+	// Count query
+	countQuery := "SELECT COUNT(*) FROM ledger_transactions lt" + sqlWhere
 
 	var totalCount int64
-	err := r.dbRead.QueryRowx(sqlQuery, args).Scan(&totalCount)
+	err := r.dbRead.QueryRowx(countQuery, args...).Scan(&totalCount)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return nil, logData
 	}
 
-	// get data
-	ledgerTransactions := []*models.LedgerTransaction{}
-
-	sqlQuery = fmt.Sprintf(`
-		SELECT
-			lt.uuid,
-			lt.randid,
-			lt.created_at,
-			lt.updated_at,
-			lt.transaction_type,
-			lt.ledger_payment_uuid,
-			lt.ledger_settlement_uuid,
-			lt.ledger_wallet_uuid,
-			lt.ledger_disbursement_uuid,
-			lt.amount,
-			lt.description
-		FROM ledger_transactions lt
-	`)
-
+	// Build LIMIT/OFFSET
 	limit := request.PerPage
 	offset := (request.Page - 1) * request.PerPage
-	sqlLimitOffset := fmt.Sprintf(` LIMIT $%d OFFSET $%d `, dollarSymbolIndex, dollarSymbolIndex+1)
-
+	sqlLimitOffset := fmt.Sprintf(" LIMIT $%d OFFSET $%d ", len(args)+1, len(args)+2)
 	args = append(args, limit, offset)
-	dollarSymbolIndex += 2
 
-	sqlQuery = sqlQuery + sqlWhere + sqlOrderBy + sqlLimitOffset
+	// Get data query
+	dataQuery := fmt.Sprintf(`
+		SELECT %s
+		FROM ledger_transactions lt
+	`, selectTransactionFields()) + sqlWhere + sqlOrderBy + sqlLimitOffset
 
-	err = r.dbRead.Select(ledgerTransactions, sqlQuery, args)
+	ledgerTransactions := []*models.LedgerTransaction{}
+	err = r.dbRead.Select(&ledgerTransactions, dataQuery, args...)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return nil, logData
