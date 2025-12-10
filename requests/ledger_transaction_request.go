@@ -11,11 +11,12 @@ type LedgerTransactionCreateTransactionRequest struct {
 }
 
 type LedgerTransactionGetRequest struct {
-	LedgerWalletUUID string `json:"ledger_wallet_uuid"`
-	IsPayment        bool   `json:"is_payment"`
-	IsDisbursement   bool   `json:"is_disbursement"`
-	Page             int64  `json:"page"`
-	PerPage          int64  `json:"per_page"`
-	SortField        string `json:"sort_field"`
-	SortValue        string `json:"sort_value"`
+	UserEmail      string `json:"user_email"`
+	Currency       string `json:"currency"`
+	IsPayment      bool   `json:"is_payment"`
+	IsDisbursement bool   `json:"is_disbursement"`
+	Page           int64  `json:"page"`
+	PerPage        int64  `json:"per_page"`
+	SortField      string `json:"sort_field"`
+	SortValue      string `json:"sort_value"`
 }

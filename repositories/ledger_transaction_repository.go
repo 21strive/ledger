@@ -332,8 +332,12 @@ func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGet
 	}
 
 	// Apply filters
-	if request.LedgerWalletUUID != "" {
-		addFilter("lt.ledger_wallet_uuid = $%d", request.LedgerWalletUUID)
+	if request.UserEmail != "" {
+		addFilter("la.email = $%d", request.UserEmail)
+	}
+
+	if request.Currency != "" {
+		addFilter("lw.currency = $%d", request.Currency)
 	}
 
 	if request.IsDisbursement {
@@ -382,10 +386,23 @@ func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGet
 	args = append(args, limit, offset)
 
 	// Get data query
-	dataQuery := fmt.Sprintf(`
-		SELECT %s
+	dataQuery := `
+		SELECT
+			lt.uuid,
+			lt.randid,
+			lt.created_at,
+			lt.updated_at,
+			lt.transaction_type,
+			lt.ledger_payment_uuid,
+			lt.ledger_settlement_uuid,
+			lt.ledger_wallet_uuid,
+			lt.ledger_disbursement_uuid,
+			lt.amount,
+			lt.description
 		FROM ledger_transactions lt
-	`, selectTransactionFields()) + sqlWhere + sqlOrderBy + sqlLimitOffset
+		INNER JOIN ledger_wallets lw ON lt.ledger_wallet_uuid = lw.uuid
+		INNER JOIN ledger_accounts la ON lw.ledger_account_uuid = la.uuid
+	` + sqlWhere + sqlOrderBy + sqlLimitOffset
 
 	ledgerTransactions := []*models.LedgerTransaction{}
 	err = r.dbRead.Select(&ledgerTransactions, dataQuery, args...)
