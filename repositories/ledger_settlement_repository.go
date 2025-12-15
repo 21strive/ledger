@@ -279,7 +279,7 @@ func (r *ledgerSettlementRepository) GetByUUID(uuid string) (*models.LedgerSettl
 
 func (r *ledgerSettlementRepository) GetByBatchNumber(batchNumber string) (*models.LedgerSettlement, *models.ErrorLog) {
 
-	var ledgerSettlement *models.LedgerSettlement
+	ledgerSettlement :=&models.LedgerSettlement{}
 
 	sqlQuery := `
 		SELECT
@@ -306,7 +306,7 @@ func (r *ledgerSettlementRepository) GetByBatchNumber(batchNumber string) (*mode
 		LIMIT 1
 	`
 
-	err := r.dbRead.QueryRowx(sqlQuery, batchNumber).StructScan(&ledgerSettlement)
+	err := r.dbRead.Get(ledgerSettlement, sqlQuery, batchNumber)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {
