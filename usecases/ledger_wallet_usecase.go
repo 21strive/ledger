@@ -8,6 +8,7 @@ import (
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/faizauthar12/ledger/responses"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -90,6 +91,9 @@ func (u *ledgerWalletUseCase) CreateWallet(sqlTransaction *sqlx.Tx, ledgerAccoun
 	ledgerWallet := &models.LedgerWallet{}
 	redifu.InitRecord(ledgerWallet)
 
+	uuid7, _ := uuid.NewV7()
+
+	ledgerWallet.UUID = uuid7.String()
 	ledgerWallet.LedgerAccountUUID = ledgerAccountUUID
 	ledgerWallet.Currency = currency
 	ledgerWallet.Balance = 0

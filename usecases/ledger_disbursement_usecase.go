@@ -10,6 +10,7 @@ import (
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/faizauthar12/ledger/responses"
 	"github.com/faizauthar12/ledger/utils/helper"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -125,6 +126,9 @@ func (u *ledgerDisbursementUseCase) CreateDisbursement(
 	ledgerDisbursement := &models.LedgerDisbursement{}
 	redifu.InitRecord(ledgerDisbursement)
 
+	uuid7, _ := uuid.NewV7()
+
+	ledgerDisbursement.UUID = uuid7.String()
 	ledgerDisbursement.LedgerAccountUUID = ledgerAccountUUID
 	ledgerDisbursement.LedgerWalletUUID = ledgerWalletUUID
 	ledgerDisbursement.LedgerAccountBankUUID = ledgerAccountBankUUID

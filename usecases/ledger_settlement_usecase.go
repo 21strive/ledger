@@ -7,6 +7,7 @@ import (
 	"github.com/21strive/redifu"
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -30,6 +31,7 @@ type LedgerSettlementUseCaseInterface interface {
 	GetSettlementsByAccount(ledgerAccountUUID string) ([]*models.LedgerSettlement, *models.ErrorLog)
 	GetSettlementsByAccountAndStatus(ledgerAccountUUID string, status string) ([]*models.LedgerSettlement, *models.ErrorLog)
 	GetPendingSettlements() ([]*models.LedgerSettlement, *models.ErrorLog)
+	GetByUUIDs(uuids []string) ([]*models.LedgerSettlement, *models.ErrorLog)
 }
 
 type ledgerSettlementUseCase struct {
@@ -82,6 +84,9 @@ func (u *ledgerSettlementUseCase) CreateSettlement(
 	ledgerSettlement := &models.LedgerSettlement{}
 	redifu.InitRecord(ledgerSettlement)
 
+	uuid7, _ := uuid.NewV7()
+
+	ledgerSettlement.UUID = uuid7.String()
 	ledgerSettlement.LedgerAccountUUID = ledgerAccountUUID
 	ledgerSettlement.BatchNumber = batchNumber
 	ledgerSettlement.SettlementDate = settlementDate
@@ -174,6 +179,16 @@ func (u *ledgerSettlementUseCase) GetSettlementsByAccountAndStatus(ledgerAccount
 func (u *ledgerSettlementUseCase) GetPendingSettlements() ([]*models.LedgerSettlement, *models.ErrorLog) {
 
 	settlements, errorLog := u.ledgerSettlementRepository.GetByStatus(models.SettlementStatusInProgress)
+	if errorLog != nil {
+		return nil, errorLog
+	}
+
+	return settlements, nil
+}
+
+func (u *ledgerSettlementUseCase) GetByUUIDs(uuids []string) ([]*models.LedgerSettlement, *models.ErrorLog) {
+
+	settlements, errorLog := u.ledgerSettlementRepository.GetByUUIDs(uuids)
 	if errorLog != nil {
 		return nil, errorLog
 	}

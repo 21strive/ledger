@@ -8,6 +8,7 @@ import (
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/faizauthar12/ledger/utils/helper"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -51,6 +52,9 @@ func (u *ledgerAccountUseCase) CreateLedgerAccount(sqlTransaction *sqlx.Tx, name
 	ledgerAccount := &models.LedgerAccount{}
 	redifu.InitRecord(ledgerAccount)
 
+	uuid7, _ := uuid.NewV7()
+
+	ledgerAccount.UUID = uuid7.String()
 	ledgerAccount.Name = name
 	ledgerAccount.Email = email
 

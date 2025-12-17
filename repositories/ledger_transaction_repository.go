@@ -44,7 +44,7 @@ type LedgerTransactionRepositoryInterface interface {
 	GetByLedgerSettlementUUID(ledgerSettlementUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
 	GetByLedgerWalletUUID(ledgerWalletUUID string) ([]*models.LedgerTransaction, *models.ErrorLog)
 	GetByTransactionType(transactionType string) ([]*models.LedgerTransaction, *models.ErrorLog)
-	Get(request *requests.LedgerTransactionGetRequest) ([]*models.LedgerTransaction, *models.ErrorLog)
+	Get(request *requests.LedgerTransactionGetRequest) ([]*models.LedgerTransaction, int64, *models.ErrorLog)
 }
 
 type ledgerTransactionRepository struct {
@@ -314,10 +314,10 @@ func (r *ledgerTransactionRepository) GetByTransactionType(transactionType strin
 	return ledgerTransactions, nil
 }
 
-func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGetRequest) ([]*models.LedgerTransaction, *models.ErrorLog) {
+func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGetRequest) ([]*models.LedgerTransaction, int64, *models.ErrorLog) {
 
 	// Dynamic WHERE clause builder
-	whereConditions := []string{"1=1", "deleted_at IS NULL"}
+	whereConditions := []string{"1=1"}
 	args := []interface{}{}
 
 	// Helper function to build WHERE clause dynamically
@@ -370,13 +370,13 @@ func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGet
 	}
 
 	// Count query
-	countQuery := "SELECT COUNT(*) FROM ledger_transactions lt" + sqlWhere
+	countQuery := "SELECT COUNT(*) FROM ledger_transactions lt INNER JOIN ledger_wallets lw ON lt.ledger_wallet_uuid = lw.uuid\n\t\tINNER JOIN ledger_accounts la ON lw.ledger_account_uuid = la.uuid" + sqlWhere
 
 	var totalCount int64
 	err := r.dbRead.QueryRowx(countQuery, args...).Scan(&totalCount)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		return nil, logData
+		return nil, 0, logData
 	}
 
 	// Build LIMIT/OFFSET
@@ -408,8 +408,8 @@ func (r *ledgerTransactionRepository) Get(request *requests.LedgerTransactionGet
 	err = r.dbRead.Select(&ledgerTransactions, dataQuery, args...)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		return nil, logData
+		return nil, 0, logData
 	}
 
-	return ledgerTransactions, nil
+	return ledgerTransactions, totalCount, nil
 }

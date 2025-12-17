@@ -5,6 +5,7 @@ import (
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/faizauthar12/ledger/requests"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -41,6 +42,9 @@ func (u *ledgerTransactionUseCase) CreateTransaction(sqlTransaction *sqlx.Tx, re
 	transaction := &models.LedgerTransaction{}
 	redifu.InitRecord(transaction)
 
+	uuid7, _ := uuid.NewV7()
+
+	transaction.UUID = uuid7.String()
 	transaction.TransactionType = request.TransactionType
 	transaction.LedgerWalletUUID = request.LedgerWalletUUID
 	transaction.Amount = request.Amount

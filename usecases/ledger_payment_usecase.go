@@ -10,6 +10,7 @@ import (
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/faizauthar12/ledger/requests"
 	"github.com/faizauthar12/ledger/utils/helper"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )
@@ -28,12 +29,11 @@ type LedgerPaymentUseCaseInterface interface {
 }
 
 type ledgerPaymentUseCase struct {
-	dbRead                      *sqlx.DB
-	dbWrite                     *sqlx.DB
 	ledgerPaymentRepository     repositories.LedgerPaymentRepositoryInterface
 	ledgerWalletRepository      repositories.LedgerWalletRepositoryInterface
 	ledgerTransactionRepository repositories.LedgerTransactionRepositoryInterface
 	ledgerWalletUseCase         LedgerWalletUseCaseInterface
+	ledgerPendingBalanceUseCase LedgerPendingBalanceUseCaseInterface
 }
 
 func NewLedgerPaymentUseCase(
@@ -46,14 +46,14 @@ func NewLedgerPaymentUseCase(
 	ledgerWalletRepository := repositories.NewLedgerWalletRepository(dbRead, dbWrite)
 	ledgerTransactionRepository := repositories.NewLedgerTransactionRepository(dbRead, dbWrite)
 	ledgerWalletUseCase := NewLedgerWalletUseCase(dbRead, dbWrite, redis)
+	ledgerPendingBalanceUseCase := NewLedgerPendingBalanceUseCase(dbRead, dbWrite)
 
 	return &ledgerPaymentUseCase{
-		dbRead:                      dbRead,
-		dbWrite:                     dbWrite,
 		ledgerPaymentRepository:     ledgerPaymentRepository,
 		ledgerWalletRepository:      ledgerWalletRepository,
 		ledgerTransactionRepository: ledgerTransactionRepository,
 		ledgerWalletUseCase:         ledgerWalletUseCase,
+		ledgerPendingBalanceUseCase: ledgerPendingBalanceUseCase,
 	}
 }
 
@@ -90,6 +90,8 @@ func (u *ledgerPaymentUseCase) CreatePayment(sqlTransaction *sqlx.Tx, request *r
 	payment := &models.LedgerPayment{}
 	redifu.InitRecord(payment)
 
+	uuid7, _ := uuid.NewV7()
+	payment.UUID = uuid7.String()
 	payment.LedgerAccountUUID = request.LedgerAccountUUID
 	payment.LedgerWalletUUID = wallet.UUID
 	payment.InvoiceNumber = request.InvoiceNumber
@@ -156,6 +158,9 @@ func (u *ledgerPaymentUseCase) ConfirmPayment(sqlTransaction *sqlx.Tx, request *
 	transaction := &models.LedgerTransaction{}
 	redifu.InitRecord(transaction)
 
+	uuid7, _ := uuid.NewV7()
+
+	transaction.UUID = uuid7.String()
 	transaction.TransactionType = models.TransactionTypePayment
 	transaction.LedgerPaymentUUID = payment.UUID
 	transaction.LedgerWalletUUID = payment.LedgerWalletUUID
@@ -184,7 +189,13 @@ func (u *ledgerPaymentUseCase) ConfirmPayment(sqlTransaction *sqlx.Tx, request *
 		return nil, errorLog
 	}
 
-	// 7. Return updated payment
+	// 7. Set Ledger Pending Balance, will be used for settlement if successful
+	_, errorLog = u.ledgerPendingBalanceUseCase.SetPendingBalance(sqlTransaction, payment.LedgerAccountUUID, payment.LedgerWalletUUID, payment.LedgerSettlementUUID, "", payment.Amount)
+	if errorLog != nil {
+		return nil, errorLog
+	}
+
+	// 8. Return updated payment
 	return payment, nil
 }
 

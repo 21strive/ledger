@@ -47,6 +47,7 @@ type LedgerSettlementRepositoryInterface interface {
 	GetByLedgerAccountUUID(ledgerAccountUUID string) ([]*models.LedgerSettlement, *models.ErrorLog)
 	GetByStatus(status string) ([]*models.LedgerSettlement, *models.ErrorLog)
 	GetByLedgerAccountUUIDAndStatus(ledgerAccountUUID string, status string) ([]*models.LedgerSettlement, *models.ErrorLog)
+	GetByUUIDs(uuids []string) ([]*models.LedgerSettlement, *models.ErrorLog)
 }
 
 type ledgerSettlementRepository struct {
@@ -433,6 +434,55 @@ func (r *ledgerSettlementRepository) GetByLedgerAccountUUIDAndStatus(ledgerAccou
 	`
 
 	err := r.dbRead.Select(&ledgerSettlements, sqlQuery, ledgerAccountUUID, status)
+	if err != nil {
+		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		return nil, logData
+	}
+
+	return ledgerSettlements, nil
+}
+
+func (r *ledgerSettlementRepository) GetByUUIDs(uuids []string) ([]*models.LedgerSettlement, *models.ErrorLog) {
+
+	if len(uuids) == 0 {
+		return []*models.LedgerSettlement{}, nil
+	}
+
+	// Build quoted string for IN clause
+	quotedUUIDs := make([]string, len(uuids))
+	for i, uuid := range uuids {
+		quotedUUIDs[i] = fmt.Sprintf("'%s'", uuid)
+	}
+
+	ledgerSettlementUUIDsString := strings.Join(quotedUUIDs, ",")
+
+	var ledgerSettlements []*models.LedgerSettlement
+
+	sqlQuery := fmt.Sprintf(`
+		SELECT
+			ls.uuid,
+			ls.randid,
+			ls.created_at,
+			ls.updated_at,
+			ls.ledger_account_uuid,
+			ls.batch_number,
+			ls.settlement_date,
+			ls.real_settlement_date,
+			ls.currency,
+			ls.gross_amount,
+			ls.net_amount,
+			ls.fee_amount,
+			ls.bank_name,
+			ls.bank_account_number,
+			ls.account_type,
+			ls.status
+		FROM
+			ledger_settlements ls
+		WHERE
+			ls.uuid IN (%s)
+	`, ledgerSettlementUUIDsString)
+
+	err := r.dbRead.Select(&ledgerSettlements, sqlQuery)
 	if err != nil {
 		logData := helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
 		return nil, logData
