@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	github.com/21strive/redifu v0.13.2
 	github.com/google/uuid v1.6.0
+	github.com/guregu/null/v6 v6.0.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/redis/go-redis/v9 v9.7.0

@@ -5,6 +5,7 @@ import (
 	"github.com/faizauthar12/ledger/models"
 	"github.com/faizauthar12/ledger/repositories"
 	"github.com/google/uuid"
+	"github.com/guregu/null/v6"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -41,8 +42,8 @@ func (u *ledgerPendingBalanceUseCase) SetPendingBalance(sqlTransaction *sqlx.Tx,
 	ledgerPendingBalance.LedgerAccountUUID = ledgerAccountUUID
 	ledgerPendingBalance.Amount = amount
 	ledgerPendingBalance.LedgerWalletUUID = walletUUID
-	ledgerPendingBalance.LedgerSettlementUUID = settlementUUID
-	ledgerPendingBalance.LedgerDisbursementUUID = disbursementUUID
+	ledgerPendingBalance.LedgerSettlementUUID = null.StringFrom(settlementUUID)
+	ledgerPendingBalance.LedgerDisbursementUUID = null.StringFrom(disbursementUUID)
 
 	errorLog := u.ledgerPendingBalanceRepository.Insert(sqlTransaction, ledgerPendingBalance)
 	if errorLog != nil {
