@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/faizauthar12/ledger/models"
-	"github.com/faizauthar12/ledger/requests"
-	"github.com/faizauthar12/ledger/utils/helper"
+	"github.com/21strive/ledger/models"
+	"github.com/21strive/ledger/requests"
+	"github.com/21strive/ledger/utils/helper"
 	"github.com/jmoiron/sqlx"
 )
 

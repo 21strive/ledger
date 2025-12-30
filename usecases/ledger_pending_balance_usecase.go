@@ -1,9 +1,9 @@
 package usecases
 
 import (
+	"github.com/21strive/ledger/models"
+	"github.com/21strive/ledger/repositories"
 	"github.com/21strive/redifu"
-	"github.com/faizauthar12/ledger/models"
-	"github.com/faizauthar12/ledger/repositories"
 	"github.com/google/uuid"
 	"github.com/guregu/null/v6"
 	"github.com/jmoiron/sqlx"

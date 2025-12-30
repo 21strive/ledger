@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/faizauthar12/ledger/models"
-	"github.com/faizauthar12/ledger/utils/helper"
+	"github.com/21strive/ledger/models"
+	"github.com/21strive/ledger/utils/helper"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 )

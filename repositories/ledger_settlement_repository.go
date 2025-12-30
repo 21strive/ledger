@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/faizauthar12/ledger/models"
-	"github.com/faizauthar12/ledger/utils/helper"
+	"github.com/21strive/ledger/models"
+	"github.com/21strive/ledger/utils/helper"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -280,7 +280,7 @@ func (r *ledgerSettlementRepository) GetByUUID(uuid string) (*models.LedgerSettl
 
 func (r *ledgerSettlementRepository) GetByBatchNumber(batchNumber string) (*models.LedgerSettlement, *models.ErrorLog) {
 
-	ledgerSettlement :=&models.LedgerSettlement{}
+	ledgerSettlement := &models.LedgerSettlement{}
 
 	sqlQuery := `
 		SELECT

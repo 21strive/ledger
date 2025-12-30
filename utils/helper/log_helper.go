@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/faizauthar12/ledger/models"
+	"github.com/21strive/ledger/models"
 
 	"github.com/sirupsen/logrus"
 )

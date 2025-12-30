@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/21strive/ledger/models"
+	"github.com/21strive/ledger/repositories"
+	"github.com/21strive/ledger/responses"
 	"github.com/21strive/redifu"
-	"github.com/faizauthar12/ledger/models"
-	"github.com/faizauthar12/ledger/repositories"
-	"github.com/faizauthar12/ledger/responses"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"

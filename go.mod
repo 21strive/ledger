@@ -1,4 +1,4 @@
-module github.com/faizauthar12/ledger
+module github.com/21strive/ledger
 
 go 1.25.1
 
