@@ -13,21 +13,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var ledgerAccountTableSchema = `
-	CREATE TABLE IF NOT EXISTS ledger_accounts (
-	    uuid VARCHAR(255) PRIMARY KEY,
-		randid VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		name VARCHAR(255) NOT NULL,
-		email VARCHAR(255) UNIQUE NOT NULL
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_ledger_accounts_uuid ON ledger_accounts(uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_accounts_randid ON ledger_accounts(randid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_accounts_email ON ledger_accounts(email);
-`
-
 type LedgerAccountRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerAccount) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerAccount) *models.ErrorLog
@@ -44,14 +29,6 @@ func NewLedgerAccountRepository(
 	dbWrite *sqlx.DB,
 	redis redis.UniversalClient,
 ) LedgerAccountRepositoryInterface {
-
-	// create the table if not exists
-	_, err := dbWrite.Exec(ledgerAccountTableSchema)
-	if err != nil {
-		helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		panic(err)
-	}
-
 	return &ledgerAccountRepository{
 		dbRead:  dbRead,
 		dbWrite: dbWrite,

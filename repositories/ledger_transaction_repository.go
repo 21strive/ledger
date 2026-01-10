@@ -13,29 +13,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-var ledgerTransactionRepositorySchema = `
-	CREATE TABLE IF NOT EXISTS ledger_transactions (
-	    uuid VARCHAR(255) PRIMARY KEY,
-		randid VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		transaction_type VARCHAR(50) NOT NULL,
-		ledger_payment_uuid VARCHAR(255) NULL,
-		ledger_settlement_uuid VARCHAR(255) NULL,
-		ledger_wallet_uuid VARCHAR(255) NOT NULL,
-		ledger_disbursement_uuid VARCHAR(255) NULL,
-		amount BIGINT NOT NULL,
-		description TEXT NULL
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_uuid ON ledger_transactions(uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_randid ON ledger_transactions(randid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_transaction_type ON ledger_transactions(transaction_type);
-	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_ledger_payment_uuid ON ledger_transactions(ledger_payment_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_ledger_settlement_uuid ON ledger_transactions(ledger_settlement_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_transactions_ledger_wallet_uuid ON ledger_transactions(ledger_wallet_uuid);
-`
-
 type LedgerTransactionRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerTransaction) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerTransaction) *models.ErrorLog
@@ -56,14 +33,6 @@ func NewLedgerTransactionRepository(
 	dbRead *sqlx.DB,
 	dbWrite *sqlx.DB,
 ) LedgerTransactionRepositoryInterface {
-
-	// create the table if not exists
-	_, err := dbWrite.Exec(ledgerTransactionRepositorySchema)
-	if err != nil {
-		helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		panic(err)
-	}
-
 	return &ledgerTransactionRepository{
 		dbRead:  dbRead,
 		dbWrite: dbWrite,

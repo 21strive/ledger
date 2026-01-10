@@ -12,36 +12,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-var ledgerDisbursementRepositorySchema = `
-	CREATE TABLE IF NOT EXISTS ledger_disbursements (
-	    uuid VARCHAR(255) PRIMARY KEY,
-		randid VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		ledger_account_uuid VARCHAR(255) NOT NULL,
-		ledger_wallet_uuid VARCHAR(255) NOT NULL,
-		ledger_account_bank_uuid VARCHAR(255) NOT NULL,
-		amount BIGINT NOT NULL,
-		currency VARCHAR(10) NOT NULL,
-		bank_name VARCHAR(255) NOT NULL,
-		bank_account_number VARCHAR(255) NOT NULL,
-		gateway_request_id VARCHAR(255) NULL,
-		gateway_reference_number VARCHAR(255) NULL,
-		requested_at TIMESTAMP NOT NULL,
-		processed_at TIMESTAMP NULL,
-		completed_at TIMESTAMP NULL,
-		status VARCHAR(20) NOT NULL,
-		failure_reason TEXT NULL
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_ledger_disbursements_uuid ON ledger_disbursements(uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_disbursements_randid ON ledger_disbursements(randid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_disbursements_ledger_account_uuid ON ledger_disbursements(ledger_account_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_disbursements_ledger_wallet_uuid ON ledger_disbursements(ledger_wallet_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_disbursements_status ON ledger_disbursements(status);
-	CREATE INDEX IF NOT EXISTS idx_ledger_disbursements_gateway_request_id ON ledger_disbursements(gateway_request_id);
-`
-
 type LedgerDisbursementRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerDisbursement) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerDisbursement) *models.ErrorLog
@@ -62,13 +32,6 @@ func NewLedgerDisbursementRepository(
 	dbRead *sqlx.DB,
 	dbWrite *sqlx.DB,
 ) LedgerDisbursementRepositoryInterface {
-
-	// create the table if not exists
-	_, err := dbWrite.Exec(ledgerDisbursementRepositorySchema)
-	if err != nil {
-		helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		panic(err)
-	}
 
 	return &ledgerDisbursementRepository{
 		dbRead:  dbRead,

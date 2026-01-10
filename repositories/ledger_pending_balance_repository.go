@@ -11,24 +11,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-var ledgerPendingBalanceRepositorySchema = `
-	CREATE TABLE IF NOT EXISTS ledger_pending_balances (
-	    uuid VARCHAR(255) PRIMARY KEY,
-		randid VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		ledger_account_uuid VARCHAR(255) NOT NULL,
-	    ledger_wallet_uuid VARCHAR(255) NOT NULL,
-		amount BIGINT NOT NULL,
-		ledger_settlement_uuid VARCHAR(255),
-		ledger_disbursement_uuid VARCHAR(255)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_ledger_pending_balances_uuid ON ledger_pending_balances(uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_pending_balances_randid ON ledger_pending_balances(randid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_pending_balances_ledger_account_uuid ON ledger_pending_balances(ledger_account_uuid);
-`
-
 type LedgerPendingBalanceRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerPendingBalance) *models.ErrorLog
 	Delete(sqlTransaction *sqlx.Tx, data *models.LedgerPendingBalance) *models.ErrorLog
@@ -44,13 +26,6 @@ func NewLedgerPendingBalanceRepository(
 	dbRead *sqlx.DB,
 	dbWrite *sqlx.DB,
 ) LedgerPendingBalanceRepositoryInterface {
-
-	// create the table if not exists
-	_, err := dbWrite.Exec(ledgerPendingBalanceRepositorySchema)
-	if err != nil {
-		panic(err)
-	}
-
 	return &ledgerPendingBalanceRepository{
 		dbRead:  dbRead,
 		dbWrite: dbWrite,

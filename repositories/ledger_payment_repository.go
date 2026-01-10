@@ -12,49 +12,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-var ledgerPaymentRepositorySchema = `
-	CREATE TABLE IF NOT EXISTS ledger_payments (
-	    uuid VARCHAR(255) PRIMARY KEY,
-		randid VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-		-- Relationships
-		ledger_account_uuid VARCHAR(255) NOT NULL,
-		ledger_wallet_uuid VARCHAR(255) NOT NULL,
-		ledger_settlement_uuid VARCHAR(255) NULL,
-
-		-- Invoice & Amount
-		invoice_number VARCHAR(255) NOT NULL,
-		amount BIGINT NOT NULL,
-		currency VARCHAR(10) NOT NULL DEFAULT 'IDR',
-
-		-- Payment Info
-		payment_method VARCHAR(100) NULL,
-		payment_date TIMESTAMP NULL,
-		expires_at TIMESTAMP NOT NULL,
-
-		-- Gateway References (agnostic)
-		gateway_request_id VARCHAR(255) NOT NULL,
-		gateway_token_id VARCHAR(255) NOT NULL,
-		gateway_payment_url TEXT NOT NULL,
-		gateway_reference_number VARCHAR(255) NULL,
-
-		-- Status
-		status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_uuid ON ledger_payments(uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_randid ON ledger_payments(randid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_account_uuid ON ledger_payments(ledger_account_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_wallet_uuid ON ledger_payments(ledger_wallet_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_ledger_settlement_uuid ON ledger_payments(ledger_settlement_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_invoice_number ON ledger_payments(invoice_number);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_gateway_request_id ON ledger_payments(gateway_request_id);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_status ON ledger_payments(status);
-	CREATE INDEX IF NOT EXISTS idx_ledger_payments_expires_at ON ledger_payments(expires_at);
-`
-
 type LedgerPaymentRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerPayment) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerPayment) *models.ErrorLog
@@ -78,14 +35,6 @@ func NewLedgerPaymentRepository(
 	dbRead *sqlx.DB,
 	dbWrite *sqlx.DB,
 ) LedgerPaymentRepositoryInterface {
-
-	// create the table if not exists
-	_, err := dbWrite.Exec(ledgerPaymentRepositorySchema)
-	if err != nil {
-		helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		panic(err)
-	}
-
 	return &ledgerPaymentRepository{
 		dbRead:  dbRead,
 		dbWrite: dbWrite,

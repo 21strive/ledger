@@ -12,23 +12,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-var ledgerAccountBankRepositorySchema = `
-	CREATE TABLE IF NOT EXISTS ledger_account_banks (
-	    uuid VARCHAR(255) PRIMARY KEY,
-		randid VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		ledger_account_uuid VARCHAR(255) NOT NULL,
-		bank_account_number VARCHAR(255) NOT NULL,
-		bank_name VARCHAR(255) NOT NULL
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_ledger_account_banks_uuid ON ledger_account_banks(uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_account_banks_randid ON ledger_account_banks(randid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_account_banks_ledger_account_uuid ON ledger_account_banks(ledger_account_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_account_banks_bank_account_number ON ledger_account_banks(bank_account_number);
-`
-
 type LedgerAccountBankRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerAccountBank) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerAccountBank) *models.ErrorLog
@@ -45,14 +28,6 @@ func NewLedgerAccountBankRepository(
 	dbRead *sqlx.DB,
 	dbWrite *sqlx.DB,
 ) LedgerAccountBankRepositoryInterface {
-
-	// create the table if not exists
-	_, err := dbWrite.Exec(ledgerAccountBankRepositorySchema)
-	if err != nil {
-		helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		panic(err)
-	}
-
 	return &ledgerAccountBankRepository{
 		dbRead:  dbRead,
 		dbWrite: dbWrite,

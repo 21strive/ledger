@@ -12,33 +12,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-var ledgerSettlementRepositorySchema = `
-	CREATE TABLE IF NOT EXISTS ledger_settlements (
-	    uuid VARCHAR(255) PRIMARY KEY,
-		randid VARCHAR(255) UNIQUE NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		ledger_account_uuid VARCHAR(255) NOT NULL,
-		batch_number VARCHAR(255) UNIQUE NOT NULL,
-		settlement_date TIMESTAMP NOT NULL,
-		real_settlement_date TIMESTAMP NULL,
-		currency VARCHAR(10) NOT NULL,
-		gross_amount BIGINT NOT NULL,
-		net_amount BIGINT NOT NULL,
-		fee_amount BIGINT NOT NULL,
-		bank_name VARCHAR(255) NOT NULL,
-		bank_account_number VARCHAR(255) NOT NULL,
-		account_type VARCHAR(20) NOT NULL,
-		status VARCHAR(20) NOT NULL
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_ledger_settlements_uuid ON ledger_settlements(uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_settlements_randid ON ledger_settlements(randid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_settlements_batch_number ON ledger_settlements(batch_number);
-	CREATE INDEX IF NOT EXISTS idx_ledger_settlements_ledger_account_uuid ON ledger_settlements(ledger_account_uuid);
-	CREATE INDEX IF NOT EXISTS idx_ledger_settlements_status ON ledger_settlements(status);
-`
-
 type LedgerSettlementRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerSettlement) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerSettlement) *models.ErrorLog
@@ -59,14 +32,6 @@ func NewLedgerSettlementRepository(
 	dbRead *sqlx.DB,
 	dbWrite *sqlx.DB,
 ) LedgerSettlementRepositoryInterface {
-
-	// create the table if not exists
-	_, err := dbWrite.Exec(ledgerSettlementRepositorySchema)
-	if err != nil {
-		helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
-		panic(err)
-	}
-
 	return &ledgerSettlementRepository{
 		dbRead:  dbRead,
 		dbWrite: dbWrite,
