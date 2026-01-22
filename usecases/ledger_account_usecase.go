@@ -16,6 +16,7 @@ import (
 type LedgerAccountUseCaseInterface interface {
 	CreateLedgerAccount(sqlTransaction *sqlx.Tx, name, email string) (*models.LedgerAccount, *models.ErrorLog)
 	GetLedgerAccountByEmail(email string) (*models.LedgerAccount, *models.ErrorLog)
+	GetLedgerAccountByExternalId(externalId string) (*models.LedgerAccount, *models.ErrorLog)
 }
 
 type ledgerAccountUseCase struct {
@@ -69,6 +70,16 @@ func (u *ledgerAccountUseCase) CreateLedgerAccount(sqlTransaction *sqlx.Tx, name
 func (u *ledgerAccountUseCase) GetLedgerAccountByEmail(email string) (*models.LedgerAccount, *models.ErrorLog) {
 
 	ledgerAccount, errorLog := u.LedgerAccountRepository.GetByEmail(email)
+	if errorLog != nil {
+		return nil, errorLog
+	}
+
+	return ledgerAccount, nil
+}
+
+func (u *ledgerAccountUseCase) GetLedgerAccountByExternalId(externalId string) (*models.LedgerAccount, *models.ErrorLog) {
+
+	ledgerAccount, errorLog := u.LedgerAccountRepository.GetByExternalId(externalId)
 	if errorLog != nil {
 		return nil, errorLog
 	}
