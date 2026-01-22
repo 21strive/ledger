@@ -16,7 +16,7 @@ import (
 type LedgerAccountRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerAccount) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerAccount) *models.ErrorLog
-	GetByEmail(email string) (*models.LedgerAccount, *models.ErrorLog)
+	GetByExternalId(externalId string) (*models.LedgerAccount, *models.ErrorLog)
 }
 
 type ledgerAccountRepository struct {
@@ -61,8 +61,8 @@ func (r *ledgerAccountRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 	// name
 	queryBuilder("name", data.Name)
 
-	// email
-	queryBuilder("email", data.Email)
+	// external_id
+	queryBuilder("external_id", data.ExternalId)
 
 	// Generate placeholders for PostgreSQL ($1, $2, ...)
 	rawSqlPlaceholders := []string{}
@@ -112,8 +112,8 @@ func (r *ledgerAccountRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	// name
 	queryBuilder("name", data.Name)
 
-	// email
-	queryBuilder("email", data.Email)
+	// external_id
+	queryBuilder("external_id", data.ExternalId)
 
 	// Add condition for WHERE clause
 	// uuid always the last $n
@@ -132,7 +132,7 @@ func (r *ledgerAccountRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	return nil
 }
 
-func (r *ledgerAccountRepository) GetByEmail(email string) (*models.LedgerAccount, *models.ErrorLog) {
+func (r *ledgerAccountRepository) GetByExternalId(externalId string) (*models.LedgerAccount, *models.ErrorLog) {
 
 	ledgerAccount := &models.LedgerAccount{}
 
@@ -143,11 +143,11 @@ func (r *ledgerAccountRepository) GetByEmail(email string) (*models.LedgerAccoun
 			la.created_at,
 			la.updated_at,
 			la.name,
-			la.email
+			la.external_id
 		FROM ledger_accounts la
 		WHERE la.email = $1`
 
-	err := r.dbRead.QueryRowx(sqlQuery, email).StructScan(ledgerAccount)
+	err := r.dbRead.QueryRowx(sqlQuery, externalId).StructScan(ledgerAccount)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {
