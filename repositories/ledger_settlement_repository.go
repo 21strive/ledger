@@ -201,7 +201,7 @@ func (r *ledgerSettlementRepository) Update(sqlTransaction *sqlx.Tx, data *model
 
 func (r *ledgerSettlementRepository) GetByUUID(uuid string) (*models.LedgerSettlement, *models.ErrorLog) {
 
-	var ledgerSettlement *models.LedgerSettlement
+	ledgerSettlement := &models.LedgerSettlement{}
 
 	sqlQuery := `
 		SELECT
