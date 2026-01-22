@@ -228,7 +228,7 @@ func (r *ledgerSettlementRepository) GetByUUID(uuid string) (*models.LedgerSettl
 		LIMIT 1
 	`
 
-	err := r.dbRead.QueryRowx(sqlQuery, uuid).StructScan(&ledgerSettlement)
+	err := r.dbRead.QueryRowx(sqlQuery, uuid).StructScan(ledgerSettlement)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {
