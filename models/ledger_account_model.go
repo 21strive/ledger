@@ -6,6 +6,7 @@ import (
 
 type LedgerAccount struct {
 	*redifu.Record
-	Name  string `json:"name" db:"name"`
-	Email string `json:"email" db:"email"`
+	Name       string `json:"name" db:"name"`
+	Email      string `json:"email" db:"email"`
+	ExternalId string `json:"external_id" db:"external_id"`
 }

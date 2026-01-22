@@ -17,6 +17,7 @@ type LedgerAccountRepositoryInterface interface {
 	Insert(sqlTransaction *sqlx.Tx, data *models.LedgerAccount) *models.ErrorLog
 	Update(sqlTransaction *sqlx.Tx, data *models.LedgerAccount) *models.ErrorLog
 	GetByEmail(email string) (*models.LedgerAccount, *models.ErrorLog)
+	GetByExternalId(externalId string) (*models.LedgerAccount, *models.ErrorLog)
 }
 
 type ledgerAccountRepository struct {
@@ -63,6 +64,9 @@ func (r *ledgerAccountRepository) Insert(sqlTransaction *sqlx.Tx, data *models.L
 
 	// email
 	queryBuilder("email", data.Email)
+
+	// external_id
+	queryBuilder("external_id", data.ExternalId)
 
 	// Generate placeholders for PostgreSQL ($1, $2, ...)
 	rawSqlPlaceholders := []string{}
@@ -115,6 +119,9 @@ func (r *ledgerAccountRepository) Update(sqlTransaction *sqlx.Tx, data *models.L
 	// email
 	queryBuilder("email", data.Email)
 
+	// external_id
+	queryBuilder("external_id", data.ExternalId)
+
 	// Add condition for WHERE clause
 	// uuid always the last $n
 	queryBuilder("uuid", data.UUID)
@@ -143,11 +150,43 @@ func (r *ledgerAccountRepository) GetByEmail(email string) (*models.LedgerAccoun
 			la.created_at,
 			la.updated_at,
 			la.name,
-			la.email
+			la.email,
+			la.external_id
 		FROM ledger_accounts la
 		WHERE la.email = $1`
 
 	err := r.dbRead.QueryRowx(sqlQuery, email).StructScan(ledgerAccount)
+	if err != nil {
+		var logData *models.ErrorLog
+		if err == sql.ErrNoRows {
+			logData = helper.WriteLog(err, http.StatusNotFound, "Ledger Account not found")
+		} else {
+			logData = helper.WriteLog(err, http.StatusInternalServerError, helper.DefaultStatusText[http.StatusInternalServerError])
+		}
+
+		return nil, logData
+	}
+
+	return ledgerAccount, nil
+}
+
+func (r *ledgerAccountRepository) GetByExternalId(externalId string) (*models.LedgerAccount, *models.ErrorLog) {
+
+	ledgerAccount := &models.LedgerAccount{}
+
+	sqlQuery := `
+		SELECT
+			la.uuid,
+			la.randid,
+			la.created_at,
+			la.updated_at,
+			la.name,
+			la.email,
+			la.external_id
+		FROM ledger_accounts la
+		WHERE la.external_id = $1`
+
+	err := r.dbRead.QueryRowx(sqlQuery, externalId).StructScan(ledgerAccount)
 	if err != nil {
 		var logData *models.ErrorLog
 		if err == sql.ErrNoRows {

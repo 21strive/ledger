@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS ledger_accounts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL
+    email VARCHAR(255) UNIQUE NOT NULL,
+    external_id VARCHAR(255) UNIQUE NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_ledger_accounts_uuid ON ledger_accounts(uuid);
