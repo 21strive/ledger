@@ -14,7 +14,7 @@ import (
 )
 
 type LedgerAccountUseCaseInterface interface {
-	CreateLedgerAccount(sqlTransaction *sqlx.Tx, name, email string) (*models.LedgerAccount, *models.ErrorLog)
+	CreateLedgerAccount(sqlTransaction *sqlx.Tx, name, email, externalId string) (*models.LedgerAccount, *models.ErrorLog)
 	GetLedgerAccountByEmail(email string) (*models.LedgerAccount, *models.ErrorLog)
 	GetLedgerAccountByExternalId(externalId string) (*models.LedgerAccount, *models.ErrorLog)
 }
@@ -36,7 +36,7 @@ func NewLedgerAccountUseCase(
 	}
 }
 
-func (u *ledgerAccountUseCase) CreateLedgerAccount(sqlTransaction *sqlx.Tx, name, email string) (*models.LedgerAccount, *models.ErrorLog) {
+func (u *ledgerAccountUseCase) CreateLedgerAccount(sqlTransaction *sqlx.Tx, name, email, extenralId string) (*models.LedgerAccount, *models.ErrorLog) {
 
 	if name == "" {
 		errorMessage := "name is required"
@@ -58,6 +58,7 @@ func (u *ledgerAccountUseCase) CreateLedgerAccount(sqlTransaction *sqlx.Tx, name
 	ledgerAccount.UUID = uuid7.String()
 	ledgerAccount.Name = name
 	ledgerAccount.Email = email
+	ledgerAccount.ExternalId = extenralId
 
 	errorLog := u.LedgerAccountRepository.Insert(sqlTransaction, ledgerAccount)
 	if errorLog != nil {
