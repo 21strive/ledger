@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 
 	"github.com/21strive/doku/app/requests"
@@ -56,7 +57,7 @@ func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email
 		Name:  name,
 	})
 	if dokuErr != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to create DOKU sub account", dokuErr.Err)
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to create DOKU sub account", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
 	}
 
 	ledger := domain.NewLedger(accountID, response.ID.String, currency)
