@@ -4,13 +4,13 @@ import (
 	"context"
 	"time"
 
-	"github.com/21strive/ledger/domain/domainerr"
+	"github.com/21strive/ledger/ledgererr"
 	"github.com/google/uuid"
 )
 
 var (
-	ErrLedgerNotFound                 = domainerr.NewError(404101, "ledger not found", nil)
-	ErrReconciliationDiscrepancyFound = domainerr.NewError(409101, "reconciliation discrepancy found", nil)
+	ErrLedgerNotFound                 = ledgererr.NewError(404101, "ledger not found", nil)
+	ErrReconciliationDiscrepancyFound = ledgererr.NewError(409101, "reconciliation discrepancy found", nil)
 )
 
 const (
@@ -19,11 +19,14 @@ const (
 )
 
 type Wallet struct {
+	// Internal expected balances based on our transactions
 	ExpectedPendingBalance   Money
-	PendingBalance           Money
 	ExpectedAvailableBalance Money
-	AvailableBalance         Money
-	Currency                 Currency
+
+	// Actual balances from DOKU
+	PendingBalance   Money
+	AvailableBalance Money
+	Currency         Currency
 }
 
 type Money struct {
@@ -187,10 +190,6 @@ func (l *Ledger) ReconcileBalanceWithVerification(
 
 	l.Wallet.PendingBalance.Amount = dokuPending
 	l.Wallet.AvailableBalance.Amount = dokuAvailable
-
-	// Reset expected balances to match actual after sync
-	l.Wallet.ExpectedPendingBalance.Amount = dokuPending
-	l.Wallet.ExpectedAvailableBalance.Amount = dokuAvailable
 
 	now := time.Now()
 	l.LastSyncedAt = &now

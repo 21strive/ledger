@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // ReconciliationDiscrepancy represents a mismatch between expected and actual
 type ReconciliationDiscrepancy struct {
@@ -13,12 +16,10 @@ type ReconciliationDiscrepancy struct {
 	ActualAvailable   int64
 	PendingDiff       int64 // Actual - Expected
 	AvailableDiff     int64
-	Severity          DiscrepancySeverity
-	Status            DiscrepancyStatus
 	DetectedAt        time.Time
 	ResolvedAt        *time.Time
 	ResolutionNotes   string
-	RelatedTxIDs      []string // Transactions that might be affected
+	// RelatedTxIDs      []string // Transactions that might be affected
 }
 
 type DiscrepancyType string
@@ -30,3 +31,10 @@ const (
 	DiscrepancyTypeUnexpectedCredit  DiscrepancyType = "UNEXPECTED_CREDIT"
 	DiscrepancyTypeUnexpectedDebit   DiscrepancyType = "UNEXPECTED_DEBIT"
 )
+
+type ReconciliationDiscrepancyRepository interface {
+	Save(ctx context.Context, discrepancy *ReconciliationDiscrepancy) error
+	GetByLedgerID(ctx context.Context, ledgerID string, limit, offset int) ([]ReconciliationDiscrepancy, error)
+	GetPendingDiscrepancies(ctx context.Context, limit int) ([]ReconciliationDiscrepancy, error)
+	MarkResolved(ctx context.Context, id string, notes string) error
+}

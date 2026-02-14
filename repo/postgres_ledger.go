@@ -9,10 +9,10 @@ import (
 )
 
 type PostgresLedgerRepository struct {
-	db *sql.DB
+	db DBTX
 }
 
-func NewPostgresLedgerRepository(db *sql.DB) *PostgresLedgerRepository {
+func NewPostgresLedgerRepository(db DBTX) *PostgresLedgerRepository {
 	return &PostgresLedgerRepository{db: db}
 }
 

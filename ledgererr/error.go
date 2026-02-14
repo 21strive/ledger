@@ -1,4 +1,4 @@
-package domainerr
+package ledgererr
 
 import (
 	"errors"
@@ -48,7 +48,7 @@ func (err AppError) Unwrap() error {
 	return err.OriginError
 }
 
-func IsDomainError(target error, err error) bool {
+func IsAppError(target error, err error) bool {
 	var appErr AppError
 	if errors.As(err, &appErr) {
 		return errors.Is(appErr.OriginError, target)
@@ -67,4 +67,7 @@ func IsErrorCode(code ErrorCode, err error) bool {
 const (
 	CodeInternal ErrorCode = 500
 	CodeNotFound ErrorCode = 404
+
+	CodeDatabaseError ErrorCode = 50001
+	CodeDokuAPIError  ErrorCode = 50002
 )

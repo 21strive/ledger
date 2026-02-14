@@ -1,7 +1,9 @@
 package repo
 
-import "github.com/21strive/ledger/domain/domainerr"
+import "github.com/21strive/ledger/ledgererr"
 
 var (
-	ErrNotFound = domainerr.NewError(domainerr.CodeNotFound, "record not found", nil)
+	ErrNotFound        = ledgererr.NewError(ledgererr.CodeNotFound, "record not found", nil)
+	ErrFailedInsertSQL = ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to insert record", nil)
+	ErrFailedQuerySQL  = ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query records", nil)
 )
