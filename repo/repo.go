@@ -32,6 +32,6 @@ func (p *RepositoryProvider) ReconciliationLog() domain.ReconciliationLogReposit
 	return NewPostgresReconciliationLogRepository(p.db)
 }
 
-func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
-	return NewPostgresReconciliationDiscrepancyRepository(p.db)
-}
+// func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
+// 	return NewPostgresReconciliationDiscrepancyRepository(p.db)
+// }
