@@ -9,7 +9,6 @@ import (
 type Tx interface {
 	Ledger() domain.LedgerRepository
 	ReconciliationLog() domain.ReconciliationLogRepository
-	ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository
 }
 
 type postgresTx struct {
