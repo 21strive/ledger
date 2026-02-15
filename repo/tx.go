@@ -9,6 +9,9 @@ import (
 type Tx interface {
 	Ledger() domain.LedgerRepository
 	ReconciliationLog() domain.ReconciliationLogRepository
+	ProductTransaction() domain.ProductTransactionRepository
+	PaymentRequest() domain.PaymentRequestRepository
+	FeeConfig() domain.FeeConfigRepository
 }
 
 type postgresTx struct {
@@ -21,4 +24,16 @@ func (p *postgresTx) Ledger() domain.LedgerRepository {
 
 func (p *postgresTx) ReconciliationLog() domain.ReconciliationLogRepository {
 	return NewPostgresReconciliationLogRepository(p.tx)
+}
+
+func (p *postgresTx) ProductTransaction() domain.ProductTransactionRepository {
+	return NewPostgresProductTransactionRepository(p.tx)
+}
+
+func (p *postgresTx) PaymentRequest() domain.PaymentRequestRepository {
+	return NewPostgresPaymentRequestRepository(p.tx)
+}
+
+func (p *postgresTx) FeeConfig() domain.FeeConfigRepository {
+	return NewPostgresFeeConfigRepository(p.tx)
 }

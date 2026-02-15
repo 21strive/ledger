@@ -32,6 +32,18 @@ func (p *RepositoryProvider) ReconciliationLog() domain.ReconciliationLogReposit
 	return NewPostgresReconciliationLogRepository(p.db)
 }
 
+func (p *RepositoryProvider) ProductTransaction() domain.ProductTransactionRepository {
+	return NewPostgresProductTransactionRepository(p.db)
+}
+
+func (p *RepositoryProvider) PaymentRequest() domain.PaymentRequestRepository {
+	return NewPostgresPaymentRequestRepository(p.db)
+}
+
+func (p *RepositoryProvider) FeeConfig() domain.FeeConfigRepository {
+	return NewPostgresFeeConfigRepository(p.db)
+}
+
 // func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
 // 	return NewPostgresReconciliationDiscrepancyRepository(p.db)
 // }
