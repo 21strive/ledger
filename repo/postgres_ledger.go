@@ -18,20 +18,23 @@ func NewPostgresLedgerRepository(db DBTX) *PostgresLedgerRepository {
 
 func (r *PostgresLedgerRepository) GetByID(ctx context.Context, id string) (*domain.Ledger, error) {
 	var row struct {
-		ID               string       `db:"id"`
-		AccountID        string       `db:"account_id"`
-		DokuSubAccountID string       `db:"doku_sub_account_id"`
-		PendingBalance   int64        `db:"pending_balance"`
-		AvailableBalance int64        `db:"available_balance"`
-		Currency         string       `db:"currency"`
-		LastSyncedAt     sql.NullTime `db:"last_synced_at"`
-		CreatedAt        time.Time    `db:"created_at"`
-		UpdatedAt        time.Time    `db:"updated_at"`
+		ID                       string       `db:"id"`
+		AccountID                string       `db:"account_id"`
+		DokuSubAccountID         string       `db:"doku_sub_account_id"`
+		PendingBalance           int64        `db:"pending_balance"`
+		AvailableBalance         int64        `db:"available_balance"`
+		Currency                 string       `db:"currency"`
+		ExpectedPendingBalance   int64        `db:"expected_pending_balance"`
+		ExpectedAvailableBalance int64        `db:"expected_available_balance"`
+		LastSyncedAt             sql.NullTime `db:"last_synced_at"`
+		CreatedAt                time.Time    `db:"created_at"`
+		UpdatedAt                time.Time    `db:"updated_at"`
 	}
 
 	query := `
 		SELECT id, account_id, doku_sub_account_id, pending_balance, available_balance,
-		       currency, last_synced_at, created_at, updated_at
+		       currency, expected_pending_balance, expected_available_balance,
+		       last_synced_at, created_at, updated_at
 		FROM ledgers
 		WHERE id = $1
 	`
@@ -53,6 +56,8 @@ func (r *PostgresLedgerRepository) GetByID(ctx context.Context, id string) (*dom
 		&row.PendingBalance,
 		&row.AvailableBalance,
 		&row.Currency,
+		&row.ExpectedPendingBalance,
+		&row.ExpectedAvailableBalance,
 		&row.LastSyncedAt,
 		&row.CreatedAt,
 		&row.UpdatedAt,
@@ -79,6 +84,14 @@ func (r *PostgresLedgerRepository) GetByID(ctx context.Context, id string) (*dom
 				Amount:   row.AvailableBalance,
 				Currency: domain.Currency(row.Currency),
 			},
+			ExpectedPendingBalance: domain.Money{
+				Amount:   row.ExpectedPendingBalance,
+				Currency: domain.Currency(row.Currency),
+			},
+			ExpectedAvailableBalance: domain.Money{
+				Amount:   row.ExpectedAvailableBalance,
+				Currency: domain.Currency(row.Currency),
+			},
 			Currency: domain.Currency(row.Currency),
 		},
 		LastSyncedAt: lastSyncedAt,
@@ -93,11 +106,14 @@ func (r *PostgresLedgerRepository) Save(ctx context.Context, ledger *domain.Ledg
 	query := `
 		INSERT INTO ledgers (
 			id, account_id, doku_sub_account_id, pending_balance, available_balance,
-			currency, last_synced_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			currency, expected_pending_balance, expected_available_balance,
+			last_synced_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (id) DO UPDATE SET
 			pending_balance = EXCLUDED.pending_balance,
 			available_balance = EXCLUDED.available_balance,
+			expected_pending_balance = EXCLUDED.expected_pending_balance,
+			expected_available_balance = EXCLUDED.expected_available_balance,
 			last_synced_at = EXCLUDED.last_synced_at,
 			updated_at = EXCLUDED.updated_at
 	`
@@ -110,6 +126,8 @@ func (r *PostgresLedgerRepository) Save(ctx context.Context, ledger *domain.Ledg
 		ledger.Wallet.PendingBalance.Amount,
 		ledger.Wallet.AvailableBalance.Amount,
 		ledger.Wallet.Currency,
+		ledger.Wallet.ExpectedPendingBalance.Amount,
+		ledger.Wallet.ExpectedAvailableBalance.Amount,
 		ledger.LastSyncedAt,
 		ledger.CreatedAt,
 		ledger.UpdatedAt,
@@ -123,20 +141,23 @@ func (r *PostgresLedgerRepository) Save(ctx context.Context, ledger *domain.Ledg
 
 func (r *PostgresLedgerRepository) GetByAccountID(ctx context.Context, accountID string) (*domain.Ledger, error) {
 	var row struct {
-		ID               string       `db:"id"`
-		AccountID        string       `db:"account_id"`
-		DokuSubAccountID string       `db:"doku_sub_account_id"`
-		PendingBalance   int64        `db:"pending_balance"`
-		AvailableBalance int64        `db:"available_balance"`
-		Currency         string       `db:"currency"`
-		LastSyncedAt     sql.NullTime `db:"last_synced_at"`
-		CreatedAt        time.Time    `db:"created_at"`
-		UpdatedAt        time.Time    `db:"updated_at"`
+		ID                       string       `db:"id"`
+		AccountID                string       `db:"account_id"`
+		DokuSubAccountID         string       `db:"doku_sub_account_id"`
+		PendingBalance           int64        `db:"pending_balance"`
+		AvailableBalance         int64        `db:"available_balance"`
+		Currency                 string       `db:"currency"`
+		ExpectedPendingBalance   int64        `db:"expected_pending_balance"`
+		ExpectedAvailableBalance int64        `db:"expected_available_balance"`
+		LastSyncedAt             sql.NullTime `db:"last_synced_at"`
+		CreatedAt                time.Time    `db:"created_at"`
+		UpdatedAt                time.Time    `db:"updated_at"`
 	}
 
 	query := `
 		SELECT id, account_id, doku_sub_account_id, pending_balance, available_balance,
-		       currency, last_synced_at, created_at, updated_at
+		       currency, expected_pending_balance, expected_available_balance,
+		       last_synced_at, created_at, updated_at
 		FROM ledgers
 		WHERE account_id = $1
 	`
@@ -161,6 +182,8 @@ func (r *PostgresLedgerRepository) GetByAccountID(ctx context.Context, accountID
 		&row.PendingBalance,
 		&row.AvailableBalance,
 		&row.Currency,
+		&row.ExpectedPendingBalance,
+		&row.ExpectedAvailableBalance,
 		&row.LastSyncedAt,
 		&row.CreatedAt,
 		&row.UpdatedAt,
@@ -187,6 +210,14 @@ func (r *PostgresLedgerRepository) GetByAccountID(ctx context.Context, accountID
 				Amount:   row.AvailableBalance,
 				Currency: domain.Currency(row.Currency),
 			},
+			ExpectedPendingBalance: domain.Money{
+				Amount:   row.ExpectedPendingBalance,
+				Currency: domain.Currency(row.Currency),
+			},
+			ExpectedAvailableBalance: domain.Money{
+				Amount:   row.ExpectedAvailableBalance,
+				Currency: domain.Currency(row.Currency),
+			},
 			Currency: domain.Currency(row.Currency),
 		},
 		LastSyncedAt: lastSyncedAt,
@@ -198,20 +229,23 @@ func (r *PostgresLedgerRepository) GetByAccountID(ctx context.Context, accountID
 }
 func (r *PostgresLedgerRepository) GetByDokuSubAccountID(ctx context.Context, dokuSubAccountID string) (*domain.Ledger, error) {
 	var row struct {
-		ID               string       `db:"id"`
-		AccountID        string       `db:"account_id"`
-		DokuSubAccountID string       `db:"doku_sub_account_id"`
-		PendingBalance   int64        `db:"pending_balance"`
-		AvailableBalance int64        `db:"available_balance"`
-		Currency         string       `db:"currency"`
-		LastSyncedAt     sql.NullTime `db:"last_synced_at"`
-		CreatedAt        time.Time    `db:"created_at"`
-		UpdatedAt        time.Time    `db:"updated_at"`
+		ID                       string       `db:"id"`
+		AccountID                string       `db:"account_id"`
+		DokuSubAccountID         string       `db:"doku_sub_account_id"`
+		PendingBalance           int64        `db:"pending_balance"`
+		AvailableBalance         int64        `db:"available_balance"`
+		Currency                 string       `db:"currency"`
+		ExpectedPendingBalance   int64        `db:"expected_pending_balance"`
+		ExpectedAvailableBalance int64        `db:"expected_available_balance"`
+		LastSyncedAt             sql.NullTime `db:"last_synced_at"`
+		CreatedAt                time.Time    `db:"created_at"`
+		UpdatedAt                time.Time    `db:"updated_at"`
 	}
 
 	query := `
 		SELECT id, account_id, doku_sub_account_id, pending_balance, available_balance,
-		       currency, last_synced_at, created_at, updated_at
+		       currency, expected_pending_balance, expected_available_balance,
+		       last_synced_at, created_at, updated_at
 		FROM ledgers
 		WHERE doku_sub_account_id = $1
 	`
@@ -236,6 +270,8 @@ func (r *PostgresLedgerRepository) GetByDokuSubAccountID(ctx context.Context, do
 		&row.PendingBalance,
 		&row.AvailableBalance,
 		&row.Currency,
+		&row.ExpectedPendingBalance,
+		&row.ExpectedAvailableBalance,
 		&row.LastSyncedAt,
 		&row.CreatedAt,
 		&row.UpdatedAt,
@@ -260,6 +296,14 @@ func (r *PostgresLedgerRepository) GetByDokuSubAccountID(ctx context.Context, do
 			},
 			AvailableBalance: domain.Money{
 				Amount:   row.AvailableBalance,
+				Currency: domain.Currency(row.Currency),
+			},
+			ExpectedPendingBalance: domain.Money{
+				Amount:   row.ExpectedPendingBalance,
+				Currency: domain.Currency(row.Currency),
+			},
+			ExpectedAvailableBalance: domain.Money{
+				Amount:   row.ExpectedAvailableBalance,
 				Currency: domain.Currency(row.Currency),
 			},
 			Currency: domain.Currency(row.Currency),

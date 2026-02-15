@@ -17,7 +17,7 @@ CREATE INDEX idx_ledgers_doku_sub_account ON ledgers(doku_sub_account_id);
 CREATE INDEX idx_ledgers_last_synced ON ledgers(last_synced_at);
 
 -- Table to track discrepancies found during reconciliation
-CREATE TABLE IF NOT EXISTS ledger_reconciliation_discrepancies (
+CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
     id VARCHAR(36) PRIMARY KEY,
     ledger_id VARCHAR(36) NOT NULL,
     discrepancy_type VARCHAR(50) NOT NULL,
@@ -35,11 +35,11 @@ CREATE TABLE IF NOT EXISTS ledger_reconciliation_discrepancies (
     FOREIGN KEY (ledger_id) REFERENCES ledgers(id)
 );
 
-CREATE INDEX idx_ledger_reconciliation_discrepancies_ledger_id ON ledger_reconciliation_discrepancies(ledger_id);
-CREATE INDEX idx_ledger_reconciliation_discrepancies_detected ON ledger_reconciliation_discrepancies(detected_at DESC);
+CREATE INDEX idx_reconciliation_discrepancies_ledger_id ON reconciliation_discrepancies(ledger_id);
+CREATE INDEX idx_reconciliation_discrepancies_detected ON reconciliation_discrepancies(detected_at DESC);
 
 -- Reconciliation logs to track all reconciliation attempts and outcomes
-CREATE TABLE IF NOT EXISTS ledger_reconciliation_logs (
+CREATE TABLE IF NOT EXISTS reconciliation_logs (
     id VARCHAR(36) PRIMARY KEY,
     ledger_id VARCHAR(36) NOT NULL,
     previous_pending BIGINT NOT NULL,
