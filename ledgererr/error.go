@@ -91,7 +91,8 @@ const (
 	CodePaymentExpired              ErrorCode = 400004
 
 	// FeeConfig error codes
-	CodeFeeConfigNotFound ErrorCode = 404004
+	CodeFeeConfigNotFound         ErrorCode = 404004
+	CodeUnsupportedPaymentChannel ErrorCode = 400005
 )
 
 // Ledger errors
@@ -119,5 +120,6 @@ var (
 
 // FeeConfig errors
 var (
-	ErrFeeConfigNotFound = NewError(CodeFeeConfigNotFound, "fee config not found", nil)
+	ErrFeeConfigNotFound         = NewError(CodeFeeConfigNotFound, "fee config not found", nil)
+	ErrUnsupportedPaymentChannel = NewError(CodeUnsupportedPaymentChannel, "unsupported payment channel", nil)
 )

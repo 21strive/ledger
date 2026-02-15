@@ -145,3 +145,18 @@ func (fc *FeeCalculator) GetFeeBreakdown(sellerPrice int64, paymentChannel strin
 		Currency:     currency,
 	}
 }
+
+// HasPaymentChannel checks if the fee calculator has a DOKU fee config for the given payment channel
+func (fc *FeeCalculator) HasPaymentChannel(paymentChannel string) bool {
+	_, ok := fc.dokuFees[paymentChannel]
+	return ok
+}
+
+// SupportedPaymentChannels returns all payment channels that have fee configurations
+func (fc *FeeCalculator) SupportedPaymentChannels() []string {
+	channels := make([]string, 0, len(fc.dokuFees))
+	for channel := range fc.dokuFees {
+		channels = append(channels, channel)
+	}
+	return channels
+}

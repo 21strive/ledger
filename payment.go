@@ -73,6 +73,14 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 
 	// Calculate fees
 	feeCalc := domain.NewFeeCalculator(feeConfigs)
+
+	// Validate payment channel is supported
+	if !feeCalc.HasPaymentChannel(req.PaymentChannel) {
+		return nil, ledgererr.ErrUnsupportedPaymentChannel.WithError(
+			fmt.Errorf("payment channel %q not found in fee configs, supported: %v", req.PaymentChannel, feeCalc.SupportedPaymentChannels()),
+		)
+	}
+
 	currency := domain.Currency(req.Currency)
 	feeBreakdown := feeCalc.GetFeeBreakdown(req.SellerPrice, req.PaymentChannel, currency)
 
