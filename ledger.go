@@ -276,7 +276,7 @@ type WithdrawResponse struct {
 // 3. Call DOKU SendPayoutSubAccount FIRST (no DB changes yet)
 // 4. If DOKU fails: Return error (nothing to rollback)
 // 5. If DOKU succeeds: Debit balance + Create Disbursement in ONE transaction
-func (c *LedgerClient) Withdraw(ctx context.Context, req *WithdrawRequest) (*WithdrawResponse, error) {
+func (c *LedgerClient) Withdraw(ctx context.Context, ledgerAccountID string, req *WithdrawRequest) (*WithdrawResponse, error) {
 	// Validate request
 	if req.AccountID == "" {
 		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "account_id is required", nil)
@@ -286,7 +286,7 @@ func (c *LedgerClient) Withdraw(ctx context.Context, req *WithdrawRequest) (*Wit
 	}
 
 	// Get ledger (read-only check first)
-	ledger, err := c.repoProvider.Ledger().GetByAccountID(ctx, req.AccountID)
+	ledger, err := c.repoProvider.Ledger().GetByAccountID(ctx, ledgerAccountID)
 	if err != nil {
 		if ledgererr.IsAppError(err, repo.ErrNotFound) {
 			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
@@ -298,7 +298,9 @@ func (c *LedgerClient) Withdraw(ctx context.Context, req *WithdrawRequest) (*Wit
 	safeBalance := ledger.GetSafeDisbursableBalance()
 	if req.Amount > safeBalance {
 		c.logger.WarnContext(ctx, "Insufficient safe balance for withdrawal",
-			"account_id", req.AccountID,
+			"account_id", ledgerAccountID,
+			"ledger_id", ledger.ID,
+			"sac_id", req.AccountID,
 			"requested_amount", req.Amount,
 			"safe_balance", safeBalance,
 			"expected_available", ledger.Wallet.ExpectedAvailableBalance.Amount,
