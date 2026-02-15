@@ -80,7 +80,7 @@ func NewFeeCalculator(configs []*FeeConfig) *FeeCalculator {
 		if !cfg.IsActive {
 			continue
 		}
-		if cfg.ConfigType == FeeConfigTypePlatform && cfg.PaymentChannel == "PLATFORM" {
+		if calc.platformFee == nil && cfg.ConfigType == FeeConfigTypePlatform && cfg.PaymentChannel == "PLATFORM" {
 			calc.platformFee = cfg
 		} else if cfg.ConfigType == FeeConfigTypeDoku {
 			calc.dokuFees[cfg.PaymentChannel] = cfg

@@ -61,21 +61,21 @@ CREATE INDEX idx_reconciliation_logs_ledger_created ON reconciliation_logs(ledge
 -- ProductTransaction: BUSINESS TRANSACTION RECORD
 -- Purpose: Records WHO bought WHAT from WHOM for HOW MUCH
 -- Status lifecycle: PENDING → COMPLETED → SETTLED
---   PENDING: Created with invoice_number, waiting for payment
---   COMPLETED: User paid via DOKU (webhook received), NO balance update yet
---   SETTLED: Appears in settlement CSV, balances calculated and verified
+-- PENDING: Created with invoice_number, waiting for payment
+-- COMPLETED: User paid via DOKU (webhook received), NO balance update yet
+-- SETTLED: Appears in settlement CSV, balances calculated and verified
 --
 -- Balance Updates:
---   - Photo Sale (COMPLETED): NO balance update
---   - CSV Reconciliation (SETTLED): 
---       expected_available = Sum(seller_price + platform_fee) from our transactions
---       actual_available = DOKU GetBalance API (returns total_charged - doku_fee)
---       Both should equal: seller_price + platform_fee
---       Compare and create discrepancy if mismatch
+-- - Photo Sale (COMPLETED): NO balance update
+-- - CSV Reconciliation (SETTLED): 
+-- expected_available = Sum(seller_price + platform_fee) from our transactions
+-- actual_available = DOKU GetBalance API (returns total_charged - doku_fee)
+-- Both should equal: seller_price + platform_fee
+-- Compare and create discrepancy if mismatch
 --
 -- Metadata JSONB contains product details:
---   {"photo_id": "...", "title": "Sunset Beach", "resolution": "4K", 
---    "license_type": "Commercial", "download_url": "https://..."}
+-- {"photo_id": "...", "title": "Sunset Beach", "resolution": "4K", 
+-- "license_type": "Commercial", "download_url": "https://..."}
 CREATE TABLE IF NOT EXISTS product_transactions (
     id VARCHAR(36) PRIMARY KEY,
     buyer_account_id VARCHAR(36) NOT NULL,
@@ -83,20 +83,20 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     product_id VARCHAR(36) NOT NULL,
     invoice_number VARCHAR(50) NOT NULL UNIQUE,  -- Our internal invoice number
     
-    -- Pricing breakdown (buyer pays ALL fees)
+-- Pricing breakdown (buyer pays ALL fees)
     seller_price BIGINT NOT NULL,           -- What seller receives (100% of their price)
     platform_fee BIGINT NOT NULL,           -- Platform markup
     doku_fee BIGINT NOT NULL,               -- Payment gateway fee
     total_charged BIGINT NOT NULL,          -- seller_price + platform_fee + doku_fee
     currency VARCHAR(3) NOT NULL CHECK (currency IN ('IDR', 'USD')),
     
-    -- Transaction status and lifecycle
+-- Transaction status and lifecycle
     status VARCHAR(20) NOT NULL CHECK (status IN ('PENDING', 'COMPLETED', 'SETTLED', 'FAILED', 'REFUNDED')),
     created_at TIMESTAMP NOT NULL,
     completed_at TIMESTAMP,                 -- When user paid (DOKU webhook)
     settled_at TIMESTAMP,                   -- When appeared in settlement CSV
     
-    -- Product details (what was purchased)
+-- Product details (what was purchased)
     metadata JSONB                         -- Buyer name, product title, resolution, license type, etc.
 );
 
@@ -110,34 +110,34 @@ CREATE INDEX idx_product_transactions_status_settled ON product_transactions(sta
 -- payment_requests: DOKU PAYMENT GATEWAY INTEGRATION
 -- Purpose: Tracks DOKU payment lifecycle for each transaction
 -- Status lifecycle: PENDING → COMPLETED/FAILED/EXPIRED
---   PENDING: Payment created, waiting for user to pay
---   COMPLETED: DOKU webhook confirms payment received
---   FAILED: Payment failed (insufficient funds, declined, etc.)
---   EXPIRED: Payment link expired (typically 24 hours)
+-- PENDING: Payment created, waiting for user to pay
+-- COMPLETED: DOKU webhook confirms payment received
+-- FAILED: Payment failed (insufficient funds, declined, etc.)
+-- EXPIRED: Payment link expired (typically 24 hours)
 --
 -- This table handles DOKU webhook notifications and payment status updates
 CREATE TABLE IF NOT EXISTS payment_requests (
     id VARCHAR(36) PRIMARY KEY,
     product_transaction_id VARCHAR(36) NOT NULL,
     
-    -- DOKU payment gateway details
+-- DOKU payment gateway details
     request_id VARCHAR(100) NOT NULL UNIQUE,    -- DOKU's payment request ID
     payment_code VARCHAR(100),                  -- VA number, QRIS code, etc.
     payment_channel VARCHAR(50) NOT NULL,       -- QRIS, VA_BCA, VA_BRI, etc.
     payment_url TEXT,                           -- URL for user to complete payment
     
-    -- Payment amount and status
+-- Payment amount and status
     amount BIGINT NOT NULL,                     -- Total charged to buyer
     currency VARCHAR(3) NOT NULL CHECK (currency IN ('IDR', 'USD')),
     status VARCHAR(20) NOT NULL CHECK (status IN ('PENDING', 'COMPLETED', 'FAILED', 'EXPIRED')),
     
-    -- Lifecycle timestamps
+-- Lifecycle timestamps
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     completed_at TIMESTAMP,                     -- When DOKU webhook confirmed payment
     expires_at TIMESTAMP NOT NULL,              -- Payment link expiration
     
-    -- Error handling
+-- Error handling
     failure_reason TEXT,
     
     FOREIGN KEY (product_transaction_id) REFERENCES product_transactions(id)
@@ -151,8 +151,10 @@ CREATE INDEX idx_payment_requests_expires ON payment_requests(expires_at);
 
 -- LedgerTransaction: ACCOUNTING JOURNAL ENTRIES
 -- Purpose: Audit trail of ALL balance movements (credits, debits, settlements, fees)
--- Types: CREDIT (money in), DEBIT (money out), SETTLEMENT (pending→available), FEE (DOKU fees), ADJUSTMENT
--- Links to: ProductTransaction (sales) or Disbursement (withdrawals) via reference_type + reference_id
+-- Types: CREDIT (money in), DEBIT (money out), SETTLEMENT (pending→available), FEE
+-- (DOKU fees), ADJUSTMENT
+-- Links to: ProductTransaction (sales) or Disbursement (withdrawals) via
+-- reference_type + reference_id
 CREATE TABLE IF NOT EXISTS ledger_transactions (
     id VARCHAR(36) PRIMARY KEY,
     ledger_id VARCHAR(36) NOT NULL,
@@ -207,12 +209,17 @@ CREATE TABLE IF NOT EXISTS fee_configs (
     UNIQUE(config_type, payment_channel)
 );
 
+CREATE INDEX idx_fee_configs_type_channel ON fee_configs(config_type, payment_channel);
+CREATE INDEX idx_fee_configs_active ON fee_configs(is_active);
+CREATE UNIQUE INDEX idx_fee_configs_platform ON fee_configs(payment_channel);
+
 -- Insert default configurations
 INSERT INTO fee_configs (config_type, payment_channel, fee_type, fixed_amount, percentage, created_at, updated_at)
 VALUES 
-('PLATFORM', 'PLATFORM', 'PERCENTAGE', 1000, 0, NOW(), NOW()),
+('PLATFORM', 'PLATFORM', 'FIXED', 1000, 0, NOW(), NOW()),
 ('DOKU', 'QRIS', 'PERCENTAGE', 0, 2.2, NOW(), NOW()),
-('DOKU', 'VIRTUAL_ACCOUNT_MANDIRI', 'FIXED', 4500, 0, NOW(), NOW()),
+('DOKU', 'VIRTUAL_ACCOUNT_MANDIRI', 'FIXED', 4500, 0, NOW(), NOW())
+ON CONFLICT (config_type, payment_channel) DO NOTHING;
 -- ('PLATFORM', 'VIRTUAL_ACCOUNT_BCA', 'PERCENTAGE', 0, 0.03, NOW(), NOW()),
 -- ('PLATFORM', 'VIRTUAL_ACCOUNT_BNI', 'PERCENTAGE', 0, 0.03, NOW(), NOW()),
 -- ('PLATFORM', 'VIRTUAL_ACCOUNT_BRI', 'PERCENTAGE', 0, 0.03, NOW(), NOW()),
@@ -225,4 +232,6 @@ VALUES
 -- ('DOKU', 'VIRTUAL_ACCOUNT_BRI', 'PERCENTAGE', 0, 0.015, NOW(), NOW()),
 -- ('DOKU', 'CREDIT_CARD', 'PERCENTAGE', 0, 0.025, NOW(), NOW()),
 -- ('DOKU', 'E_WALLET', 'PERCENTAGE', 0, 0.02, NOW(), NOW())
-ON CONFLICT (config_type, payment_channel) DO NOTHING;
+
+
+

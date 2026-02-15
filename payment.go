@@ -76,8 +76,18 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	currency := domain.Currency(req.Currency)
 	feeBreakdown := feeCalc.GetFeeBreakdown(req.SellerPrice, req.PaymentChannel, currency)
 
+	c.logger.InfoContext(ctx, "Calculated fee breakdown",
+		"seller_price", feeBreakdown.SellerPrice,
+		"platform_fee", feeBreakdown.PlatformFee,
+		"doku_fee", feeBreakdown.DokuFee,
+		"total_charged", feeBreakdown.TotalCharged,
+		"currency", feeBreakdown.Currency,
+	)
+
 	// Generate invoice number
 	invoiceNumber := generateInvoiceNumber()
+
+	c.logger.InfoContext(ctx, "Generated invoice number", "invoice_number", invoiceNumber)
 
 	// Calculate expiration time
 	expiresIn := req.ExpiresIn
