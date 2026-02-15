@@ -68,6 +68,7 @@ const (
 	CodeInternal ErrorCode = 500
 	CodeNotFound ErrorCode = 404
 
-	CodeDatabaseError ErrorCode = 50001
-	CodeDokuAPIError  ErrorCode = 50002
+	CodeDatabaseError           ErrorCode = 50001
+	CodeDokuAPIError            ErrorCode = 50002
+	CodeSubaccountAlreadyExists ErrorCode = 409001
 )

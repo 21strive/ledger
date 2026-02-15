@@ -5,13 +5,13 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"github.com/21strive/doku/app/requests"
 	"github.com/21strive/doku/app/usecases"
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
 	"github.com/21strive/ledger/repo"
-	"github.com/Oudwins/zog"
 )
 
 type LedgerClient struct {
@@ -49,8 +49,6 @@ func (c *LedgerClient) GetLedgerByID(ctx context.Context, id string) (*domain.Le
 }
 
 func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email, name string, currency domain.Currency) (*domain.Ledger, error) {
-	zog.String()
-
 	// Generate doku sub account first in case of internal failure
 	response, dokuErr := s.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
 		Email: email,
@@ -58,6 +56,10 @@ func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email
 	})
 	s.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
 	if dokuErr != nil {
+		if dokuErr.StatusCode == http.StatusConflict {
+			return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists, "DOKU sub account already exists", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
+		}
+
 		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to create DOKU sub account", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
 	}
 
