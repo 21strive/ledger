@@ -62,8 +62,8 @@ type ReconciliationResult struct {
 
 type LedgerRepository interface {
 	GetByID(ctx context.Context, id string) (*Ledger, error)
-	GetByAccountID(accountID string) (*Ledger, error)
-	GetByDokuSubAccountID(dokuSubAccountID string) (*Ledger, error)
+	GetByAccountID(ctx context.Context, accountID string) (*Ledger, error)
+	GetByDokuSubAccountID(ctx context.Context, dokuSubAccountID string) (*Ledger, error)
 	Save(ctx context.Context, ledger *Ledger) error
 }
 
