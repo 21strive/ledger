@@ -3,7 +3,7 @@ module github.com/21strive/ledger
 go 1.25.1
 
 require (
-	github.com/21strive/doku v0.0.0-20260215075727-06cf654a0c25
+	github.com/21strive/doku v0.0.0-20260215081934-fe792910d0d9
 	github.com/21strive/redifu v0.13.2
 	github.com/Oudwins/zog v0.22.0
 	github.com/google/uuid v1.6.0
