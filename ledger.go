@@ -57,7 +57,7 @@ func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email
 		Name:  name,
 	})
 	s.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
-	if dokuErr != nil || dokuErr.StatusCode >= 300 {
+	if dokuErr != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to create DOKU sub account", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
 	}
 
