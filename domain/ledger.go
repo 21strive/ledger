@@ -111,6 +111,35 @@ func (l *Ledger) HasDiscrepancy() bool {
 		l.Wallet.ExpectedAvailableBalance.Amount != l.Wallet.AvailableBalance.Amount
 }
 
+// GetDiscrepancyAmount returns the difference between expected and actual available balance
+func (l *Ledger) GetDiscrepancyAmount() int64 {
+	return l.Wallet.ExpectedAvailableBalance.Amount - l.Wallet.AvailableBalance.Amount
+}
+
+// DebitAvailableBalance debits the expected_available balance for disbursement
+// Only expected_available is updated; actual_available waits for reconciliation
+func (l *Ledger) DebitAvailableBalance(amount int64) error {
+	if amount <= 0 {
+		return nil
+	}
+	if l.Wallet.ExpectedAvailableBalance.Amount < amount {
+		return nil // Caller should check balance first
+	}
+	l.Wallet.ExpectedAvailableBalance.Amount -= amount
+	l.UpdatedAt = time.Now()
+	return nil
+}
+
+// AddAvailableBalance credits the expected_available balance (used for rollback on DOKU failure)
+// Only expected_available is updated; actual_available waits for reconciliation
+func (l *Ledger) AddAvailableBalance(amount int64) {
+	if amount <= 0 {
+		return
+	}
+	l.Wallet.ExpectedAvailableBalance.Amount += amount
+	l.UpdatedAt = time.Now()
+}
+
 func (r ReconciliationResult) IsSettlement() bool {
 	if r.PendingDiff >= 0 || r.AvailableDiff <= 0 {
 		return false

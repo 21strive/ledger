@@ -12,6 +12,7 @@ type Tx interface {
 	ProductTransaction() domain.ProductTransactionRepository
 	PaymentRequest() domain.PaymentRequestRepository
 	FeeConfig() domain.FeeConfigRepository
+	Disbursement() domain.DisbursementRepository
 }
 
 type postgresTx struct {
@@ -36,4 +37,8 @@ func (p *postgresTx) PaymentRequest() domain.PaymentRequestRepository {
 
 func (p *postgresTx) FeeConfig() domain.FeeConfigRepository {
 	return NewPostgresFeeConfigRepository(p.tx)
+}
+
+func (p *postgresTx) Disbursement() domain.DisbursementRepository {
+	return NewPostgresDisbursementRepository(p.tx)
 }

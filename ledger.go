@@ -176,3 +176,75 @@ func (s *LedgerClient) GetBalance(ctx context.Context, accountID string) (*Balan
 		LastSyncedAt: ledger.LastSyncedAt,
 	}, nil
 }
+
+// ValidateBankAccountRequest contains the parameters to validate a bank account
+type ValidateBankAccountRequest struct {
+	BankCode      string `json:"bank_code"`
+	AccountNumber string `json:"account_number"`
+	AccountName   string `json:"account_name"` // Optional: for verification
+}
+
+// ValidateBankAccountResponse contains the result of bank account validation
+type ValidateBankAccountResponse struct {
+	IsValid       bool   `json:"is_valid"`
+	BankCode      string `json:"bank_code"`
+	BankName      string `json:"bank_name"`
+	AccountNumber string `json:"account_number"`
+	AccountName   string `json:"account_name"` // From DOKU response
+}
+
+// ValidateBankAccount validates a bank account with DOKU
+func (c *LedgerClient) ValidateBankAccount(ctx context.Context, req *ValidateBankAccountRequest) (*ValidateBankAccountResponse, error) {
+	if req.BankCode == "" || req.AccountNumber == "" {
+		return nil, ledgererr.ErrInvalidBankAccount.WithError(fmt.Errorf("bank_code and account_number are required"))
+	}
+
+	// Get access token for DOKU API
+	tokenResp, tokenErr := c.dokuClient.GetToken()
+	if tokenErr != nil {
+		c.logger.ErrorContext(ctx, "Failed to get DOKU access token",
+			"error", tokenErr.Err,
+			"message", tokenErr.Message,
+		)
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to get DOKU access token", fmt.Errorf("%v", tokenErr.Message))
+	}
+	c.logger.DebugContext(ctx, "DOKU GetToken response", "response", tokenResp)
+
+	// Call DOKU BankAccountInquiry
+	dokuReq := &requests.DokuBankAccountInquiryRequest{
+		BeneficiaryAccountNumber: req.AccountNumber,
+	}
+	dokuReq.AdditionalInfo.BeneficiaryBankCode = req.BankCode
+	dokuReq.AdditionalInfo.BeneficiaryAccountName = req.AccountName
+
+	resp, dokuErr := c.dokuClient.BankAccountInquiry(dokuReq, tokenResp.AccessToken)
+	if dokuErr != nil {
+		c.logger.ErrorContext(ctx, "DOKU BankAccountInquiry failed",
+			"bank_code", req.BankCode,
+			"account_number", req.AccountNumber,
+			"error", dokuErr.Err,
+			"message", dokuErr.Message,
+			"status_code", dokuErr.StatusCode,
+		)
+		return &ValidateBankAccountResponse{
+			IsValid:       false,
+			BankCode:      req.BankCode,
+			AccountNumber: req.AccountNumber,
+		}, nil
+	}
+
+	c.logger.InfoContext(ctx, "DOKU BankAccountInquiry success",
+		"bank_code", resp.BeneficiaryBankCode,
+		"bank_name", resp.BeneficiaryBankName,
+		"account_number", resp.BeneficiaryAccountNumber,
+		"account_name", resp.BeneficiaryAccountName,
+	)
+
+	return &ValidateBankAccountResponse{
+		IsValid:       true,
+		BankCode:      resp.BeneficiaryBankCode,
+		BankName:      resp.BeneficiaryBankName,
+		AccountNumber: resp.BeneficiaryAccountNumber,
+		AccountName:   resp.BeneficiaryAccountName,
+	}, nil
+}

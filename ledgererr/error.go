@@ -93,6 +93,14 @@ const (
 	// FeeConfig error codes
 	CodeFeeConfigNotFound         ErrorCode = 404004
 	CodeUnsupportedPaymentChannel ErrorCode = 400005
+
+	// Disbursement error codes
+	CodeDisbursementNotFound      ErrorCode = 404005
+	CodeDisbursementAlreadyExists ErrorCode = 409006
+	CodeInvalidDisbursementStatus ErrorCode = 400006
+	CodeInvalidDisbursementAmount ErrorCode = 400007
+	CodeInvalidBankAccount        ErrorCode = 400008
+	CodeInsufficientBalance       ErrorCode = 400009
 )
 
 // Ledger errors
@@ -122,4 +130,14 @@ var (
 var (
 	ErrFeeConfigNotFound         = NewError(CodeFeeConfigNotFound, "fee config not found", nil)
 	ErrUnsupportedPaymentChannel = NewError(CodeUnsupportedPaymentChannel, "unsupported payment channel", nil)
+)
+
+// Disbursement errors
+var (
+	ErrDisbursementNotFound      = NewError(CodeDisbursementNotFound, "disbursement not found", nil)
+	ErrDisbursementAlreadyExists = NewError(CodeDisbursementAlreadyExists, "disbursement already exists", nil)
+	ErrInvalidDisbursementStatus = NewError(CodeInvalidDisbursementStatus, "invalid disbursement status transition", nil)
+	ErrInvalidDisbursementAmount = NewError(CodeInvalidDisbursementAmount, "disbursement amount must be positive", nil)
+	ErrInvalidBankAccount        = NewError(CodeInvalidBankAccount, "invalid bank account information", nil)
+	ErrInsufficientBalance       = NewError(CodeInsufficientBalance, "insufficient balance for disbursement", nil)
 )

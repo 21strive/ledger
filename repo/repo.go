@@ -44,6 +44,10 @@ func (p *RepositoryProvider) FeeConfig() domain.FeeConfigRepository {
 	return NewPostgresFeeConfigRepository(p.db)
 }
 
+func (p *RepositoryProvider) Disbursement() domain.DisbursementRepository {
+	return NewPostgresDisbursementRepository(p.db)
+}
+
 // func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
 // 	return NewPostgresReconciliationDiscrepancyRepository(p.db)
 // }
