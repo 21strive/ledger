@@ -48,6 +48,19 @@ func (c *LedgerClient) GetLedgerByID(ctx context.Context, id string) (*domain.Le
 	return ledger, nil
 }
 
+func (c *LedgerClient) GetLedgerByAccountID(ctx context.Context, accountID string) (*domain.Ledger, error) {
+	ledger, err := c.repoProvider.Ledger().GetByAccountID(ctx, accountID)
+	if err != nil {
+		if ledgererr.IsAppError(repo.ErrNotFound, err) {
+			return nil, domain.ErrLedgerNotFound.WithError(err)
+		}
+
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger by account ID", err)
+	}
+
+	return ledger, nil
+}
+
 func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email, name string, currency domain.Currency) (*domain.Ledger, error) {
 	// Generate doku sub account first in case of internal failure
 	response, dokuErr := s.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
