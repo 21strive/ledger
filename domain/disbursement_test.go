@@ -171,7 +171,7 @@ func TestDisbursement_CanTransitionTo(t *testing.T) {
 		{"pending to processing", DisbursementStatusPending, DisbursementStatusProcessing, true},
 		{"pending to failed", DisbursementStatusPending, DisbursementStatusFailed, true},
 		{"pending to cancelled", DisbursementStatusPending, DisbursementStatusCancelled, true},
-		{"pending to completed", DisbursementStatusPending, DisbursementStatusCompleted, false},
+		{"pending to completed (immediate success)", DisbursementStatusPending, DisbursementStatusCompleted, true},
 		{"processing to completed", DisbursementStatusProcessing, DisbursementStatusCompleted, true},
 		{"processing to failed", DisbursementStatusProcessing, DisbursementStatusFailed, true},
 		{"processing to pending", DisbursementStatusProcessing, DisbursementStatusPending, false},
@@ -234,18 +234,22 @@ func TestDisbursement_MarkCompleted(t *testing.T) {
 		d, _ := NewDisbursement("ledger-123", 100000, CurrencyIDR, bankAccount, "Test")
 		d.Status = DisbursementStatusProcessing
 
-		err := d.MarkCompleted()
+		err := d.MarkCompleted("DOKU-TX-123")
 		assert.NoError(t, err)
 		assert.Equal(t, DisbursementStatusCompleted, d.Status)
+		assert.Equal(t, "DOKU-TX-123", d.ExternalTransactionID)
 		assert.NotNil(t, d.ProcessedAt)
 		assert.True(t, d.IsTerminal())
 	})
 
-	t.Run("invalid transition from pending", func(t *testing.T) {
+	t.Run("valid transition from pending (immediate success)", func(t *testing.T) {
 		d, _ := NewDisbursement("ledger-123", 100000, CurrencyIDR, bankAccount, "Test")
 
-		err := d.MarkCompleted()
-		assert.Error(t, err)
+		err := d.MarkCompleted("DOKU-TX-456")
+		assert.NoError(t, err)
+		assert.Equal(t, DisbursementStatusCompleted, d.Status)
+		assert.Equal(t, "DOKU-TX-456", d.ExternalTransactionID)
+		assert.NotNil(t, d.ProcessedAt)
 	})
 }
 

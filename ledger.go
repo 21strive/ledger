@@ -248,3 +248,191 @@ func (c *LedgerClient) ValidateBankAccount(ctx context.Context, req *ValidateBan
 		AccountName:   resp.BeneficiaryAccountName,
 	}, nil
 }
+
+// WithdrawRequest contains the parameters to withdraw funds to a bank account
+type WithdrawRequest struct {
+	AccountID     string `json:"account_id"`
+	Amount        int64  `json:"amount"`
+	Currency      string `json:"currency"`
+	BankCode      string `json:"bank_code"`
+	AccountNumber string `json:"account_number"`
+	AccountName   string `json:"account_name"`
+	Description   string `json:"description"`
+}
+
+// WithdrawResponse contains the result of a withdrawal request
+type WithdrawResponse struct {
+	DisbursementID string `json:"disbursement_id"`
+	Status         string `json:"status"`
+	Amount         int64  `json:"amount"`
+	Currency       string `json:"currency"`
+	Message        string `json:"message"`
+}
+
+// Withdraw initiates a withdrawal from a ledger to an external bank account
+// Flow:
+// 1. Get ledger and check safe balance = MIN(expected_available, actual_available)
+// 2. Validate: requestedAmount <= safe_balance
+// 3. Call DOKU SendPayoutSubAccount FIRST (no DB changes yet)
+// 4. If DOKU fails: Return error (nothing to rollback)
+// 5. If DOKU succeeds: Debit balance + Create Disbursement in ONE transaction
+func (c *LedgerClient) Withdraw(ctx context.Context, req *WithdrawRequest) (*WithdrawResponse, error) {
+	// Validate request
+	if req.AccountID == "" {
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "account_id is required", nil)
+	}
+	if req.Amount <= 0 {
+		return nil, ledgererr.ErrInvalidDisbursementAmount
+	}
+
+	// Get ledger (read-only check first)
+	ledger, err := c.repoProvider.Ledger().GetByAccountID(ctx, req.AccountID)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger", err)
+	}
+
+	// Check safe balance = MIN(expected_available, actual_available)
+	safeBalance := ledger.GetSafeDisbursableBalance()
+	if req.Amount > safeBalance {
+		c.logger.WarnContext(ctx, "Insufficient safe balance for withdrawal",
+			"account_id", req.AccountID,
+			"requested_amount", req.Amount,
+			"safe_balance", safeBalance,
+			"expected_available", ledger.Wallet.ExpectedAvailableBalance.Amount,
+			"actual_available", ledger.Wallet.AvailableBalance.Amount,
+		)
+		return nil, ledgererr.ErrInsufficientBalance.WithError(
+			fmt.Errorf("requested: %d, safe_balance: %d", req.Amount, safeBalance),
+		)
+	}
+
+	// Log if discrepancy exists (non-blocking per AGENTS.md)
+	if ledger.HasDiscrepancy() {
+		c.logger.WarnContext(ctx, "Discrepancy detected during withdrawal (non-blocking)",
+			"account_id", req.AccountID,
+			"expected_pending", ledger.Wallet.ExpectedPendingBalance.Amount,
+			"actual_pending", ledger.Wallet.PendingBalance.Amount,
+			"expected_available", ledger.Wallet.ExpectedAvailableBalance.Amount,
+			"actual_available", ledger.Wallet.AvailableBalance.Amount,
+			"discrepancy_amount", ledger.GetDiscrepancyAmount(),
+		)
+	}
+
+	// Generate disbursement ID upfront for DOKU invoice number
+	disbursementID := domain.GenerateID()
+
+	// Call DOKU SendPayoutSubAccount FIRST (before any DB changes)
+	c.logger.InfoContext(ctx, "Calling DOKU SendPayoutSubAccount",
+		"disbursement_id", disbursementID,
+		"ledger_id", ledger.ID,
+		"amount", req.Amount,
+	)
+
+	dokuReq := requests.DokuSendPayoutSubAccountRequest{}
+	dokuReq.Account.ID = ledger.DokuSubAccountID
+	dokuReq.Payout.Amount = int(req.Amount)
+	dokuReq.Payout.InvoiceNumber = disbursementID
+	dokuReq.Beneficiary.BankCode = req.BankCode
+	dokuReq.Beneficiary.BankAccountNumber = req.AccountNumber
+	dokuReq.Beneficiary.BankAccountName = req.AccountName
+
+	dokuResp, dokuErr := c.dokuClient.SendPayoutSubAccount(dokuReq)
+	if dokuErr != nil {
+		c.logger.ErrorContext(ctx, "DOKU SendPayoutSubAccount failed",
+			"disbursement_id", disbursementID,
+			"error", dokuErr.Err,
+			"message", dokuErr.Message,
+			"status_code", dokuErr.StatusCode,
+		)
+		// No rollback needed - we haven't touched the DB yet
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "DOKU disbursement failed", fmt.Errorf("%v", dokuErr.Message))
+	}
+
+	c.logger.InfoContext(ctx, "DOKU disbursement response received",
+		"disbursement_id", disbursementID,
+		"doku_status", dokuResp.Payout.Status,
+		"doku_invoice", dokuResp.Payout.InvoiceNumber,
+	)
+
+	// DOKU succeeded - now create disbursement and debit balance in ONE transaction
+	bankAccount := domain.BankAccount{
+		BankCode:      req.BankCode,
+		AccountNumber: req.AccountNumber,
+		AccountName:   req.AccountName,
+	}
+
+	currency := domain.Currency(req.Currency)
+	if currency == "" {
+		currency = ledger.Wallet.Currency
+	}
+
+	disbursement, err := domain.NewDisbursementWithID(
+		disbursementID,
+		ledger.ID,
+		req.Amount,
+		currency,
+		bankAccount,
+		req.Description,
+	)
+	if err != nil {
+		// This shouldn't happen, but log it
+		c.logger.ErrorContext(ctx, "Failed to create disbursement entity after DOKU success",
+			"disbursement_id", disbursementID,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	// Set status based on DOKU response
+	dokuStatus := dokuResp.Payout.Status
+	switch dokuStatus {
+	case "SUCCESS":
+		_ = disbursement.MarkCompleted(dokuResp.Payout.InvoiceNumber)
+	default:
+		// PENDING, PROCESSING, or other statuses
+		_ = disbursement.MarkProcessing(dokuResp.Payout.InvoiceNumber)
+	}
+
+	// Debit expected_available balance
+	ledger.DebitAvailableBalance(req.Amount)
+
+	// Save everything in ONE transaction
+	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		if err := tx.Ledger().Save(ctx, ledger); err != nil {
+			return err
+		}
+		if err := tx.Disbursement().Save(ctx, disbursement); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		// DOKU succeeded but DB failed - log critical error for manual reconciliation
+		c.logger.ErrorContext(ctx, "CRITICAL: DOKU succeeded but DB save failed - requires manual reconciliation",
+			"disbursement_id", disbursementID,
+			"doku_status", dokuStatus,
+			"doku_invoice", dokuResp.Payout.InvoiceNumber,
+			"amount", req.Amount,
+			"ledger_id", ledger.ID,
+			"error", err,
+		)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save disbursement after DOKU success", err)
+	}
+
+	c.logger.InfoContext(ctx, "Withdrawal completed",
+		"disbursement_id", disbursement.ID,
+		"status", disbursement.Status,
+		"amount", req.Amount,
+	)
+
+	return &WithdrawResponse{
+		DisbursementID: disbursement.ID,
+		Status:         string(disbursement.Status),
+		Amount:         req.Amount,
+		Currency:       string(currency),
+		Message:        fmt.Sprintf("Withdrawal %s", dokuStatus),
+	}, nil
+}

@@ -92,6 +92,44 @@ func NewDisbursement(
 	}, nil
 }
 
+// NewDisbursementWithID creates a new disbursement with a pre-generated ID
+// Use this when the ID needs to be known before creation (e.g., for DOKU invoice number)
+func NewDisbursementWithID(
+	id string,
+	ledgerID string,
+	amount int64,
+	currency Currency,
+	bankAccount BankAccount,
+	description string,
+) (*Disbursement, error) {
+	if id == "" {
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "disbursement id is required", nil)
+	}
+	if amount <= 0 {
+		return nil, ledgererr.ErrInvalidDisbursementAmount
+	}
+
+	if err := bankAccount.Validate(); err != nil {
+		return nil, err
+	}
+
+	return &Disbursement{
+		ID:          id,
+		LedgerID:    ledgerID,
+		Amount:      amount,
+		Currency:    currency,
+		Status:      DisbursementStatusPending,
+		BankAccount: bankAccount,
+		Description: description,
+		CreatedAt:   time.Now(),
+	}, nil
+}
+
+// GenerateID generates a new UUID string for use as entity ID
+func GenerateID() string {
+	return uuid.New().String()
+}
+
 // GetMoney returns the disbursement amount as Money
 func (d *Disbursement) GetMoney() Money {
 	return Money{
@@ -139,8 +177,13 @@ func (d *Disbursement) IsTerminal() bool {
 func (d *Disbursement) CanTransitionTo(newStatus DisbursementStatus) bool {
 	switch d.Status {
 	case DisbursementStatusPending:
-		// PENDING can transition to PROCESSING, FAILED, or CANCELLED
+		// PENDING can transition to:
+		// - PROCESSING: DOKU accepted, waiting for final confirmation
+		// - COMPLETED: DOKU returned SUCCESS immediately
+		// - FAILED: DOKU rejected or error occurred
+		// - CANCELLED: User cancelled before processing
 		return newStatus == DisbursementStatusProcessing ||
+			newStatus == DisbursementStatusCompleted ||
 			newStatus == DisbursementStatusFailed ||
 			newStatus == DisbursementStatusCancelled
 	case DisbursementStatusProcessing:
@@ -165,13 +208,15 @@ func (d *Disbursement) MarkProcessing(externalTxID string) error {
 	return nil
 }
 
-// MarkCompleted transitions from PROCESSING to COMPLETED (when DOKU confirms success)
-func (d *Disbursement) MarkCompleted() error {
+// MarkCompleted transitions to COMPLETED status (when DOKU confirms success)
+// Can transition from PENDING (immediate success) or PROCESSING (async success)
+func (d *Disbursement) MarkCompleted(externalTxID string) error {
 	if !d.CanTransitionTo(DisbursementStatusCompleted) {
 		return ledgererr.ErrInvalidDisbursementStatus
 	}
 	now := time.Now()
 	d.Status = DisbursementStatusCompleted
+	d.ExternalTransactionID = externalTxID
 	d.ProcessedAt = &now
 	return nil
 }
