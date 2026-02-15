@@ -268,5 +268,14 @@ func (c *LedgerClient) validateGeneratePaymentRequest(req *GeneratePaymentReques
 // generateInvoiceNumber creates a unique invoice number
 func generateInvoiceNumber() string {
 	now := time.Now()
-	return fmt.Sprintf("INV-%s-%d", now.Format("20060102150405"), now.UnixNano()%10000)
+	return fmt.Sprintf("INV-%s-%s", now.Format("20060102150405"), randomString(6))
+}
+
+func randomString(n int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, n)
+	for i := range result {
+		result[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+	}
+	return string(result)
 }
