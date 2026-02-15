@@ -70,7 +70,7 @@ func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email
 	existingLedger, err := s.repoProvider.Ledger().GetByAccountID(ctx, accountID)
 	if err == nil {
 		s.logger.InfoContext(ctx, "Ledger already exists for account ID", "account_id", accountID, "ledger_id", existingLedger.ID)
-		return nil, domain.ErrLedgerAlreadyExists
+		return nil, ledgererr.ErrLedgerAlreadyExists
 	} else if !ledgererr.IsErrorCode(ledgererr.CodeNotFound, err) {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to check existing ledger", err)
 	}

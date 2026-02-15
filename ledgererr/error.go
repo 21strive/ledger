@@ -72,3 +72,7 @@ const (
 	CodeDokuAPIError            ErrorCode = 50002
 	CodeSubaccountAlreadyExists ErrorCode = 409001
 )
+
+var (
+	ErrLedgerAlreadyExists = NewError(409100, "ledger already exists", nil)
+)
