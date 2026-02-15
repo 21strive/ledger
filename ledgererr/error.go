@@ -48,10 +48,10 @@ func (err AppError) Unwrap() error {
 	return err.OriginError
 }
 
-func IsAppError(target error, err error) bool {
+func IsAppError(target error, err AppError) bool {
 	var appErr AppError
-	if errors.As(err, &appErr) {
-		return errors.Is(appErr.OriginError, target)
+	if errors.As(target, &appErr) {
+		return appErr.ErrCode() == err.ErrCode()
 	}
 	return false
 }
