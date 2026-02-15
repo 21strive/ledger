@@ -40,7 +40,7 @@ func (c *LedgerClient) GetLedgerByID(ctx context.Context, id string) (*domain.Le
 	ledger, err := c.repoProvider.Ledger().GetByID(ctx, id)
 	if err != nil {
 		if ledgererr.IsAppError(err, repo.ErrNotFound) {
-			return nil, domain.ErrLedgerNotFound.WithError(err)
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
 		}
 
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger by ID", err)
@@ -53,7 +53,7 @@ func (c *LedgerClient) GetLedgerByAccountID(ctx context.Context, accountID strin
 	ledger, err := c.repoProvider.Ledger().GetByAccountID(ctx, accountID)
 	if err != nil {
 		if ledgererr.IsAppError(err, repo.ErrNotFound) {
-			return nil, domain.ErrLedgerNotFound.WithError(err)
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
 		}
 
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger by account ID", err)
@@ -125,7 +125,7 @@ func (s *LedgerClient) DeleteLedger(ctx context.Context, id string) error {
 		ledger, err := tx.Ledger().GetByID(ctx, id)
 		if err != nil {
 			if ledgererr.IsAppError(err, repo.ErrNotFound) {
-				return domain.ErrLedgerNotFound.WithError(err)
+				return ledgererr.ErrLedgerNotFound.WithError(err)
 			}
 			return ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger for deletion", err)
 		}
@@ -157,7 +157,7 @@ func (s *LedgerClient) GetBalance(ctx context.Context, accountID string) (*Balan
 	ledger, err := s.repoProvider.Ledger().GetByAccountID(ctx, accountID)
 	if err != nil {
 		if ledgererr.IsAppError(err, repo.ErrNotFound) {
-			return nil, domain.ErrLedgerNotFound.WithError(err)
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
 		}
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger by account ID", err)
 	}

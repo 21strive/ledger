@@ -43,22 +43,23 @@ This project uses **two coexisting architectural patterns**:
     - **Error Codes** (`ledgererr/error.go`):
       - `CodeInternal` (500): Internal server errors
       - `CodeNotFound` (404): Resource not found
-      - `CodeDatabaseError` (50001): Database operation failed
-      - `CodeDokuAPIError` (50002): DOKU payment gateway error
+      - `CodeDatabaseError` (500001): Database operation failed
+      - `CodeDokuAPIError` (500002): DOKU payment gateway error
       - `CodeSubaccountAlreadyExists` (409001): Duplicate subaccount
-    - **Domain-specific errors** (each aggregate defines its own in domain files):
-      - **Ledger** (`domain/ledger.go`): `ErrLedgerNotFound`, `ErrLedgerAlreadyExists`, `ErrReconciliationDiscrepancyFound`
+    - **All domain errors are defined in `ledgererr/error.go`**:
+      - **Ledger**: `ErrLedgerNotFound` (404001), `ErrLedgerAlreadyExists` (409002), `ErrReconciliationDiscrepancyFound` (409003)
+      - **ProductTransaction**: `ErrProductTransactionNotFound` (404002), `ErrProductTransactionAlreadyExists` (409004), `ErrInvalidTransactionStatus` (400001), `ErrInvalidFeeBreakdown` (400002)
+      - **PaymentRequest**: `ErrPaymentRequestNotFound` (404003), `ErrPaymentRequestAlreadyExists` (409005), `ErrInvalidPaymentStatus` (400003), `ErrPaymentExpired` (400004)
       - **Repository** (`repo/error.go`): `ErrNotFound`, `ErrFailedInsertSQL`, `ErrFailedQuerySQL`, etc.
-    - **When adding new errors**: Define them in the appropriate domain file using `ledgererr.NewError(code, message, origin)`
-      - Example: `var ErrLedgerNotFound = ledgererr.NewError(404101, "ledger not found", nil)`
-  - **Domain Errors should be instantiated within domain files** - each domain aggregate defines its own specific errors
+    - **When adding new errors**: Define them in `ledgererr/error.go` with code format `HTTPXXX` (e.g., 404001, 409002)
+      - Example: `var ErrLedgerNotFound = NewError(404001, "ledger not found", nil)`
   - **Error Wrapping Strategy** (Critical!):
     - Use `NewError(code, message, origin)` when creating new errors
       - Example: `return ledgererr.NewError(ledgererr.CodeNotFound, "ledger not found", nil)`
     - Use `.WithError(originErr)` to attach origin error to existing AppError
-      - Example: `return ErrFailedInsertSQL.WithError(err)`
+      - Example: `return ledgererr.ErrLedgerNotFound.WithError(err)`
     - Use `errors.As()` to check error types
-      - Example: `if ledgererr.IsAppError(err, ErrLedgerNotFound) { ... }`
+      - Example: `if ledgererr.IsAppError(err, ledgererr.ErrLedgerNotFound) { ... }`
   - **Error Stack Building**: Errors chain naturally via origin error field
   - **Error Checking**: Use `ledgererr.IsAppError(target, err)` or `ledgererr.IsErrorCode(code, err)`
   - Example: `if ledgererr.IsErrorCode(ledgererr.CodeNotFound, err) { return http.StatusNotFound }`
@@ -901,9 +902,9 @@ ledger_transactions (
 -- Product sales
 product_transactions (
   id, type, buyer_account_id, seller_account_id,
-  product_id, product_type, payment_channel,
+  product_id, invoice_number,
   seller_price, platform_fee, doku_fee, total_charged, currency,
-  status, metadata, created_at, completed_at
+  status, metadata, created_at, completed_at, settled_at
 )
 
 -- Withdrawals
