@@ -43,7 +43,7 @@ func (r *PostgresLedgerRepository) GetByID(ctx context.Context, id string) (*dom
 	defer res.Close()
 
 	if !res.Next() {
-		return nil, err
+		return nil, ErrNotFound
 	}
 
 	err = res.Scan(

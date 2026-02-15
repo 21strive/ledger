@@ -39,7 +39,7 @@ func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logge
 func (c *LedgerClient) GetLedgerByID(ctx context.Context, id string) (*domain.Ledger, error) {
 	ledger, err := c.repoProvider.Ledger().GetByID(ctx, id)
 	if err != nil {
-		if ledgererr.IsAppError(repo.ErrNotFound, err) {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
 			return nil, domain.ErrLedgerNotFound.WithError(err)
 		}
 
@@ -52,7 +52,7 @@ func (c *LedgerClient) GetLedgerByID(ctx context.Context, id string) (*domain.Le
 func (c *LedgerClient) GetLedgerByAccountID(ctx context.Context, accountID string) (*domain.Ledger, error) {
 	ledger, err := c.repoProvider.Ledger().GetByAccountID(ctx, accountID)
 	if err != nil {
-		if ledgererr.IsAppError(repo.ErrNotFound, err) {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
 			return nil, domain.ErrLedgerNotFound.WithError(err)
 		}
 
@@ -124,7 +124,7 @@ func (s *LedgerClient) DeleteLedger(ctx context.Context, id string) error {
 		s.logger.InfoContext(ctx, "Attempting to delete ledger", "ledger_id", id)
 		ledger, err := tx.Ledger().GetByID(ctx, id)
 		if err != nil {
-			if ledgererr.IsAppError(repo.ErrNotFound, err) {
+			if ledgererr.IsAppError(err, repo.ErrNotFound) {
 				return domain.ErrLedgerNotFound.WithError(err)
 			}
 			return ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger for deletion", err)
