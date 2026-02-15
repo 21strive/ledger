@@ -65,6 +65,7 @@ type LedgerRepository interface {
 	GetByAccountID(ctx context.Context, accountID string) (*Ledger, error)
 	GetByDokuSubAccountID(ctx context.Context, dokuSubAccountID string) (*Ledger, error)
 	Save(ctx context.Context, ledger *Ledger) error
+	Delete(ctx context.Context, id string) error
 }
 
 func NewLedger(accountID, dokuSubAccountID string, currency Currency) *Ledger {
@@ -215,6 +216,10 @@ func (l *Ledger) NeedsSyncWithDoku() bool {
 	)
 
 	return l.LastSyncedAt.Before(cutoff)
+}
+
+func (l *Ledger) HasBalance() bool {
+	return l.Wallet.AvailableBalance.Amount > 0 || l.Wallet.PendingBalance.Amount > 0
 }
 
 func (l *Ledger) CanDisburse(amount Money) bool {

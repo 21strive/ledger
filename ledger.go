@@ -80,6 +80,38 @@ func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email
 	return ledger, nil
 }
 
+func (s *LedgerClient) DeleteLedger(ctx context.Context, id string) error {
+	err := s.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		s.logger.InfoContext(ctx, "Attempting to delete ledger", "ledger_id", id)
+		ledger, err := tx.Ledger().GetByID(ctx, id)
+		if err != nil {
+			if ledgererr.IsAppError(repo.ErrNotFound, err) {
+				return domain.ErrLedgerNotFound.WithError(err)
+			}
+			return ledgererr.NewError(ledgererr.CodeInternal, "failed to get ledger for deletion", err)
+		}
+
+		s.logger.InfoContext(ctx, "Ledger found for deletion", "ledger_id", id, "doku_sub_account_id", ledger.DokuSubAccountID)
+
+		if ledger.HasBalance() {
+			return ledgererr.NewError(ledgererr.CodeInternal, "cannot delete ledger with non-zero balance", nil)
+		}
+
+		err = tx.Ledger().Delete(ctx, id)
+		if err != nil {
+			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to delete ledger", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return ledgererr.NewError(ledgererr.CodeInternal, "transaction failed while deleting ledger", err)
+	}
+
+	return nil
+}
+
 // func (s *LedgerClient) GetBalance(ctx context.Context, accountID string) (*BalanceResponse, error) {
 // 	ledger, err := s.repoProvider.Ledger().GetByAccountID(accountID)
 // 	if err != nil {

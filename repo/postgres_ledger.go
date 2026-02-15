@@ -271,3 +271,23 @@ func (r *PostgresLedgerRepository) GetByDokuSubAccountID(ctx context.Context, do
 
 	return ledger, nil
 }
+
+func (r *PostgresLedgerRepository) Delete(ctx context.Context, id string) error {
+	query := `DELETE FROM ledgers WHERE id = $1`
+
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return ErrFailedDeleteSQL.WithError(err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return ErrFailedDeleteSQL.WithError(err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
