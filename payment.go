@@ -29,7 +29,7 @@ type GeneratePaymentRequest struct {
 
 	// Payment configuration
 	PaymentChannel string `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
-	ExpiresIn      int64  `json:"expires_in"`      // Payment expiration in seconds (default: 24 hours)
+	ExpiresIn      int64  `json:"expires_in"`      // Payment expiration in minutes (default: 60 minutes, max: 999999)
 }
 
 // GeneratePaymentResponse contains the result of payment generation
@@ -90,11 +90,12 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	c.logger.InfoContext(ctx, "Generated invoice number", "invoice_number", invoiceNumber)
 
 	// Calculate expiration time
-	expiresIn := req.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = 24 * 60 * 60 // Default: 24 hours
+	// Payment due date is in minutes (default: 60 minutes, max: 999999)
+	expiresInMinutes := req.ExpiresIn
+	if expiresInMinutes <= 0 {
+		expiresInMinutes = 60 // Default: 60 minutes
 	}
-	expiresAt := time.Now().Add(time.Duration(expiresIn) * time.Second)
+	expiresAt := time.Now().Add(time.Duration(expiresInMinutes) * time.Minute)
 
 	productTx := domain.NewProductTransaction(
 		req.BuyerAccountID,
@@ -111,7 +112,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 		CustomerName:   req.BuyerName,
 		CustomerEmail:  req.BuyerEmail,
 		SacID:          sellerLedger.DokuSubAccountID,
-		PaymentDueDate: expiresAt.Unix(),
+		PaymentDueDate: expiresInMinutes, // DOKU expects minutes
 		InvoiceNumber:  invoiceNumber,
 		PaymentMethod:  req.PaymentChannel,
 	})
