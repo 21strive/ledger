@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 
 	"github.com/21strive/doku/app/requests"
 	"github.com/21strive/doku/app/usecases"
@@ -63,21 +64,46 @@ func (c *LedgerClient) GetLedgerByAccountID(ctx context.Context, accountID strin
 
 func (s *LedgerClient) CreateLedger(ctx context.Context, accountID string, email, name string, currency domain.Currency) (*domain.Ledger, error) {
 	// Generate doku sub account first in case of internal failure
+	var dokuSubAccountID string
+
+	// Check ledger exists
+	existingLedger, err := s.repoProvider.Ledger().GetByAccountID(ctx, accountID)
+	if err == nil {
+		s.logger.InfoContext(ctx, "Ledger already exists for account ID", "account_id", accountID, "ledger_id", existingLedger.ID)
+		return existingLedger, nil
+	} else if !ledgererr.IsErrorCode(ledgererr.CodeNotFound, err) {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to check existing ledger", err)
+	}
+
 	response, dokuErr := s.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
 		Email: email,
 		Name:  name,
 	})
 	s.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
+
 	if dokuErr != nil {
 		if dokuErr.StatusCode == http.StatusConflict {
-			return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists, "DOKU sub account already exists", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-		}
+			// Extract SAC ID from error message: "email already registered with account id: SAC-XXXX-XXXX"
+			// Convert interface{} message to string
+			messageStr := fmt.Sprintf("%v", dokuErr.Message)
+			re := regexp.MustCompile(`account id:\s*(SAC-[\w-]+)`)
+			matches := re.FindStringSubmatch(messageStr)
 
-		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to create DOKU sub account", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
+			if len(matches) > 1 {
+				dokuSubAccountID = matches[1]
+				s.logger.InfoContext(ctx, "Email already registered, using existing SAC ID", "sac_id", dokuSubAccountID, "email", email)
+			} else {
+				return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists, "DOKU sub account already exists but could not extract SAC ID", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
+			}
+		} else {
+			return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to create DOKU sub account", fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
+		}
+	} else {
+		dokuSubAccountID = response.ID.String
 	}
 
-	ledger := domain.NewLedger(accountID, response.ID.String, currency)
-	err := s.txProvider.Transact(ctx, func(tx repo.Tx) error {
+	ledger := domain.NewLedger(accountID, dokuSubAccountID, currency)
+	err = s.txProvider.Transact(ctx, func(tx repo.Tx) error {
 		err := tx.Ledger().Save(ctx, ledger)
 		if err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to create ledger", err)
