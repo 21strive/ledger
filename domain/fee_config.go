@@ -91,19 +91,45 @@ func NewFeeCalculator(configs []*FeeConfig) *FeeCalculator {
 }
 
 // CalculateTotalFees calculates platform fee and DOKU fee for a given seller price and payment channel
+// IMPORTANT: DOKU charges their fee on the TOTAL amount they receive, not on (seller_price + platform_fee)
+// So we need to reverse-calculate to ensure seller and platform get the right amounts
 func (fc *FeeCalculator) CalculateTotalFees(sellerPrice int64, paymentChannel string) (platformFee, dokuFee, totalCharged int64) {
 	// Calculate platform fee
 	if fc.platformFee != nil {
 		platformFee = fc.platformFee.CalculateFee(sellerPrice)
 	}
 
+	baseAmount := sellerPrice + platformFee
+
 	// Calculate DOKU fee based on payment channel
 	if dokuConfig, ok := fc.dokuFees[paymentChannel]; ok {
-		// DOKU fee is calculated on total amount (seller price + platform fee)
-		dokuFee = dokuConfig.CalculateFee(sellerPrice + platformFee)
+		if dokuConfig.IsActive {
+			switch dokuConfig.FeeType {
+			case FeeTypeFixed:
+				// Fixed fee is straightforward
+				dokuFee = dokuConfig.FixedAmount
+				totalCharged = baseAmount + dokuFee
+			case FeeTypePercentage:
+				// DOKU charges X% on total_charged, so:
+				// total_charged - (total_charged * X%) = base_amount
+				// total_charged * (1 - X%) = base_amount
+				// total_charged = base_amount / (1 - X%)
+				//
+				// Example: base_amount = 51000, DOKU = 2.2%
+				// total_charged = 51000 / (1 - 0.022) = 51000 / 0.978 = 52147
+				// doku_fee = 52147 - 51000 = 1147
+				// DOKU receives 52147, takes 2.2% = 1147, leaves 51000 ✓
+				percentage := dokuConfig.Percentage / 100
+				totalCharged = int64(math.Round(float64(baseAmount) / (1 - percentage)))
+				dokuFee = totalCharged - baseAmount
+			}
+		} else {
+			totalCharged = baseAmount
+		}
+	} else {
+		totalCharged = baseAmount
 	}
 
-	totalCharged = sellerPrice + platformFee + dokuFee
 	return
 }
 

@@ -125,11 +125,13 @@ func TestNewFeeCalculator(t *testing.T) {
 		assert.NotNil(t, calc)
 
 		// Test QRIS calculation
+		// base_amount = 10000 + 1000 = 11000
+		// total_charged = 11000 / (1 - 0.022) = 11247
+		// doku_fee = 11247 - 11000 = 247
 		platformFee, dokuFee, total := calc.CalculateTotalFees(10000, "QRIS")
 		assert.Equal(t, int64(1000), platformFee)
-		// DOKU fee on (10000 + 1000) * 2.2% = 242
-		assert.Equal(t, int64(242), dokuFee)
-		assert.Equal(t, int64(11242), total)
+		assert.Equal(t, int64(247), dokuFee)
+		assert.Equal(t, int64(11247), total)
 	})
 
 	t.Run("ignores inactive configs", func(t *testing.T) {
@@ -152,11 +154,13 @@ func TestNewFeeCalculator(t *testing.T) {
 
 		calc := domain.NewFeeCalculator(configs)
 
+		// base_amount = 10000 + 0 = 10000
+		// total_charged = 10000 / (1 - 0.022) = 10225
+		// doku_fee = 10225 - 10000 = 225
 		platformFee, dokuFee, total := calc.CalculateTotalFees(10000, "QRIS")
 		assert.Equal(t, int64(0), platformFee) // No platform fee (inactive)
-		// DOKU fee on 10000 * 2.2% = 220
-		assert.Equal(t, int64(220), dokuFee)
-		assert.Equal(t, int64(10220), total)
+		assert.Equal(t, int64(225), dokuFee)
+		assert.Equal(t, int64(10225), total)
 	})
 
 	t.Run("handles empty configs", func(t *testing.T) {
@@ -207,9 +211,9 @@ func TestFeeCalculator_CalculateTotalFees(t *testing.T) {
 		platformFee, dokuFee, total := calc.CalculateTotalFees(10000, "QRIS")
 
 		assert.Equal(t, int64(1000), platformFee)
-		// DOKU fee calculated on (seller_price + platform_fee) = 11000 * 2.2% = 242
-		assert.Equal(t, int64(242), dokuFee)
-		assert.Equal(t, int64(11242), total)
+		// base_amount = 11000, total = 11000 / 0.978 = 11247, doku_fee = 247
+		assert.Equal(t, int64(247), dokuFee)
+		assert.Equal(t, int64(11247), total)
 	})
 
 	t.Run("VA fixed fee", func(t *testing.T) {
@@ -230,12 +234,14 @@ func TestFeeCalculator_CalculateTotalFees(t *testing.T) {
 
 	t.Run("large amounts", func(t *testing.T) {
 		// 90,000,000 IDR (90M)
+		// base_amount = 90000000 + 1000 = 90001000
+		// total_charged = 90001000 / 0.978 = 92025562 (rounded)
+		// doku_fee = 92025562 - 90001000 = 2024562
 		platformFee, dokuFee, total := calc.CalculateTotalFees(90000000, "QRIS")
 
 		assert.Equal(t, int64(1000), platformFee)
-		// DOKU fee on 90,001,000 * 2.2% = 1,980,022
-		assert.Equal(t, int64(1980022), dokuFee)
-		assert.Equal(t, int64(91981022), total)
+		assert.Equal(t, int64(2024562), dokuFee)
+		assert.Equal(t, int64(92025562), total)
 	})
 }
 
@@ -264,8 +270,9 @@ func TestFeeCalculator_GetFeeBreakdown(t *testing.T) {
 
 		assert.Equal(t, int64(10000), breakdown.SellerPrice)
 		assert.Equal(t, int64(1000), breakdown.PlatformFee)
-		assert.Equal(t, int64(242), breakdown.DokuFee) // (10000+1000) * 2.2%
-		assert.Equal(t, int64(11242), breakdown.TotalCharged)
+		// base_amount = 11000, total = 11247, doku_fee = 247
+		assert.Equal(t, int64(247), breakdown.DokuFee)
+		assert.Equal(t, int64(11247), breakdown.TotalCharged)
 		assert.Equal(t, domain.CurrencyIDR, breakdown.Currency)
 	})
 

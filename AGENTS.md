@@ -119,12 +119,30 @@ This project uses **two coexisting architectural patterns**:
 ```
 Seller sets price: 10,000 IDR
 Platform fee (markup): 1,000 IDR
-DOKU fee (0.7%): 70 IDR
-Total charged to buyer: 11,070 IDR
+Base amount: 11,000 IDR (seller + platform)
+DOKU fee (2.2% QRIS): 247 IDR (reverse calculated)
+Total charged to buyer: 11,247 IDR
 
 Photographer gets: 10,000 IDR (full amount!)
 Platform gets: 1,000 IDR
-DOKU gets: 70 IDR
+DOKU gets: 247 IDR
+```
+
+**DOKU Fee Reverse Calculation** (Important!):
+
+DOKU charges percentage on the total amount they receive, not the base amount.
+To ensure seller+platform receive exact amounts, we reverse calculate:
+
+```
+Formula: total_charged = base_amount / (1 - percentage/100)
+         doku_fee = total_charged - base_amount
+
+Example with 2.2% QRIS:
+  base_amount = 11,000 IDR
+  total_charged = 11,000 / (1 - 0.022) = 11,000 / 0.978 = 11,247 IDR
+  doku_fee = 11,247 - 11,000 = 247 IDR
+
+Verification: DOKU takes 2.2% of 11,247 = 247 IDR → leaves 11,000 ✓
 ```
 
 #### 3. LedgerTransaction
@@ -210,13 +228,16 @@ PENDING → PROCESSING → COMPLETED
 ```
 Seller price: 10,000 IDR
 Platform fee: 1,000 IDR (10% or fixed amount)
-DOKU fee: 70 IDR (0.7% for QRIS) OR 4,500 IDR (flat for VA)
+Base amount: 11,000 IDR
+DOKU fee: 247 IDR (2.2% QRIS, reverse calculated) OR 4,500 IDR (flat for VA)
 
-Buyer pays: 11,070 IDR
+Buyer pays: 11,247 IDR (QRIS) or 15,500 IDR (VA)
 Seller receives: 10,000 IDR (100% of their price!)
 Platform earns: 1,000 IDR
-DOKU earns: 70 IDR
+DOKU earns: 247 IDR (QRIS) or 4,500 IDR (VA)
 ```
+
+**Note**: DOKU percentage fees use reverse calculation to ensure seller+platform get exact amounts.
 
 **Configuration**: Fees stored in database (`fee_configs` table), can be updated per payment channel
 
@@ -849,8 +870,8 @@ Returns: {
   "transaction_id": "...",
   "seller_price": 10000,
   "platform_fee": 1000,
-  "doku_fee": 70,
-  "total_charged": 11070,
+  "doku_fee": 247,
+  "total_charged": 11247,
   "payment_url": "/payment/...",
   "message": "Purchase initiated"
 }
