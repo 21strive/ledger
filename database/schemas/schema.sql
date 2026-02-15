@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS ledgers (
     updated_at TIMESTAMP NOT NULL
 );
 
-CREATE INDEX idx_last_synced ON ledgers(last_synced_at);
+CREATE INDEX idx_ledgers_account_id ON ledgers(account_id);
+CREATE INDEX idx_ledgers_doku_sub_account ON ledgers(doku_sub_account_id);
+CREATE INDEX idx_ledgers_last_synced ON ledgers(last_synced_at);
 
 -- Table to track discrepancies found during reconciliation
 CREATE TABLE IF NOT EXISTS ledger_reconciliation_discrepancies (
@@ -25,14 +27,16 @@ CREATE TABLE IF NOT EXISTS ledger_reconciliation_discrepancies (
     actual_available BIGINT NOT NULL,
     pending_diff BIGINT NOT NULL,
     available_diff BIGINT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'RESOLVED', 'AUTO_RESOLVED')),
     detected_at TIMESTAMP NOT NULL,
     resolved_at TIMESTAMP,
     resolution_notes TEXT,
+    related_tx_ids TEXT, -- Comma-separated transaction IDs for investigation
     FOREIGN KEY (ledger_id) REFERENCES ledgers(id)
 );
 
-CREATE INDEX idx_ledger_id ON ledger_reconciliation_discrepancies(ledger_id);
-CREATE INDEX idx_detected ON ledger_reconciliation_discrepancies(detected_at DESC);
+CREATE INDEX idx_ledger_reconciliation_discrepancies_ledger_id ON ledger_reconciliation_discrepancies(ledger_id);
+CREATE INDEX idx_ledger_reconciliation_discrepancies_detected ON ledger_reconciliation_discrepancies(detected_at DESC);
 
 -- Reconciliation logs to track all reconciliation attempts and outcomes
 CREATE TABLE IF NOT EXISTS ledger_reconciliation_logs (
@@ -52,5 +56,5 @@ CREATE TABLE IF NOT EXISTS ledger_reconciliation_logs (
     FOREIGN KEY (ledger_id) REFERENCES ledgers(id)
 );
 
-CREATE INDEX idx_ledger_created ON ledger_reconciliation_logs(ledger_id, created_at DESC);
+CREATE INDEX idx_reconciliation_logs_ledger_created ON reconciliation_logs(ledger_id, created_at DESC);
 
