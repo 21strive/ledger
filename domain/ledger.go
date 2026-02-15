@@ -9,6 +9,7 @@ import (
 )
 
 var (
+	ErrLedgerAlreadyExists            = ledgererr.NewError(409100, "ledger already exists", nil)
 	ErrLedgerNotFound                 = ledgererr.NewError(404101, "ledger not found", nil)
 	ErrReconciliationDiscrepancyFound = ledgererr.NewError(409101, "reconciliation discrepancy found", nil)
 )
