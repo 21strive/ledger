@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"time"
 
@@ -272,10 +273,5 @@ func generateInvoiceNumber() string {
 }
 
 func randomString(n int) string {
-	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	result := make([]byte, n)
-	for i := range result {
-		result[i] = letters[time.Now().UnixNano()%int64(len(letters))]
-	}
-	return string(result)
+	return rand.Text()[:n]
 }
