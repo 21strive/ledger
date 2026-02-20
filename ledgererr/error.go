@@ -101,6 +101,14 @@ const (
 	CodeInvalidDisbursementAmount ErrorCode = 400007
 	CodeInvalidBankAccount        ErrorCode = 400008
 	CodeInsufficientBalance       ErrorCode = 400009
+
+	// Settlement error codes
+	CodeSettlementBatchNotFound      ErrorCode = 404006
+	CodeSettlementBatchAlreadyExists ErrorCode = 409007
+	CodeInvalidSettlementBatchStatus ErrorCode = 400010
+	CodeInvalidSettlementItem        ErrorCode = 400011
+	CodeInvalidSettlementCSVFormat   ErrorCode = 400012
+	CodeSettlementItemNotFound       ErrorCode = 404007
 )
 
 // Ledger errors
@@ -140,4 +148,14 @@ var (
 	ErrInvalidDisbursementAmount = NewError(CodeInvalidDisbursementAmount, "disbursement amount must be positive", nil)
 	ErrInvalidBankAccount        = NewError(CodeInvalidBankAccount, "invalid bank account information", nil)
 	ErrInsufficientBalance       = NewError(CodeInsufficientBalance, "insufficient balance for disbursement", nil)
+)
+
+// Settlement errors
+var (
+	ErrSettlementBatchNotFound      = NewError(CodeSettlementBatchNotFound, "settlement batch not found", nil)
+	ErrSettlementBatchAlreadyExists = NewError(CodeSettlementBatchAlreadyExists, "settlement batch already exists for this date", nil)
+	ErrInvalidSettlementBatchStatus = NewError(CodeInvalidSettlementBatchStatus, "invalid settlement batch status transition", nil)
+	ErrInvalidSettlementItem        = NewError(CodeInvalidSettlementItem, "invalid settlement item data", nil)
+	ErrInvalidSettlementCSVFormat   = NewError(CodeInvalidSettlementCSVFormat, "invalid settlement CSV format", nil)
+	ErrSettlementItemNotFound       = NewError(CodeSettlementItemNotFound, "settlement item not found", nil)
 )

@@ -13,11 +13,8 @@ const (
 )
 
 type Wallet struct {
-	// Internal expected balances based on our transactions
-	ExpectedPendingBalance   Money
-	ExpectedAvailableBalance Money
-
-	// Actual balances from DOKU
+	// Actual balances from DOKU (source of truth)
+	// Expected balances are calculated per-batch during reconciliation
 	PendingBalance   Money
 	AvailableBalance Money
 	Currency         Currency
@@ -69,11 +66,9 @@ func NewLedger(accountID, dokuSubAccountID string, currency Currency) *Ledger {
 		AccountID:        accountID,
 		DokuSubAccountID: dokuSubAccountID,
 		Wallet: Wallet{
-			ExpectedPendingBalance:   Money{Amount: 0, Currency: currency},
-			PendingBalance:           Money{Amount: 0, Currency: currency},
-			ExpectedAvailableBalance: Money{Amount: 0, Currency: currency},
-			AvailableBalance:         Money{Amount: 0, Currency: currency},
-			Currency:                 currency,
+			PendingBalance:   Money{Amount: 0, Currency: currency},
+			AvailableBalance: Money{Amount: 0, Currency: currency},
+			Currency:         currency,
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -96,47 +91,31 @@ func (l *Ledger) GetTotalBalance() Money {
 	}
 }
 
-// GetSafeDisbursableBalance returns MIN(expected_available, actual_available)
-// to prevent overdrafts even when discrepancies exist.
+// GetSafeDisbursableBalance returns the actual available balance from DOKU.
+// With per-batch reconciliation, DOKU balance is the source of truth.
 func (l *Ledger) GetSafeDisbursableBalance() int64 {
-	if l.Wallet.ExpectedAvailableBalance.Amount < l.Wallet.AvailableBalance.Amount {
-		return l.Wallet.ExpectedAvailableBalance.Amount
-	}
 	return l.Wallet.AvailableBalance.Amount
 }
 
-// HasDiscrepancy checks if there's any mismatch between expected and actual balances
-func (l *Ledger) HasDiscrepancy() bool {
-	return l.Wallet.ExpectedPendingBalance.Amount != l.Wallet.PendingBalance.Amount ||
-		l.Wallet.ExpectedAvailableBalance.Amount != l.Wallet.AvailableBalance.Amount
-}
-
-// GetDiscrepancyAmount returns the difference between expected and actual available balance
-func (l *Ledger) GetDiscrepancyAmount() int64 {
-	return l.Wallet.ExpectedAvailableBalance.Amount - l.Wallet.AvailableBalance.Amount
-}
-
-// DebitAvailableBalance debits the expected_available balance for disbursement
-// Only expected_available is updated; actual_available waits for reconciliation
+// DebitAvailableBalance debits the actual available balance for disbursement
 func (l *Ledger) DebitAvailableBalance(amount int64) error {
 	if amount <= 0 {
 		return nil
 	}
-	if l.Wallet.ExpectedAvailableBalance.Amount < amount {
+	if l.Wallet.AvailableBalance.Amount < amount {
 		return nil // Caller should check balance first
 	}
-	l.Wallet.ExpectedAvailableBalance.Amount -= amount
+	l.Wallet.AvailableBalance.Amount -= amount
 	l.UpdatedAt = time.Now()
 	return nil
 }
 
-// AddAvailableBalance credits the expected_available balance (used for rollback on DOKU failure)
-// Only expected_available is updated; actual_available waits for reconciliation
-func (l *Ledger) AddAvailableBalance(amount int64) {
+// RollbackAvailableBalance credits back the available balance (used for rollback on DOKU failure)
+func (l *Ledger) RollbackAvailableBalance(amount int64) {
 	if amount <= 0 {
 		return
 	}
-	l.Wallet.ExpectedAvailableBalance.Amount += amount
+	l.Wallet.AvailableBalance.Amount += amount
 	l.UpdatedAt = time.Now()
 }
 

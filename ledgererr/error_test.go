@@ -211,7 +211,7 @@ func TestErrorsIsAndAs(t *testing.T) {
 
 		var appErr ledgererr.AppError
 		assert.True(t, errors.As(err, &appErr))
-		assert.Equal(t, ledgererr.ErrorCode(409100), appErr.Code)
+		assert.Equal(t, ledgererr.CodeLedgerAlreadyExists, appErr.Code)
 		assert.Equal(t, "ledger already exists", appErr.Msg)
 	})
 }
@@ -255,7 +255,7 @@ func TestIsErrorCode(t *testing.T) {
 	t.Run("identify ErrLedgerAlreadyExists by error code", func(t *testing.T) {
 		err := ledgererr.ErrLedgerAlreadyExists
 
-		assert.True(t, ledgererr.IsErrorCode(ledgererr.ErrorCode(409100), err))
+		assert.True(t, ledgererr.IsErrorCode(ledgererr.CodeLedgerAlreadyExists, err))
 	})
 
 	t.Run("identify ErrLedgerAlreadyExists with origin by error code", func(t *testing.T) {
@@ -263,7 +263,7 @@ func TestIsErrorCode(t *testing.T) {
 		err := ledgererr.ErrLedgerAlreadyExists.WithError(dbErr)
 
 		// Should still identify by error code even with origin
-		assert.True(t, ledgererr.IsErrorCode(ledgererr.ErrorCode(409100), err))
+		assert.True(t, ledgererr.IsErrorCode(ledgererr.CodeLedgerAlreadyExists, err))
 	})
 }
 
@@ -271,8 +271,8 @@ func TestErrorCodes(t *testing.T) {
 	t.Run("verify error code values", func(t *testing.T) {
 		assert.Equal(t, ledgererr.ErrorCode(500), ledgererr.CodeInternal)
 		assert.Equal(t, ledgererr.ErrorCode(404), ledgererr.CodeNotFound)
-		assert.Equal(t, ledgererr.ErrorCode(50001), ledgererr.CodeDatabaseError)
-		assert.Equal(t, ledgererr.ErrorCode(50002), ledgererr.CodeDokuAPIError)
+		assert.Equal(t, ledgererr.ErrorCode(500001), ledgererr.CodeDatabaseError)
+		assert.Equal(t, ledgererr.ErrorCode(500002), ledgererr.CodeDokuAPIError)
 		assert.Equal(t, ledgererr.ErrorCode(409001), ledgererr.CodeSubaccountAlreadyExists)
 	})
 
@@ -297,7 +297,7 @@ func TestPredefinedErrors(t *testing.T) {
 	t.Run("ErrLedgerAlreadyExists", func(t *testing.T) {
 		err := ledgererr.ErrLedgerAlreadyExists
 
-		assert.Equal(t, ledgererr.ErrorCode(409100), err.Code)
+		assert.Equal(t, ledgererr.CodeLedgerAlreadyExists, err.Code)
 		assert.Equal(t, "ledger already exists", err.Msg)
 		assert.Nil(t, err.OriginError)
 	})
@@ -306,7 +306,7 @@ func TestPredefinedErrors(t *testing.T) {
 		originErr := errors.New("duplicate key violation")
 		err := ledgererr.ErrLedgerAlreadyExists.WithError(originErr)
 
-		assert.Equal(t, ledgererr.ErrorCode(409100), err.Code)
+		assert.Equal(t, ledgererr.CodeLedgerAlreadyExists, err.Code)
 		assert.Equal(t, "ledger already exists", err.Msg)
 		assert.Equal(t, originErr, err.OriginError)
 	})

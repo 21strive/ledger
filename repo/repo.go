@@ -48,6 +48,14 @@ func (p *RepositoryProvider) Disbursement() domain.DisbursementRepository {
 	return NewPostgresDisbursementRepository(p.db)
 }
 
-// func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
-// 	return NewPostgresReconciliationDiscrepancyRepository(p.db)
-// }
+func (p *RepositoryProvider) SettlementBatch() domain.SettlementBatchRepository {
+	return NewPostgresSettlementBatchRepository(p.db)
+}
+
+func (p *RepositoryProvider) SettlementItem() domain.SettlementItemRepository {
+	return NewPostgresSettlementItemRepository(p.db)
+}
+
+func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
+	return NewPostgresReconciliationDiscrepancyRepository(p.db)
+}

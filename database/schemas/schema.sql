@@ -16,10 +16,17 @@ CREATE INDEX idx_ledgers_account_id ON ledgers(account_id);
 CREATE INDEX idx_ledgers_doku_sub_account ON ledgers(doku_sub_account_id);
 CREATE INDEX idx_ledgers_last_synced ON ledgers(last_synced_at);
 
--- Table to track discrepancies found during reconciliation
+INSERT INTO ledgers (id, account_id, doku_sub_account_id, currency, created_at, updated_at)
+VALUES ('00000000-0000-0000-0000-000000000001', 'account_12345', 'doku_sub_12345', 'IDR', NOW(), NOW())
+ON CONFLICT (account_id) DO NOTHING;
+
+-- Table to track balance discrepancies found during settlement reconciliation
+-- Linked to SettlementBatch - each batch can have at most one discrepancy record
+-- Per-transaction discrepancies are tracked in settlement_items.amount_discrepancy
 CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
     id VARCHAR(36) PRIMARY KEY,
     ledger_id VARCHAR(36) NOT NULL,
+    settlement_batch_id VARCHAR(36) NOT NULL,
     discrepancy_type VARCHAR(50) NOT NULL,
     expected_pending BIGINT NOT NULL,
     actual_pending BIGINT NOT NULL,
@@ -27,16 +34,20 @@ CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
     actual_available BIGINT NOT NULL,
     pending_diff BIGINT NOT NULL,
     available_diff BIGINT NOT NULL,
+    item_discrepancy_count INT NOT NULL DEFAULT 0,
+    total_item_discrepancy BIGINT NOT NULL DEFAULT 0,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'RESOLVED', 'AUTO_RESOLVED')),
     detected_at TIMESTAMP NOT NULL,
     resolved_at TIMESTAMP,
     resolution_notes TEXT,
-    related_tx_ids TEXT, -- Comma-separated transaction IDs for investigation
-    FOREIGN KEY (ledger_id) REFERENCES ledgers(id)
+    FOREIGN KEY (ledger_id) REFERENCES ledgers(id),
+    FOREIGN KEY (settlement_batch_id) REFERENCES settlement_batches(id),
+    UNIQUE (settlement_batch_id) -- One discrepancy per batch
 );
 
 CREATE INDEX idx_reconciliation_discrepancies_ledger_id ON reconciliation_discrepancies(ledger_id);
 CREATE INDEX idx_reconciliation_discrepancies_detected ON reconciliation_discrepancies(detected_at DESC);
+CREATE INDEX idx_reconciliation_discrepancies_batch ON reconciliation_discrepancies(settlement_batch_id);
 
 -- Reconciliation logs to track all reconciliation attempts and outcomes
 CREATE TABLE IF NOT EXISTS reconciliation_logs (
@@ -218,7 +229,7 @@ INSERT INTO fee_configs (config_type, payment_channel, fee_type, fixed_amount, p
 VALUES 
 ('PLATFORM', 'PLATFORM', 'FIXED', 1000, 0, NOW(), NOW()),
 ('DOKU', 'QRIS', 'PERCENTAGE', 0, 2.2, NOW(), NOW()),
-('DOKU', 'VIRTUAL_ACCOUNT_MANDIRI', 'FIXED', 4500, 0, NOW(), NOW())
+('DOKU', 'VIRTUAL_ACCOUNT', 'FIXED', 4500, 0, NOW(), NOW())
 ON CONFLICT (config_type, payment_channel) DO NOTHING;
 -- ('PLATFORM', 'VIRTUAL_ACCOUNT_BCA', 'PERCENTAGE', 0, 0.03, NOW(), NOW()),
 -- ('PLATFORM', 'VIRTUAL_ACCOUNT_BNI', 'PERCENTAGE', 0, 0.03, NOW(), NOW()),
@@ -234,4 +245,52 @@ ON CONFLICT (config_type, payment_channel) DO NOTHING;
 -- ('DOKU', 'E_WALLET', 'PERCENTAGE', 0, 0.02, NOW(), NOW())
 
 
+-- Settlement batch tracking (CSV uploads from DOKU)
+CREATE TABLE IF NOT EXISTS settlement_batches (
+    id VARCHAR(36) PRIMARY KEY,
+    ledger_id VARCHAR(36) NOT NULL,
+    report_file_name VARCHAR(255) NOT NULL,
+    settlement_date DATE NOT NULL,
+    gross_amount BIGINT NOT NULL DEFAULT 0,
+    net_amount BIGINT NOT NULL DEFAULT 0,
+    doku_fee BIGINT NOT NULL DEFAULT 0,
+    currency VARCHAR(3) NOT NULL,
+    uploaded_by VARCHAR(255) NOT NULL,
+    uploaded_at TIMESTAMP NOT NULL,
+    processed_at TIMESTAMP,
+    processing_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (processing_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')),
+    matched_count INT DEFAULT 0,
+    unmatched_count INT DEFAULT 0,
+    failure_reason TEXT,
+    metadata JSONB,
+    FOREIGN KEY (ledger_id) REFERENCES ledgers(id),
+    UNIQUE(ledger_id, settlement_date)
+);
 
+CREATE INDEX idx_settlement_batches_ledger_id ON settlement_batches(ledger_id);
+CREATE INDEX idx_settlement_batches_date ON settlement_batches(ledger_id, settlement_date DESC);
+CREATE INDEX idx_settlement_batches_status ON settlement_batches(processing_status);
+
+-- Settlement item linking (individual CSV rows matched to transactions)
+CREATE TABLE IF NOT EXISTS settlement_items (
+    id VARCHAR(36) PRIMARY KEY,
+    settlement_batch_id VARCHAR(36) NOT NULL,
+    product_transaction_id VARCHAR(36),
+    invoice_number VARCHAR(100),
+    transaction_amount BIGINT NOT NULL,
+    pay_to_merchant BIGINT NOT NULL,
+    allocated_fee BIGINT NOT NULL,
+    is_matched BOOLEAN NOT NULL DEFAULT FALSE,
+    expected_net_amount BIGINT NOT NULL DEFAULT 0,
+    amount_discrepancy BIGINT NOT NULL DEFAULT 0,
+    csv_row_number INT NOT NULL,
+    raw_csv_data JSONB,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (settlement_batch_id) REFERENCES settlement_batches(id),
+    FOREIGN KEY (product_transaction_id) REFERENCES product_transactions(id)
+);
+
+CREATE INDEX idx_settlement_items_batch_id ON settlement_items(settlement_batch_id);
+CREATE INDEX idx_settlement_items_product_tx_id ON settlement_items(product_transaction_id);
+CREATE INDEX idx_settlement_items_invoice ON settlement_items(invoice_number);
+CREATE INDEX idx_settlement_items_unmatched ON settlement_items(settlement_batch_id) WHERE is_matched = false;
