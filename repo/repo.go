@@ -24,8 +24,12 @@ func NewRepositoryProvider(db *sql.DB) *RepositoryProvider {
 	return &RepositoryProvider{db: db}
 }
 
-func (p *RepositoryProvider) Ledger() domain.LedgerRepository {
-	return NewPostgresLedgerRepository(p.db)
+func (p *RepositoryProvider) Account() domain.AccountRepository {
+	return NewPostgresAccountRepository(p.db)
+}
+
+func (p *RepositoryProvider) LedgerEntry() domain.LedgerEntryRepository {
+	return NewPostgresLedgerEntryRepository(p.db)
 }
 
 func (p *RepositoryProvider) ReconciliationLog() domain.ReconciliationLogRepository {

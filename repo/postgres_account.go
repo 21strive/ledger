@@ -1,0 +1,172 @@
+package repo
+
+import (
+	"context"
+	"database/sql"
+
+	"github.com/21strive/ledger/domain"
+)
+
+type PostgresAccountRepository struct {
+	db DBTX
+}
+
+func NewPostgresAccountRepository(db DBTX) *PostgresAccountRepository {
+	return &PostgresAccountRepository{db: db}
+}
+
+const accountSelectColumns = `
+	id, doku_subaccount_id, owner_type, owner_id, currency, created_at
+`
+
+// scanAccount scans a single row into a domain.Account.
+// It handles the nullable doku_subaccount_id column.
+func scanAccount(row interface {
+	Scan(dest ...any) error
+}) (*domain.Account, error) {
+	var a domain.Account
+	var dokuSubAccountID sql.NullString
+
+	err := row.Scan(
+		&a.ID,
+		&dokuSubAccountID,
+		&a.OwnerType,
+		&a.OwnerID,
+		&a.Currency,
+		&a.CreatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, ErrFailedScanSQL.WithError(err)
+	}
+
+	if dokuSubAccountID.Valid {
+		a.DokuSubAccountID = dokuSubAccountID.String
+	}
+
+	return &a, nil
+}
+
+func (r *PostgresAccountRepository) GetByID(ctx context.Context, id string) (*domain.Account, error) {
+	query := `
+		SELECT` + accountSelectColumns + `
+		FROM accounts
+		WHERE id = $1
+	`
+
+	row := r.db.QueryRowContext(ctx, query, id)
+	return scanAccount(row)
+}
+
+func (r *PostgresAccountRepository) GetByOwner(ctx context.Context, ownerType domain.OwnerType, ownerID string) (*domain.Account, error) {
+	query := `
+		SELECT` + accountSelectColumns + `
+		FROM accounts
+		WHERE owner_type = $1 AND owner_id = $2
+	`
+
+	row := r.db.QueryRowContext(ctx, query, ownerType, ownerID)
+	return scanAccount(row)
+}
+
+func (r *PostgresAccountRepository) GetByDokuSubAccountID(ctx context.Context, dokuSubAccountID string) (*domain.Account, error) {
+	query := `
+		SELECT` + accountSelectColumns + `
+		FROM accounts
+		WHERE doku_subaccount_id = $1
+	`
+
+	row := r.db.QueryRowContext(ctx, query, dokuSubAccountID)
+	return scanAccount(row)
+}
+
+func (r *PostgresAccountRepository) GetBySellerID(ctx context.Context, sellerID string) (*domain.Account, error) {
+	query := `
+		SELECT` + accountSelectColumns + `
+		FROM accounts
+		WHERE owner_type = $1 AND owner_id = $2
+	`
+
+	row := r.db.QueryRowContext(ctx, query, domain.OwnerTypeSeller, sellerID)
+	return scanAccount(row)
+}
+
+func (r *PostgresAccountRepository) GetPlatformAccount(ctx context.Context) (*domain.Account, error) {
+	query := `
+		SELECT` + accountSelectColumns + `
+		FROM accounts
+		WHERE owner_type = $1
+		LIMIT 1
+	`
+
+	row := r.db.QueryRowContext(ctx, query, domain.OwnerTypePlatform)
+	return scanAccount(row)
+}
+
+func (r *PostgresAccountRepository) GetPaymentGatewayAccount(ctx context.Context) (*domain.Account, error) {
+	query := `
+		SELECT` + accountSelectColumns + `
+		FROM accounts
+		WHERE owner_type = $1
+		LIMIT 1
+	`
+
+	row := r.db.QueryRowContext(ctx, query, domain.OwnerTypePaymentGateway)
+	return scanAccount(row)
+}
+
+func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Account) error {
+	query := `
+		INSERT INTO accounts (
+			id, doku_subaccount_id, owner_type, owner_id, currency, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET
+			doku_subaccount_id = EXCLUDED.doku_subaccount_id,
+			owner_type         = EXCLUDED.owner_type,
+			owner_id           = EXCLUDED.owner_id,
+			currency           = EXCLUDED.currency
+	`
+
+	dokuSubAccountID := sql.NullString{
+		String: account.DokuSubAccountID,
+		Valid:  account.DokuSubAccountID != "",
+	}
+
+	_, err := r.db.ExecContext(
+		ctx,
+		query,
+		account.ID,
+		dokuSubAccountID,
+		account.OwnerType,
+		account.OwnerID,
+		account.Currency,
+		account.CreatedAt,
+	)
+	if err != nil {
+		return ErrFailedInsertSQL.WithError(err)
+	}
+
+	return nil
+}
+
+func (r *PostgresAccountRepository) Delete(ctx context.Context, id string) error {
+	query := `DELETE FROM accounts WHERE id = $1`
+
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return ErrFailedDeleteSQL.WithError(err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return ErrFailedDeleteSQL.WithError(err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}

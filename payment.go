@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/21strive/doku/app/requests"
 	dokuRequests "github.com/21strive/doku/app/requests"
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
@@ -58,12 +59,12 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	}
 
 	// Get seller's ledger to obtain DOKU SAC ID
-	sellerLedger, err := c.repoProvider.Ledger().GetByAccountID(ctx, req.SellerAccountID)
+	sellerAcccount, err := c.repoProvider.Account().GetBySellerID(ctx, req.SellerAccountID)
 	if err != nil {
 		if ledgererr.IsAppError(err, repo.ErrNotFound) {
-			return nil, ledgererr.ErrLedgerNotFound.WithError(fmt.Errorf("seller ledger not found for account_id: %s", req.SellerAccountID))
+			return nil, ledgererr.ErrLedgerNotFound.WithError(fmt.Errorf("seller account not found for seller_id: %s", req.SellerAccountID))
 		}
-		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get seller ledger", err)
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get seller account", err)
 	}
 
 	// Load fee configurations
@@ -120,7 +121,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 		Amount:         feeBreakdown.TotalCharged,
 		CustomerName:   req.BuyerName,
 		CustomerEmail:  req.BuyerEmail,
-		SacID:          sellerLedger.DokuSubAccountID,
+		SacID:          sellerAcccount.DokuSubAccountID,
 		PaymentDueDate: expiresInMinutes, // DOKU expects minutes
 		InvoiceNumber:  invoiceNumber,
 		PaymentMethod:  req.PaymentChannel,
@@ -215,6 +216,114 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 		TotalCharged:  feeBreakdown.TotalCharged,
 		Currency:      string(currency),
 	}, nil
+}
+
+type NotifyPaymentSuccessRequest struct {
+	TransactionID string
+	InvoiceNumber string
+	PaymentCode   string
+	PaymentURL    string
+	ExpiresAt     int64
+	SellerPrice   int64
+	PlatformFee   int64
+	DokuFee       int64
+	TotalCharged  int64
+	Currency      string
+}
+
+func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.DokuNotificationRequest) error {
+	dokuResp, dokuErr := c.dokuClient.HandleNotification(req)
+	if dokuErr != nil {
+		return ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to notify payment success", fmt.Errorf("status: %d, error: %v", dokuErr.StatusCode, dokuErr.Message))
+	}
+
+	if dokuResp.Transaction.Status.String != "SUCCESS" {
+		return ledgererr.NewError(ledgererr.CodeDokuAPIError, "payment status is not paid", fmt.Errorf("status: %s", dokuResp.Transaction.Status.String))
+	}
+
+	// 1. Get the invoice number from the DOKU response
+	if dokuResp.Order == nil || !dokuResp.Order.InvoiceNumber.Valid {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "missing invoice number in notification", nil)
+	}
+	invoiceNumber := dokuResp.Order.InvoiceNumber.String
+
+	// 2. Fetch the corresponding ProductTransaction
+	productTx, err := c.repoProvider.ProductTransaction().GetByInvoiceNumber(ctx, invoiceNumber)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return ledgererr.NewError(ledgererr.CodeNotFound, "product transaction not found", err)
+		}
+		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to get product transaction", err)
+	}
+
+	// Double webhook idempotency check: if not PENDING, already processed or terminal
+	if !productTx.IsPending() {
+		c.logger.InfoContext(ctx, "Payment notification received for non-pending transaction", "invoice_number", invoiceNumber, "status", productTx.Status)
+		return nil
+	}
+
+	// 3. Fetch related PaymentRequest
+	paymentReq, err := c.repoProvider.PaymentRequest().GetByProductTransactionID(ctx, productTx.ID)
+	if err != nil {
+		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to get payment request", err)
+	}
+
+	// 4. Resolve the system accounts needed for ledger entries
+	platformAccount, err := c.repoProvider.Account().GetPlatformAccount(ctx)
+	if err != nil {
+		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to get platform account", err)
+	}
+
+	dokuAccount, err := c.repoProvider.Account().GetPaymentGatewayAccount(ctx)
+	if err != nil {
+		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to get payment gateway account", err)
+	}
+
+	// 5. Generate ledger entries (PENDING credit to seller, platform, and doku)
+	ledgerEntries := domain.NewPaymentEntries(
+		productTx.ID,
+		productTx.SellerAccountID,
+		productTx.Fee.SellerPrice,
+		platformAccount.ID,
+		productTx.Fee.PlatformFee,
+		dokuAccount.ID,
+		productTx.Fee.DokuFee,
+	)
+
+	// 6. Persist everything in single transaction
+	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		// Update PaymentRequest to COMPLETED
+		if err := paymentReq.MarkCompleted(); err != nil {
+			return err
+		}
+		if err := tx.PaymentRequest().Update(ctx, paymentReq); err != nil {
+			return err
+		}
+
+		// Update ProductTransaction to COMPLETED
+		if err := productTx.MarkCompleted(); err != nil {
+			return err
+		}
+		if err := tx.ProductTransaction().UpdateStatus(ctx, productTx.ID, productTx.Status, *productTx.CompletedAt); err != nil {
+			return err
+		}
+
+		// Insert immutable ledger entries
+		if err := tx.LedgerEntry().SaveBatch(ctx, ledgerEntries); err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		c.logger.ErrorContext(ctx, "Failed to persist payment success", "invoice_number", invoiceNumber, "error", err)
+		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to persist payment success transaction", err)
+	}
+
+	c.logger.InfoContext(ctx, "Payment success securely handled", "invoice_number", invoiceNumber, "product_tx_id", productTx.ID)
+
+	return nil
 }
 
 // CalculateFees returns the fee breakdown without creating a transaction
