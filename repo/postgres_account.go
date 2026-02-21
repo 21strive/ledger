@@ -52,7 +52,7 @@ func scanAccount(row interface {
 func (r *PostgresAccountRepository) GetByID(ctx context.Context, id string) (*domain.Account, error) {
 	query := `
 		SELECT` + accountSelectColumns + `
-		FROM accounts
+		FROM ledger_accounts
 		WHERE id = $1
 	`
 
@@ -63,7 +63,7 @@ func (r *PostgresAccountRepository) GetByID(ctx context.Context, id string) (*do
 func (r *PostgresAccountRepository) GetByOwner(ctx context.Context, ownerType domain.OwnerType, ownerID string) (*domain.Account, error) {
 	query := `
 		SELECT` + accountSelectColumns + `
-		FROM accounts
+		FROM ledger_accounts
 		WHERE owner_type = $1 AND owner_id = $2
 	`
 
@@ -74,7 +74,7 @@ func (r *PostgresAccountRepository) GetByOwner(ctx context.Context, ownerType do
 func (r *PostgresAccountRepository) GetByDokuSubAccountID(ctx context.Context, dokuSubAccountID string) (*domain.Account, error) {
 	query := `
 		SELECT` + accountSelectColumns + `
-		FROM accounts
+		FROM ledger_accounts
 		WHERE doku_subaccount_id = $1
 	`
 
@@ -85,7 +85,7 @@ func (r *PostgresAccountRepository) GetByDokuSubAccountID(ctx context.Context, d
 func (r *PostgresAccountRepository) GetBySellerID(ctx context.Context, sellerID string) (*domain.Account, error) {
 	query := `
 		SELECT` + accountSelectColumns + `
-		FROM accounts
+		FROM ledger_accounts
 		WHERE owner_type = $1 AND owner_id = $2
 	`
 
@@ -96,7 +96,7 @@ func (r *PostgresAccountRepository) GetBySellerID(ctx context.Context, sellerID 
 func (r *PostgresAccountRepository) GetPlatformAccount(ctx context.Context) (*domain.Account, error) {
 	query := `
 		SELECT` + accountSelectColumns + `
-		FROM accounts
+		FROM ledger_accounts
 		WHERE owner_type = $1
 		LIMIT 1
 	`
@@ -108,7 +108,7 @@ func (r *PostgresAccountRepository) GetPlatformAccount(ctx context.Context) (*do
 func (r *PostgresAccountRepository) GetPaymentGatewayAccount(ctx context.Context) (*domain.Account, error) {
 	query := `
 		SELECT` + accountSelectColumns + `
-		FROM accounts
+		FROM ledger_accounts
 		WHERE owner_type = $1
 		LIMIT 1
 	`
@@ -119,7 +119,7 @@ func (r *PostgresAccountRepository) GetPaymentGatewayAccount(ctx context.Context
 
 func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Account) error {
 	query := `
-		INSERT INTO accounts (
+		INSERT INTO ledger_accounts (
 			id, doku_subaccount_id, owner_type, owner_id, currency, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (id) DO UPDATE SET
@@ -152,7 +152,7 @@ func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Ac
 }
 
 func (r *PostgresAccountRepository) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM accounts WHERE id = $1`
+	query := `DELETE FROM ledger_accounts WHERE id = $1`
 
 	res, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {

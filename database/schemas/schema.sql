@@ -1,4 +1,4 @@
-CREATE TABLE accounts (
+CREATE TABLE ledger_accounts (
     id UUID PRIMARY KEY,
     doku_subaccount_id VARCHAR(100) UNIQUE,
     owner_type VARCHAR(20) NOT NULL CHECK (
@@ -10,15 +10,15 @@ CREATE TABLE accounts (
         )
     ),
     owner_id VARCHAR(255),
-    -- e.g. seller_id for SELLER accounts, platform for PLATFORM accounts,
-    -- payment gateway name for PAYMENT_GATEWAY_EXPENSE accounts, etc.
+    -- e.g. seller_id for SELLER ledger_accounts, platform for PLATFORM ledger_accounts,
+    -- payment gateway name for PAYMENT_GATEWAY_EXPENSE ledger_accounts, etc.
     currency VARCHAR(3) NOT NULL,
     created_at TIMESTAMP NOT NULL
 );
 
 -- Ensure there is at most one PLATFORM and one PAYMENT_GATEWAY account
-CREATE UNIQUE INDEX idx_accounts_unique_platform ON accounts(owner_type) WHERE owner_type = 'PLATFORM';
-CREATE UNIQUE INDEX idx_accounts_unique_payment_gateway ON accounts(owner_type) WHERE owner_type = 'PAYMENT_GATEWAY';
+CREATE UNIQUE INDEX idx_accounts_unique_platform ON ledger_accounts(owner_type) WHERE owner_type = 'PLATFORM';
+CREATE UNIQUE INDEX idx_accounts_unique_payment_gateway ON ledger_accounts(owner_type) WHERE owner_type = 'PAYMENT_GATEWAY';
 
 
 CREATE TABLE ledger_entries (
@@ -28,7 +28,7 @@ CREATE TABLE ledger_entries (
     journal_id UUID NOT NULL,
 
     -- Account affected
-    account_id UUID NOT NULL REFERENCES accounts(id),
+    account_id UUID NOT NULL REFERENCES ledger_accounts(id),
 
     -- Money movement
     amount BIGINT NOT NULL,
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
     detected_at TIMESTAMP NOT NULL,
     resolved_at TIMESTAMP,
     resolution_notes TEXT,
-    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id),
     FOREIGN KEY (settlement_batch_id) REFERENCES settlement_batches(id),
     UNIQUE (settlement_batch_id) -- One discrepancy per batch
 );
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS reconciliation_logs (
     fee_amount BIGINT DEFAULT 0,
     notes TEXT,
     created_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (account_id) REFERENCES accounts(id)
+    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id)
 );
 
 CREATE INDEX idx_reconciliation_logs_account_created ON reconciliation_logs(account_id, created_at DESC);
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS disbursements (
     failure_reason TEXT,
     created_at TIMESTAMP NOT NULL,
     processed_at TIMESTAMP,
-    FOREIGN KEY (account_id) REFERENCES accounts(id)
+    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id)
 );
 
 CREATE INDEX idx_disbursements_account_id ON disbursements(account_id);
@@ -370,7 +370,7 @@ CREATE TABLE IF NOT EXISTS settlement_batches (
     unmatched_count INT DEFAULT 0,
     failure_reason TEXT,
     metadata JSONB,
-    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id),
     UNIQUE(account_id, settlement_date)
 );
 

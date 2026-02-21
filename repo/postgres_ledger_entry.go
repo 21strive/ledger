@@ -156,12 +156,12 @@ func (r *PostgresLedgerEntryRepository) SumAvailableBalanceBySellerID(ctx contex
 }
 
 // sumSellerBalance is the shared implementation for both seller balance queries.
-// It joins ledger_entries → accounts to filter by the seller's business-level owner_id.
+// It joins ledger_entries → ledger_accounts to filter by the seller's business-level owner_id.
 func (r *PostgresLedgerEntryRepository) sumSellerBalance(ctx context.Context, sellerID string, bucket domain.BalanceBucket) (int64, error) {
 	query := `
 		SELECT COALESCE(SUM(le.amount), 0)
 		FROM ledger_entries le
-		JOIN accounts a ON a.id = le.account_id
+		JOIN ledger_accounts a ON a.id = le.account_id
 		WHERE a.owner_type = 'SELLER'
 		  AND a.owner_id  = $1
 		  AND le.balance_bucket = $2
@@ -184,7 +184,7 @@ func (r *PostgresLedgerEntryRepository) GetAllBalancesBySellerID(ctx context.Con
 			COALESCE(SUM(le.amount) FILTER (WHERE le.balance_bucket = 'PENDING'),   0) AS pending,
 			COALESCE(SUM(le.amount) FILTER (WHERE le.balance_bucket = 'AVAILABLE'), 0) AS available
 		FROM ledger_entries le
-		JOIN accounts a ON a.id = le.account_id
+		JOIN ledger_accounts a ON a.id = le.account_id
 		WHERE a.owner_type = 'SELLER'
 		  AND a.owner_id  = $1
 	`
