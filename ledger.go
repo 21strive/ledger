@@ -83,6 +83,18 @@ func (c *LedgerClient) GetAccountByDokuSubAccountID(ctx context.Context, dokuSub
 	return account, nil
 }
 
+// GetAccountBySellerID returns an account by its seller ID (owner_type=SELLER, owner_id=sellerID).
+func (c *LedgerClient) GetAccountBySellerID(ctx context.Context, sellerID string) (*domain.Account, error) {
+	account, err := c.repoProvider.Account().GetBySellerID(ctx, sellerID)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account by seller ID", err)
+	}
+	return account, nil
+}
+
 // CreateAccount provisions a DOKU sub-account and persists an Account record.
 // Idempotent: if an account for accountID already exists, returns ErrLedgerAlreadyExists.
 func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, email, name string, currency domain.Currency) (*domain.Account, error) {
