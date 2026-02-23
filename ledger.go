@@ -16,6 +16,8 @@ import (
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
 	"github.com/21strive/ledger/repo"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 )
 
@@ -28,9 +30,10 @@ type LedgerClient struct {
 	logger       *slog.Logger
 	repoProvider repo.RepositoryProvider
 	dokuClient   usecases.DokuUseCaseInterface
+	s3           *s3.Client
 }
 
-func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logger *slog.Logger) *LedgerClient {
+func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logger *slog.Logger, awsConfig aws.Config) *LedgerClient {
 	txProvider := repo.NewTransactionProvider(db)
 	repoProvider := repo.NewRepositoryProvider(db)
 
@@ -40,6 +43,7 @@ func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logge
 		logger:       logger,
 		dokuClient:   dokuClient,
 		repoProvider: *repoProvider,
+		s3:           s3.NewFromConfig(awsConfig),
 	}
 }
 
