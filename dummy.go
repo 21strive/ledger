@@ -58,6 +58,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 	}
 
 	dummyBuyerUUID := uuid.New().String()
+	dummyProductID := uuid.New().String()
 
 	dummyPendingTransactions := []map[string]any{
 		{
