@@ -109,7 +109,7 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 			id, buyer_account_id, seller_account_id, product_id, invoice_number,
 			seller_price, platform_fee, doku_fee, total_charged, currency,
 			status, created_at, completed_at, settled_at, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
 		ON CONFLICT (id) DO UPDATE SET
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
