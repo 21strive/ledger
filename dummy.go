@@ -315,16 +315,17 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				time.Now().Add(24*time.Hour),
 			)
 
-			// Save PaymentRequest
-			if err := tx.PaymentRequest().Save(context.Background(), paymentReq); err != nil {
-				return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save payment request", err)
-			}
-
 			productTx.MarkSettled()
 			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
 				c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
 				return err
 			}
+
+			// Save PaymentRequest
+			if err := tx.PaymentRequest().Save(context.Background(), paymentReq); err != nil {
+				return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save payment request", err)
+			}
+
 			// Seller Entries
 			batchID := "dummy-settlement-batch-id"
 			sellerEntry := domain.NewSettlementEntriesForAccount(
