@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"time"
 
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
@@ -265,6 +266,27 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			}
 
 			status := txData["status"].(string)
+			productTx.MarkCompleted()
+			ledgerEntries := domain.NewPaymentEntries(
+				productTx.ID,
+				productTx.SellerAccountID,
+				productTx.Fee.SellerPrice,
+				platformAccount.ID,
+				productTx.Fee.PlatformFee,
+				dokuAccount.ID,
+				productTx.Fee.DokuFee,
+			)
+
+			// Insert immutable ledger entries
+			if err := tx.LedgerEntry().SaveBatch(context.Background(), ledgerEntries); err != nil {
+				return err
+			}
+
+			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
+				return err
+			}
+
 			if status == "paid" {
 				productTx.MarkSettled()
 
@@ -297,26 +319,14 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				if err := tx.LedgerEntry().SaveBatch(context.Background(), paidLedgerEntries); err != nil {
 					return err
 				}
-			} else {
-				productTx.MarkCompleted()
-				ledgerEntries := domain.NewPaymentEntries(
-					productTx.ID,
-					productTx.SellerAccountID,
-					productTx.Fee.SellerPrice,
-					platformAccount.ID,
-					productTx.Fee.PlatformFee,
-					dokuAccount.ID,
-					productTx.Fee.DokuFee,
-				)
 
-				// Insert immutable ledger entries
-				if err := tx.LedgerEntry().SaveBatch(context.Background(), ledgerEntries); err != nil {
-					return err
+				if err := tx.ProductTransaction().UpdateStatus(context.Background(), productTx.ID, domain.TransactionStatusSettled, time.Now()); err != nil {
+					c.logger.WarnContext(context.Background(), "Failed to update product transaction status",
+						"product_tx_id", productTx.ID,
+						"error", err,
+					)
 				}
-			}
-			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
-				c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
-				return err
+
 			}
 
 			// Here you would save the product transaction and ledger entries to the database
