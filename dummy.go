@@ -57,7 +57,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 	dummyPendingTransactions := []map[string]any{
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1011",
 			"price":          100000,
 			"invoice_number": "INV-001-001",
@@ -69,7 +69,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1012",
 			"price":          200000,
 			"invoice_number": "INV-001-002",
@@ -81,7 +81,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1013",
 			"price":          300000,
 			"invoice_number": "INV-001-003",
@@ -93,7 +93,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1014",
 			"price":          312012,
 			"invoice_number": "INV-001-004",
@@ -105,7 +105,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1015",
 			"price":          150000,
 			"invoice_number": "INV-001-005",
@@ -117,7 +117,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1016",
 			"price":          250000,
 			"invoice_number": "INV-001-006",
@@ -132,7 +132,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 	dummyPaidTransactions := []map[string]any{
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1017",
 			"price":          175000,
 			"invoice_number": "INV-002-001",
@@ -144,7 +144,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1018",
 			"price":          225000,
 			"invoice_number": "INV-002-002",
@@ -156,7 +156,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1019",
 			"price":          275000,
 			"invoice_number": "INV-002-003",
@@ -168,7 +168,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1020",
 			"price":          125000,
 			"invoice_number": "INV-002-004",
@@ -180,7 +180,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1021",
 			"price":          300000,
 			"invoice_number": "INV-002-005",
@@ -192,7 +192,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1022",
 			"price":          200000,
 			"invoice_number": "INV-002-006",
@@ -204,7 +204,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerEmail,
+			"seller_id":      sellerAccount.ID,
 			"product_id":     "123-456-789-1023",
 			"price":          180000,
 			"invoice_number": "INV-002-007",
