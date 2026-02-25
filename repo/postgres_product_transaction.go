@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/21strive/ledger/domain"
@@ -115,6 +116,9 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 			settled_at = EXCLUDED.settled_at,
 			metadata = EXCLUDED.metadata
 	`
+
+	log.Printf("ProductTransaction to save: %+v", tx)
+	log.Printf("metadataJSON: %s", string(metadataJSON))
 
 	_, err = r.db.ExecContext(
 		ctx,
