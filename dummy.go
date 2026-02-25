@@ -6,6 +6,7 @@ import (
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
 	"github.com/21strive/ledger/repo"
+	"github.com/google/uuid"
 )
 
 func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) {
@@ -51,13 +52,15 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		c.logger.InfoContext(context.Background(), "Seller account created", "account_id", sellerAccount.ID)
 	}
 
+	dummyBuyerUUID := uuid.New().String()
+
 	dummyPendingTransactions := []map[string]any{
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1011",
 			"price":          100000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-001-001",
 			"metadata": map[string]any{
 				"title":     "Ngawi Lari Santai",
 				"full_name": "Alice Johnson",
@@ -65,11 +68,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1012",
 			"price":          200000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-001-002",
 			"metadata": map[string]any{
 				"title":     "Jakarta Fun Run",
 				"full_name": "Charlie Krik",
@@ -77,11 +80,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1013",
 			"price":          300000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-001-003",
 			"metadata": map[string]any{
 				"title":     "Bali Sunset Photos",
 				"full_name": "Emily Carter",
@@ -89,11 +92,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1014",
 			"price":          312012,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-001-004",
 			"metadata": map[string]any{
 				"title":     "Surabaya Marathon",
 				"full_name": "David Lee",
@@ -101,11 +104,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1015",
 			"price":          150000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-001-005",
 			"metadata": map[string]any{
 				"title":     "Yogyakarta Street Food",
 				"full_name": "Sophia Kim",
@@ -113,11 +116,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1016",
 			"price":          250000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-001-006",
 			"metadata": map[string]any{
 				"title":     "Bandung Artisanal Coffee",
 				"full_name": "Michael Chen",
@@ -128,11 +131,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 
 	dummyPaidTransactions := []map[string]any{
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1017",
 			"price":          175000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-002-001",
 			"metadata": map[string]any{
 				"title":     "Medan Culinary Tour",
 				"full_name": "Olivia Davis",
@@ -140,11 +143,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1018",
 			"price":          225000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-002-002",
 			"metadata": map[string]any{
 				"title":     "Semarang Historical Sites",
 				"full_name": "James Wilson",
@@ -152,11 +155,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1019",
 			"price":          275000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-002-003",
 			"metadata": map[string]any{
 				"title":     "Makassar Beach Sunset",
 				"full_name": "Isabella Martinez",
@@ -164,11 +167,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1020",
 			"price":          125000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-002-004",
 			"metadata": map[string]any{
 				"title":     "Balikpapan Nature Hike",
 				"full_name": "William Anderson",
@@ -176,11 +179,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1021",
 			"price":          300000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-002-005",
 			"metadata": map[string]any{
 				"title":     "Pontianak River Cruise",
 				"full_name": "Mia Thomas",
@@ -188,11 +191,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1022",
 			"price":          200000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-002-006",
 			"metadata": map[string]any{
 				"title":     "Manado Diving Experience",
 				"full_name": "Benjamin Garcia",
@@ -200,11 +203,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			},
 		},
 		{
-			"buyer_id":       "dummy-buyer-account-id",
+			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerEmail,
 			"product_id":     "123-456-789-1023",
 			"price":          180000,
-			"invoice_number": generateInvoiceNumber(),
+			"invoice_number": "INV-002-007",
 			"metadata": map[string]any{
 				"title":     "Padang Culinary Delights",
 				"full_name": "Charlotte Rodriguez",
@@ -236,6 +239,17 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				feeBreakdown,
 				txData["metadata"].(map[string]any),
 			)
+			invoiceNum := txData["invoice_number"].(string)
+
+			existingProductTx, err := tx.ProductTransaction().GetByInvoiceNumber(context.Background(), invoiceNum)
+			if err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to get existing product transaction", "invoice_number", invoiceNum, "error", err)
+				return err
+			}
+			if existingProductTx != nil {
+				c.logger.InfoContext(context.Background(), "Skipping existing product transaction", "invoice_number", invoiceNum)
+				continue
+			}
 
 			ledgerEntries := domain.NewPaymentEntries(
 				productTx.ID,
@@ -274,6 +288,17 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				feeBreakdown,
 				txData["metadata"].(map[string]any),
 			)
+			invoiceNum := txData["invoice_number"].(string)
+
+			existingProductTx, err := tx.ProductTransaction().GetByInvoiceNumber(context.Background(), invoiceNum)
+			if err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to get existing product transaction", "invoice_number", invoiceNum, "error", err)
+				return err
+			}
+			if existingProductTx != nil {
+				c.logger.InfoContext(context.Background(), "Skipping existing product transaction", "invoice_number", invoiceNum)
+				continue
+			}
 
 			productTx.MarkSettled()
 			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
