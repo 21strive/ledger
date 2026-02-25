@@ -48,6 +48,11 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 	sellerAccount, err := c.CreateAccount(context.Background(), sellerEmail, sellerEmail, "Testing Name", domain.CurrencyIDR)
 	if err != nil {
 		c.logger.ErrorContext(context.Background(), "Failed to create seller account: skipping...", "error", err)
+		sellerAccount, err = c.repoProvider.Account().GetBySellerID(context.Background(), sellerEmail)
+		if err != nil {
+			c.logger.ErrorContext(context.Background(), "Failed to get seller account by seller ID", "error", err)
+			return
+		}
 	} else {
 		c.logger.InfoContext(context.Background(), "Seller account created", "account_id", sellerAccount.ID)
 	}
