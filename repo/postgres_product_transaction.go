@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/21strive/ledger/domain"
@@ -109,7 +109,7 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 			id, buyer_account_id, seller_account_id, product_id, invoice_number,
 			seller_price, platform_fee, doku_fee, total_charged, currency,
 			status, created_at, completed_at, settled_at, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (id) DO UPDATE SET
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
@@ -117,8 +117,8 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 			metadata = EXCLUDED.metadata
 	`
 
-	log.Printf("ProductTransaction to save: %+v", tx)
-	log.Printf("metadataJSON: %s", string(metadataJSON))
+	slog.InfoContext(ctx, "Saving ProductTransaction", "product_transaction", tx)
+	slog.InfoContext(ctx, "metadataJSON", "metadata_json", string(metadataJSON))
 
 	_, err = r.db.ExecContext(
 		ctx,
@@ -137,7 +137,10 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.CreatedAt,
 		tx.CompletedAt,
 		tx.SettledAt,
-		string(metadataJSON),
+		sql.NullString{
+			String: string(metadataJSON),
+			Valid:  len(metadataJSON) > 0,
+		},
 	)
 	if err != nil {
 		return ErrFailedInsertSQL.WithError(err)
