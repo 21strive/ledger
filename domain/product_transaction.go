@@ -52,6 +52,7 @@ type ProductTransactionRepository interface {
 	GetByBuyerAccountID(ctx context.Context, buyerAccountID string, page, pageSize int) ([]*ProductTransaction, error)
 	GetPendingBySellerAccountID(ctx context.Context, sellerAccountID string) ([]*ProductTransaction, error)
 	GetCompletedNotSettled(ctx context.Context, sellerAccountID string) ([]*ProductTransaction, error)
+	GetAllBySellerID(ctx context.Context, sellerAccountID string) ([]*ProductTransaction, error)
 	Save(ctx context.Context, tx *ProductTransaction) error
 	UpdateStatus(ctx context.Context, id string, status TransactionStatus, timestamp time.Time) error
 }

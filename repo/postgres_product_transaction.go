@@ -99,6 +99,19 @@ func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx contex
 	return r.scanMany(ctx, query, sellerAccountID)
 }
 
+func (r *PostgresProductTransactionRepository) GetAllBySellerID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
+	query := `
+		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       status, created_at, completed_at, settled_at, metadata
+		FROM product_transactions
+		WHERE seller_account_id = $1
+		ORDER BY created_at DESC
+	`
+
+	return r.scanMany(ctx, query, sellerAccountID)
+}
+
 func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *domain.ProductTransaction) error {
 	metadataJSON, err := json.Marshal(tx.Metadata)
 	if err != nil {

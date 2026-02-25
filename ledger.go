@@ -1028,3 +1028,39 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		Verification:  verification,
 	}, nil
 }
+
+type EarningsResponse struct {
+	PendingTransactions []*domain.ProductTransaction `json:"pending_transactions"`
+	SettledTransactions []*domain.ProductTransaction `json:"settled_transactions"`
+}
+
+// GetEarnings returns pending (COMPLETED) and settled (SETTLED) transactions for a seller.
+func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string) (*EarningsResponse, error) {
+	account, err := c.repoProvider.Account().GetBySellerID(ctx, sellerID)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account by seller ID", err)
+	}
+
+	transactions, err := c.repoProvider.ProductTransaction().GetAllBySellerID(ctx, account.ID)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get transactions", err)
+	}
+
+	resp := &EarningsResponse{
+		PendingTransactions: make([]*domain.ProductTransaction, 0),
+		SettledTransactions: make([]*domain.ProductTransaction, 0),
+	}
+
+	for _, tx := range transactions {
+		if tx.Status == domain.TransactionStatusCompleted {
+			resp.PendingTransactions = append(resp.PendingTransactions, tx)
+		} else if tx.Status == domain.TransactionStatusSettled {
+			resp.SettledTransactions = append(resp.SettledTransactions, tx)
+		}
+	}
+
+	return resp, nil
+}
