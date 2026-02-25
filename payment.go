@@ -109,7 +109,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 
 	productTx := domain.NewProductTransaction(
 		req.BuyerAccountID,
-		req.SellerAccountID,
+		sellerAcccount.ID,
 		req.ProductID,
 		invoiceNumber,
 		feeBreakdown,

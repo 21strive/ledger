@@ -87,8 +87,8 @@ CREATE TABLE ledger_entries (
 -- "license_type": "Commercial", "download_url": "https://..."}
 CREATE TABLE IF NOT EXISTS product_transactions (
     id UUID PRIMARY KEY,
-    buyer_account_id UUID NOT NULL,
-    seller_account_id UUID NOT NULL,
+    buyer_account_id VARCHAR(255) NOT NULL,
+    seller_account_id VARCHAR(255) NOT NULL,
     product_id UUID NOT NULL,
     invoice_number VARCHAR(50) NOT NULL UNIQUE,
     -- Our internal invoice number
