@@ -227,7 +227,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 
 		// PENDING Transactions
 		for _, txData := range dummyPendingTransactions {
-			feeBreakdown := feeCalc.GetFeeBreakdown(txData["price"].(int64), "QRIS", domain.CurrencyIDR)
+			feeBreakdown := feeCalc.GetFeeBreakdown(int64(txData["price"].(int)), "QRIS", domain.CurrencyIDR)
 			productTx := domain.NewProductTransaction(
 				txData["buyer_id"].(string),
 				txData["seller_id"].(string),
@@ -265,7 +265,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		}
 
 		for _, txData := range dummyPaidTransactions {
-			feeBreakdown := feeCalc.GetFeeBreakdown(txData["price"].(int64), "QRIS", domain.CurrencyIDR)
+			feeBreakdown := feeCalc.GetFeeBreakdown(int64(txData["price"].(int)), "QRIS", domain.CurrencyIDR)
 			productTx := domain.NewProductTransaction(
 				txData["buyer_id"].(string),
 				txData["seller_id"].(string),
