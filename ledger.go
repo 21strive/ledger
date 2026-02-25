@@ -156,7 +156,8 @@ func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, emai
 }
 
 // CreatePlatformAccount creates a PLATFORM-type account (no DOKU sub-account creation).
-func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, ownerID string, currency domain.Currency) (*domain.Account, error) {
+func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, currency domain.Currency) (*domain.Account, error) {
+	ownerID := "PLATFORM"
 	existing, err := c.repoProvider.Account().GetByOwner(ctx, domain.OwnerTypePlatform, ownerID)
 	if err == nil {
 		c.logger.InfoContext(ctx, "Platform account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.ID)
@@ -166,7 +167,37 @@ func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, ownerID string
 		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to check existing platform account", err)
 	}
 
-	account := domain.NewPlatformAccount("", ownerID, currency)
+	// Provision DOKU sub-account
+	var dokuSubAccountID string
+	response, dokuErr := c.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
+		Email: email,
+		Name:  ownerID,
+	})
+	c.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
+
+	if dokuErr != nil {
+		if dokuErr.StatusCode == http.StatusConflict {
+			messageStr := fmt.Sprintf("%v", dokuErr.Message)
+			re := regexp.MustCompile(`account id:\s*(SAC-[\w-]+)`)
+			matches := re.FindStringSubmatch(messageStr)
+			if len(matches) > 1 {
+				dokuSubAccountID = matches[1]
+				c.logger.InfoContext(ctx, "Email already registered, using existing SAC ID", "sac_id", dokuSubAccountID, "email", email)
+			} else {
+				return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists,
+					"DOKU sub account already exists but could not extract SAC ID",
+					fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
+			}
+		} else {
+			return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
+				"failed to create DOKU sub account",
+				fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
+		}
+	} else {
+		dokuSubAccountID = response.ID.String
+	}
+
+	account := domain.NewPlatformAccount(dokuSubAccountID, ownerID, currency)
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
 		if err := tx.Account().Save(ctx, &account); err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to create platform account", err)
@@ -584,7 +615,7 @@ type ReconciliationVerify struct {
 // 2. Derive pre-settlement balances from ledger_entries
 // 3. Insert settlement_batch record
 // 4. For each CSV row: match → mark ProductTransaction SETTLED
-// 5. Write settlement ledger entries (PENDING→AVAILABLE) in one transaction
+// 5. Write settlement ledger entries (PENDING→AVAILABLE) for each transaction
 // 6. Optionally verify with DOKU GetBalance API
 func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *ReconciliationRequest) (*ReconciliationResponse, error) {
 	if req.SellerID == "" {
@@ -750,6 +781,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 
 	now := time.Now()
 
+	// TODO: settlement entry should be for each product transaction
 	// Build settlement ledger entries
 	allSettlementEntries := make([]*domain.LedgerEntry, 0)
 
