@@ -138,10 +138,7 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.CreatedAt,
 		tx.CompletedAt,
 		tx.SettledAt,
-		sql.NullString{
-			String: string(metadataJSON),
-			Valid:  len(metadataJSON) > 0,
-		},
+		string(metadataJSON),
 	)
 	if err != nil {
 		pqErr, ok := err.(*pq.Error)
