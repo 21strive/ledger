@@ -64,7 +64,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1011",
+			"product_id":     dummyProductID,
 			"price":          100000,
 			"invoice_number": "INV-001-001",
 			"metadata": map[string]any{
@@ -76,7 +76,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1012",
+			"product_id":     dummyProductID,
 			"price":          200000,
 			"invoice_number": "INV-001-002",
 			"metadata": map[string]any{
@@ -88,7 +88,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1013",
+			"product_id":     dummyProductID,
 			"price":          300000,
 			"invoice_number": "INV-001-003",
 			"metadata": map[string]any{
@@ -100,7 +100,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1014",
+			"product_id":     dummyProductID,
 			"price":          312012,
 			"invoice_number": "INV-001-004",
 			"metadata": map[string]any{
@@ -112,7 +112,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1015",
+			"product_id":     dummyProductID,
 			"price":          150000,
 			"invoice_number": "INV-001-005",
 			"metadata": map[string]any{
@@ -124,7 +124,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1016",
+			"product_id":     dummyProductID,
 			"price":          250000,
 			"invoice_number": "INV-001-006",
 			"metadata": map[string]any{
@@ -139,7 +139,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1017",
+			"product_id":     dummyProductID,
 			"price":          175000,
 			"invoice_number": "INV-002-001",
 			"metadata": map[string]any{
@@ -151,7 +151,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1018",
+			"product_id":     dummyProductID,
 			"price":          225000,
 			"invoice_number": "INV-002-002",
 			"metadata": map[string]any{
@@ -163,7 +163,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1019",
+			"product_id":     dummyProductID,
 			"price":          275000,
 			"invoice_number": "INV-002-003",
 			"metadata": map[string]any{
@@ -175,7 +175,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1020",
+			"product_id":     dummyProductID,
 			"price":          125000,
 			"invoice_number": "INV-002-004",
 			"metadata": map[string]any{
@@ -187,7 +187,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1021",
+			"product_id":     dummyProductID,
 			"price":          300000,
 			"invoice_number": "INV-002-005",
 			"metadata": map[string]any{
@@ -199,7 +199,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1022",
+			"product_id":     dummyProductID,
 			"price":          200000,
 			"invoice_number": "INV-002-006",
 			"metadata": map[string]any{
@@ -211,7 +211,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.ID,
-			"product_id":     "123-456-789-1023",
+			"product_id":     dummyProductID,
 			"price":          180000,
 			"invoice_number": "INV-002-007",
 			"metadata": map[string]any{
