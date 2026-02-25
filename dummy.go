@@ -67,6 +67,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			"seller_id":      sellerAccount.ID,
 			"product_id":     dummyProductID,
 			"price":          100000,
+			"status":         "paid",
 			"invoice_number": "INV-001-001",
 			"metadata": map[string]any{
 				"title":     "Ngawi Lari Santai",
@@ -79,6 +80,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			"seller_id":      sellerAccount.ID,
 			"product_id":     dummyProductID,
 			"price":          200000,
+			"status":         "paid",
 			"invoice_number": "INV-001-002",
 			"metadata": map[string]any{
 				"title":     "Jakarta Fun Run",
@@ -91,6 +93,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			"seller_id":      sellerAccount.ID,
 			"product_id":     dummyProductID,
 			"price":          300000,
+			"status":         "pending",
 			"invoice_number": "INV-001-003",
 			"metadata": map[string]any{
 				"title":     "Bali Sunset Photos",
@@ -103,6 +106,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			"seller_id":      sellerAccount.ID,
 			"product_id":     dummyProductID,
 			"price":          312012,
+			"status":         "paid",
 			"invoice_number": "INV-001-004",
 			"metadata": map[string]any{
 				"title":     "Surabaya Marathon",
@@ -115,6 +119,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			"seller_id":      sellerAccount.ID,
 			"product_id":     dummyProductID,
 			"price":          150000,
+			"status":         "paid",
 			"invoice_number": "INV-001-005",
 			"metadata": map[string]any{
 				"title":     "Yogyakarta Street Food",
@@ -127,6 +132,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			"seller_id":      sellerAccount.ID,
 			"product_id":     dummyProductID,
 			"price":          250000,
+			"status":         "pending",
 			"invoice_number": "INV-001-006",
 			"metadata": map[string]any{
 				"title":     "Bandung Artisanal Coffee",
@@ -136,92 +142,92 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 	}
 
-	dummyPaidTransactions := []map[string]any{
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.ID,
-			"product_id":     dummyProductID,
-			"price":          175000,
-			"invoice_number": "INV-002-001",
-			"metadata": map[string]any{
-				"title":     "Medan Culinary Tour",
-				"full_name": "Olivia Davis",
-				"type":      "Folder",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.ID,
-			"product_id":     dummyProductID,
-			"price":          225000,
-			"invoice_number": "INV-002-002",
-			"metadata": map[string]any{
-				"title":     "Semarang Historical Sites",
-				"full_name": "James Wilson",
-				"type":      "Photos",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.ID,
-			"product_id":     dummyProductID,
-			"price":          275000,
-			"invoice_number": "INV-002-003",
-			"metadata": map[string]any{
-				"title":     "Makassar Beach Sunset",
-				"full_name": "Isabella Martinez",
-				"type":      "Folder",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.ID,
-			"product_id":     dummyProductID,
-			"price":          125000,
-			"invoice_number": "INV-002-004",
-			"metadata": map[string]any{
-				"title":     "Balikpapan Nature Hike",
-				"full_name": "William Anderson",
-				"type":      "Photos",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.ID,
-			"product_id":     dummyProductID,
-			"price":          300000,
-			"invoice_number": "INV-002-005",
-			"metadata": map[string]any{
-				"title":     "Pontianak River Cruise",
-				"full_name": "Mia Thomas",
-				"type":      "Folder",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.ID,
-			"product_id":     dummyProductID,
-			"price":          200000,
-			"invoice_number": "INV-002-006",
-			"metadata": map[string]any{
-				"title":     "Manado Diving Experience",
-				"full_name": "Benjamin Garcia",
-				"type":      "Photos",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.ID,
-			"product_id":     dummyProductID,
-			"price":          180000,
-			"invoice_number": "INV-002-007",
-			"metadata": map[string]any{
-				"title":     "Padang Culinary Delights",
-				"full_name": "Charlotte Rodriguez",
-				"type":      "Folder",
-			},
-		},
-	}
+	// dummyPaidTransactions := []map[string]any{
+	// 	{
+	// 		"buyer_id":       dummyBuyerUUID,
+	// 		"seller_id":      sellerAccount.ID,
+	// 		"product_id":     dummyProductID,
+	// 		"price":          175000,
+	// 		"invoice_number": "INV-002-001",
+	// 		"metadata": map[string]any{
+	// 			"title":     "Medan Culinary Tour",
+	// 			"full_name": "Olivia Davis",
+	// 			"type":      "Folder",
+	// 		},
+	// 	},
+	// 	{
+	// 		"buyer_id":       dummyBuyerUUID,
+	// 		"seller_id":      sellerAccount.ID,
+	// 		"product_id":     dummyProductID,
+	// 		"price":          225000,
+	// 		"invoice_number": "INV-002-002",
+	// 		"metadata": map[string]any{
+	// 			"title":     "Semarang Historical Sites",
+	// 			"full_name": "James Wilson",
+	// 			"type":      "Photos",
+	// 		},
+	// 	},
+	// 	{
+	// 		"buyer_id":       dummyBuyerUUID,
+	// 		"seller_id":      sellerAccount.ID,
+	// 		"product_id":     dummyProductID,
+	// 		"price":          275000,
+	// 		"invoice_number": "INV-002-003",
+	// 		"metadata": map[string]any{
+	// 			"title":     "Makassar Beach Sunset",
+	// 			"full_name": "Isabella Martinez",
+	// 			"type":      "Folder",
+	// 		},
+	// 	},
+	// 	{
+	// 		"buyer_id":       dummyBuyerUUID,
+	// 		"seller_id":      sellerAccount.ID,
+	// 		"product_id":     dummyProductID,
+	// 		"price":          125000,
+	// 		"invoice_number": "INV-002-004",
+	// 		"metadata": map[string]any{
+	// 			"title":     "Balikpapan Nature Hike",
+	// 			"full_name": "William Anderson",
+	// 			"type":      "Photos",
+	// 		},
+	// 	},
+	// 	{
+	// 		"buyer_id":       dummyBuyerUUID,
+	// 		"seller_id":      sellerAccount.ID,
+	// 		"product_id":     dummyProductID,
+	// 		"price":          300000,
+	// 		"invoice_number": "INV-002-005",
+	// 		"metadata": map[string]any{
+	// 			"title":     "Pontianak River Cruise",
+	// 			"full_name": "Mia Thomas",
+	// 			"type":      "Folder",
+	// 		},
+	// 	},
+	// 	{
+	// 		"buyer_id":       dummyBuyerUUID,
+	// 		"seller_id":      sellerAccount.ID,
+	// 		"product_id":     dummyProductID,
+	// 		"price":          200000,
+	// 		"invoice_number": "INV-002-006",
+	// 		"metadata": map[string]any{
+	// 			"title":     "Manado Diving Experience",
+	// 			"full_name": "Benjamin Garcia",
+	// 			"type":      "Photos",
+	// 		},
+	// 	},
+	// 	{
+	// 		"buyer_id":       dummyBuyerUUID,
+	// 		"seller_id":      sellerAccount.ID,
+	// 		"product_id":     dummyProductID,
+	// 		"price":          180000,
+	// 		"invoice_number": "INV-002-007",
+	// 		"metadata": map[string]any{
+	// 			"title":     "Padang Culinary Delights",
+	// 			"full_name": "Charlotte Rodriguez",
+	// 			"type":      "Folder",
+	// 		},
+	// 	},
+	// }
 
 	// Creating dummy transactions
 	err = c.txProvider.Transact(context.Background(), func(tx repo.Tx) error {
@@ -258,24 +264,58 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				continue
 			}
 
-			ledgerEntries := domain.NewPaymentEntries(
-				productTx.ID,
-				productTx.SellerAccountID,
-				productTx.Fee.SellerPrice,
-				platformAccount.ID,
-				productTx.Fee.PlatformFee,
-				dokuAccount.ID,
-				productTx.Fee.DokuFee,
-			)
+			status := txData["status"].(string)
+			if status == "paid" {
+				productTx.MarkSettled()
 
-			productTx.MarkCompleted()
+				// Seller Entries
+				batchID := uuid.New().String()
+				sellerEntry := domain.NewSettlementEntriesForAccount(
+					batchID,
+					sellerAccount.ID,
+					feeBreakdown.SellerPrice,
+				)
+
+				// Platform Fee Entry
+				platformEntry := domain.NewSettlementEntriesForAccount(
+					batchID,
+					platformAccount.ID,
+					feeBreakdown.PlatformFee,
+				)
+
+				// DOKU Fee Entry
+				dokuEntry := domain.NewDokuFeeSettlementEntry(
+					batchID,
+					dokuAccount.ID,
+					feeBreakdown.DokuFee,
+				)
+
+				paidLedgerEntries := append(sellerEntry, platformEntry...)
+				paidLedgerEntries = append(paidLedgerEntries, dokuEntry)
+
+				// Insert immutable ledger entries
+				if err := tx.LedgerEntry().SaveBatch(context.Background(), paidLedgerEntries); err != nil {
+					return err
+				}
+			} else {
+				productTx.MarkCompleted()
+				ledgerEntries := domain.NewPaymentEntries(
+					productTx.ID,
+					productTx.SellerAccountID,
+					productTx.Fee.SellerPrice,
+					platformAccount.ID,
+					productTx.Fee.PlatformFee,
+					dokuAccount.ID,
+					productTx.Fee.DokuFee,
+				)
+
+				// Insert immutable ledger entries
+				if err := tx.LedgerEntry().SaveBatch(context.Background(), ledgerEntries); err != nil {
+					return err
+				}
+			}
 			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
 				c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
-				return err
-			}
-
-			// Insert immutable ledger entries
-			if err := tx.LedgerEntry().SaveBatch(context.Background(), ledgerEntries); err != nil {
 				return err
 			}
 
@@ -285,66 +325,66 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			c.logger.InfoContext(context.Background(), "Generated dummy transaction and ledger entries", "transaction_id", productTx.ID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
 		}
 
-		for _, txData := range dummyPaidTransactions {
-			feeBreakdown := feeCalc.GetFeeBreakdown(int64(txData["price"].(int)), "QRIS", domain.CurrencyIDR)
-			productTx := domain.NewProductTransaction(
-				txData["buyer_id"].(string),
-				txData["seller_id"].(string),
-				txData["product_id"].(string),
-				txData["invoice_number"].(string),
-				feeBreakdown,
-				txData["metadata"].(map[string]any),
-			)
-			invoiceNum := txData["invoice_number"].(string)
+		// for _, txData := range dummyPaidTransactions {
+		// 	feeBreakdown := feeCalc.GetFeeBreakdown(int64(txData["price"].(int)), "QRIS", domain.CurrencyIDR)
+		// 	productTx := domain.NewProductTransaction(
+		// 		txData["buyer_id"].(string),
+		// 		txData["seller_id"].(string),
+		// 		txData["product_id"].(string),
+		// 		txData["invoice_number"].(string),
+		// 		feeBreakdown,
+		// 		txData["metadata"].(map[string]any),
+		// 	)
+		// 	invoiceNum := txData["invoice_number"].(string)
 
-			existingProductTx, err := tx.ProductTransaction().GetByInvoiceNumber(context.Background(), invoiceNum)
-			if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
-				c.logger.ErrorContext(context.Background(), "Failed to get existing product transaction", "invoice_number", invoiceNum, "error", err)
-				return err
-			}
-			if existingProductTx != nil {
-				c.logger.InfoContext(context.Background(), "Skipping existing product transaction", "invoice_number", invoiceNum)
-				continue
-			}
+		// 	existingProductTx, err := tx.ProductTransaction().GetByInvoiceNumber(context.Background(), invoiceNum)
+		// 	if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
+		// 		c.logger.ErrorContext(context.Background(), "Failed to get existing product transaction", "invoice_number", invoiceNum, "error", err)
+		// 		return err
+		// 	}
+		// 	if existingProductTx != nil {
+		// 		c.logger.InfoContext(context.Background(), "Skipping existing product transaction", "invoice_number", invoiceNum)
+		// 		continue
+		// 	}
 
-			productTx.MarkSettled()
-			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
-				c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
-				return err
-			}
+		// 	productTx.MarkSettled()
+		// 	if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
+		// 		c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
+		// 		return err
+		// 	}
 
-			// Seller Entries
-			batchID := uuid.New().String()
-			sellerEntry := domain.NewSettlementEntriesForAccount(
-				batchID,
-				sellerAccount.ID,
-				feeBreakdown.SellerPrice,
-			)
+		// 	// Seller Entries
+		// 	batchID := uuid.New().String()
+		// 	sellerEntry := domain.NewSettlementEntriesForAccount(
+		// 		batchID,
+		// 		sellerAccount.ID,
+		// 		feeBreakdown.SellerPrice,
+		// 	)
 
-			// Platform Fee Entry
-			platformEntry := domain.NewSettlementEntriesForAccount(
-				batchID,
-				platformAccount.ID,
-				feeBreakdown.PlatformFee,
-			)
+		// 	// Platform Fee Entry
+		// 	platformEntry := domain.NewSettlementEntriesForAccount(
+		// 		batchID,
+		// 		platformAccount.ID,
+		// 		feeBreakdown.PlatformFee,
+		// 	)
 
-			// DOKU Fee Entry
-			dokuEntry := domain.NewDokuFeeSettlementEntry(
-				batchID,
-				dokuAccount.ID,
-				feeBreakdown.DokuFee,
-			)
+		// 	// DOKU Fee Entry
+		// 	dokuEntry := domain.NewDokuFeeSettlementEntry(
+		// 		batchID,
+		// 		dokuAccount.ID,
+		// 		feeBreakdown.DokuFee,
+		// 	)
 
-			paidLedgerEntries := append(sellerEntry, platformEntry...)
-			paidLedgerEntries = append(paidLedgerEntries, dokuEntry)
+		// 	paidLedgerEntries := append(sellerEntry, platformEntry...)
+		// 	paidLedgerEntries = append(paidLedgerEntries, dokuEntry)
 
-			// Insert immutable ledger entries
-			if err := tx.LedgerEntry().SaveBatch(context.Background(), paidLedgerEntries); err != nil {
-				return err
-			}
+		// 	// Insert immutable ledger entries
+		// 	if err := tx.LedgerEntry().SaveBatch(context.Background(), paidLedgerEntries); err != nil {
+		// 		return err
+		// 	}
 
-			c.logger.InfoContext(context.Background(), "Generated dummy transaction and ledger entries", "transaction_id", productTx.ID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
-		}
+		// 	c.logger.InfoContext(context.Background(), "Generated dummy transaction and ledger entries", "transaction_id", productTx.ID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
+		// }
 
 		return nil
 

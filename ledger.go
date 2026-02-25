@@ -309,6 +309,36 @@ func (c *LedgerClient) GetBalanceByAccountUUID(ctx context.Context, accountUUID 
 	}, nil
 }
 
+// GetAllBalancesBySellerID returns both PENDING and AVAILABLE derived balances for a seller directly.
+// This is a pure read from ledger_entries — no DOKU sync.
+func (c *LedgerClient) GetAllBalancesBySellerID(ctx context.Context, sellerID string) (*BalanceResponse, error) {
+	account, err := c.repoProvider.Account().GetBySellerID(ctx, sellerID)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account by seller ID", err)
+	}
+
+	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalancesBySellerID(ctx, sellerID)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive balance", err)
+	}
+
+	currency := string(account.Currency)
+	return &BalanceResponse{
+		PendingBalance: MoneyResponse{
+			Amount:   pending,
+			Currency: currency,
+		},
+		AvailableBalance: MoneyResponse{
+			Amount:   available,
+			Currency: currency,
+		},
+		Currency: currency,
+	}, nil
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Bank account validation
 // ─────────────────────────────────────────────────────────────────────────────
