@@ -133,7 +133,7 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.CreatedAt,
 		tx.CompletedAt,
 		tx.SettledAt,
-		metadataJSON,
+		string(metadataJSON),
 	)
 	if err != nil {
 		return ErrFailedInsertSQL.WithError(err)
