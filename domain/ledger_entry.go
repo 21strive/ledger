@@ -170,6 +170,7 @@ func NewSettlementEntriesForAccount(
 ) []*LedgerEntry {
 	now := time.Now()
 	journalID := uuid.New().String()
+	// TODO: VALIDATE ALL THE LEDGER ENTRY
 
 	return []*LedgerEntry{
 		{

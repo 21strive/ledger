@@ -31,6 +31,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			return nil
 		} else {
 			c.logger.InfoContext(context.Background(), "DOKU account already exists", "account_id", existingDokuAcc.ID)
+			dokuAccount = *existingDokuAcc
 			return nil
 		}
 
