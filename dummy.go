@@ -242,7 +242,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			invoiceNum := txData["invoice_number"].(string)
 
 			existingProductTx, err := tx.ProductTransaction().GetByInvoiceNumber(context.Background(), invoiceNum)
-			if err != nil {
+			if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
 				c.logger.ErrorContext(context.Background(), "Failed to get existing product transaction", "invoice_number", invoiceNum, "error", err)
 				return err
 			}
@@ -291,7 +291,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			invoiceNum := txData["invoice_number"].(string)
 
 			existingProductTx, err := tx.ProductTransaction().GetByInvoiceNumber(context.Background(), invoiceNum)
-			if err != nil {
+			if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
 				c.logger.ErrorContext(context.Background(), "Failed to get existing product transaction", "invoice_number", invoiceNum, "error", err)
 				return err
 			}
