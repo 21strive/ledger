@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/lib/pq"
 )
 
 type PostgresProductTransactionRepository struct {
@@ -143,6 +144,10 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		},
 	)
 	if err != nil {
+		pqErr, ok := err.(*pq.Error)
+		if ok {
+			slog.ErrorContext(ctx, "PostgreSQL error", "error", pqErr.Message, "code", pqErr.Code, "detail", pqErr.Detail, "position", pqErr.Position)
+		}
 		return ErrFailedInsertSQL.WithError(err)
 	}
 
