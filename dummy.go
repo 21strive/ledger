@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"context"
-	"time"
 
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
@@ -307,14 +306,6 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				c.logger.InfoContext(context.Background(), "Skipping existing product transaction", "invoice_number", invoiceNum)
 				continue
 			}
-			paymentReq := domain.NewPaymentRequest(
-				productTx.ID,
-				"123123",
-				txData["payment_channel"].(string),
-				feeBreakdown.TotalCharged,
-				domain.CurrencyIDR,
-				time.Now().Add(24*time.Hour),
-			)
 
 			productTx.MarkSettled()
 			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
@@ -322,13 +313,8 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				return err
 			}
 
-			// Save PaymentRequest
-			if err := tx.PaymentRequest().Save(context.Background(), paymentReq); err != nil {
-				return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save payment request", err)
-			}
-
 			// Seller Entries
-			batchID := "dummy-settlement-batch-id"
+			batchID := uuid.New().String()
 			sellerEntry := domain.NewSettlementEntriesForAccount(
 				batchID,
 				sellerAccount.ID,
