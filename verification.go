@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/21strive/ledger/ledgererr"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -14,7 +15,7 @@ import (
 func (c *LedgerClient) GetPhotoKTPPresignedURL(ctx context.Context, sellerID string, bucketName string, contentType string) (string, error) {
 	validatedExt, err := validateContentType(contentType)
 	if err != nil {
-		return "", err
+		return "", ledgererr.ErrInvalidRequest.WithError(err)
 	}
 	// Normalize the sellerID to be URL-safe
 	normalizedSellerID := strings.ReplaceAll(sellerID, " ", "-")
@@ -29,7 +30,7 @@ func (c *LedgerClient) GetPhotoKTPPresignedURL(ctx context.Context, sellerID str
 	})
 
 	if err != nil {
-		return "", err
+		return "", ledgererr.ErrInvalidRequest.WithError(err)
 	}
 
 	return presignResult.URL, nil

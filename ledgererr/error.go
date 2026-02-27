@@ -158,4 +158,6 @@ var (
 	ErrInvalidSettlementItem        = NewError(CodeInvalidSettlementItem, "invalid settlement item data", nil)
 	ErrInvalidSettlementCSVFormat   = NewError(CodeInvalidSettlementCSVFormat, "invalid settlement CSV format", nil)
 	ErrSettlementItemNotFound       = NewError(CodeSettlementItemNotFound, "settlement item not found", nil)
+
+	ErrInvalidRequest = NewError(CodeInvalidRequest, "invalid request", nil)
 )
