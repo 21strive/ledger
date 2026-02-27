@@ -39,7 +39,7 @@ func (c *LedgerClient) GetPhotoKTPPresignedURL(ctx context.Context, sellerID str
 func (c *LedgerClient) GetPhotoKYCSelfiePresignedURL(ctx context.Context, sellerID string, bucketName string, contentType string) (string, error) {
 	validatedExt, err := validateContentType(contentType)
 	if err != nil {
-		return "", err
+		return "", ledgererr.ErrInvalidRequest.WithError(err)
 	}
 	// Normalize the sellerID to be URL-safe
 	normalizedSellerID := strings.ReplaceAll(sellerID, " ", "-")
