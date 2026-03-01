@@ -16,7 +16,6 @@ import (
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
 	"github.com/21strive/ledger/repo"
-	"github.com/21strive/redifu"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -874,20 +873,17 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 
 		// Reconciliation log
 		currentPending, currentAvailable, _ := tx.LedgerEntry().GetAllBalances(ctx, account.UUID)
-		reconciliationLog := &domain.ReconciliationLog{
-			LedgerUUID:        account.UUID,
-			PreviousPending:   previousPending,
-			PreviousAvailable: previousAvailable,
-			CurrentPending:    currentPending,
-			CurrentAvailable:  currentAvailable,
-			PendingDiff:       currentPending - previousPending,
-			AvailableDiff:     currentAvailable - previousAvailable,
-			IsSettlement:      true,
-			SettledAmount:     totalSettledSellerAmount + totalSettledPlatformAmount,
-			FeeAmount:         totalDokuFee,
-			Notes:             fmt.Sprintf("CSV reconciliation: %s, matched: %d, unmatched: %d", req.ReportFileName, batch.MatchedCount, batch.UnmatchedCount),
-		}
-		redifu.InitRecord(reconciliationLog)
+		reconciliationLog := domain.NewReconciliationLog(
+			account.UUID,
+			previousPending,
+			previousAvailable,
+			currentPending,
+			currentAvailable,
+			true, // isSettlement
+			totalSettledSellerAmount+totalSettledPlatformAmount, // settledAmount
+			totalDokuFee, // feeAmount
+			fmt.Sprintf("CSV reconciliation: %s, matched: %d, unmatched: %d", req.ReportFileName, batch.MatchedCount, batch.UnmatchedCount),
+		)
 		reconciliationLog.CreatedAt = now
 		reconciliationLog.UpdatedAt = now
 		if err := tx.ReconciliationLog().Save(ctx, reconciliationLog); err != nil {
@@ -946,22 +942,17 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 					discrepancyType = domain.DiscrepancyTypeAvailableMismatch
 				}
 
-				discrepancy := &domain.ReconciliationDiscrepancy{
-					LedgerUUID:           account.UUID,
-					SettlementBatchUUID:  batch.UUID,
-					DiscrepancyType:      discrepancyType,
-					ExpectedPending:      postPending,
-					ActualPending:        dokuPending,
-					ExpectedAvailable:    postAvailable,
-					ActualAvailable:      dokuAvailable,
-					PendingDiff:          dokuPending - postPending,
-					AvailableDiff:        dokuAvailable - postAvailable,
-					ItemDiscrepancyCount: itemDiscrepancyCount,
-					TotalItemDiscrepancy: totalItemDiscrepancy,
-					Status:               domain.DiscrepancyStatusPending,
-					DetectedAt:           now,
-				}
-				redifu.InitRecord(discrepancy)
+				discrepancy := domain.NewReconciliationDiscrepancy(
+					account.UUID,
+					batch.UUID,
+					discrepancyType,
+					postPending,
+					dokuPending,
+					postAvailable,
+					dokuAvailable,
+					itemDiscrepancyCount,
+					totalItemDiscrepancy,
+				)
 				discrepancy.CreatedAt = now
 				discrepancy.UpdatedAt = now
 

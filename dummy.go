@@ -259,7 +259,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			}
 
 			ledgerEntries := domain.NewPaymentEntries(
-				productTx.Record.UUID,
+				productTx.UUID,
 				productTx.SellerAccountID,
 				productTx.Fee.SellerPrice,
 				platformAccount.Record.UUID,

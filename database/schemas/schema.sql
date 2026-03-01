@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     randid VARCHAR(255) NOT NULL UNIQUE,
     buyer_account_id VARCHAR(255) NOT NULL,
     seller_account_id VARCHAR(255) NOT NULL,
-    product_uuid VARCHAR(255) NOT NULL,
+    product_id VARCHAR(255) NOT NULL,
+    -- product_type VARCHAR(50) NOT NULL CHECK (product_type IN ('PHOTO', 'FOLDER', 'SUBSCRIPTION 'OTHER')),
     invoice_number VARCHAR(50) NOT NULL UNIQUE,
     -- Our internal invoice number
     -- Pricing breakdown (buyer pays ALL fees)

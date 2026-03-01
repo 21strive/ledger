@@ -19,7 +19,7 @@ func NewPostgresDisbursementRepository(db DBTX) *PostgresDisbursementRepository 
 
 func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string) (*domain.Disbursement, error) {
 	query := `
-		SELECT uuid, randid, ledger_id, amount, currency, status,
+		SELECT uuid, randid, account_uuid, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
 		       created_at, updated_at, processed_at
@@ -86,12 +86,12 @@ func (r *PostgresDisbursementRepository) GetByLedgerID(ctx context.Context, ledg
 	offset := (page - 1) * pageSize
 
 	query := `
-		SELECT uuid, randid, ledger_id, amount, currency, status,
+		SELECT uuid, randid, account_uuid, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
 		       created_at, updated_at, processed_at
 		FROM disbursements
-		WHERE ledger_id = $1
+		WHERE account_uuid = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -107,12 +107,12 @@ func (r *PostgresDisbursementRepository) GetByLedgerID(ctx context.Context, ledg
 
 func (r *PostgresDisbursementRepository) GetPendingByLedgerID(ctx context.Context, ledgerID string) ([]*domain.Disbursement, error) {
 	query := `
-		SELECT uuid, randid, ledger_id, amount, currency, status,
+		SELECT uuid, randid, account_uuid, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
 		       created_at, updated_at, processed_at
 		FROM disbursements
-		WHERE ledger_id = $1 AND status = $2
+		WHERE account_uuid = $1 AND status = $2
 		ORDER BY created_at ASC
 	`
 

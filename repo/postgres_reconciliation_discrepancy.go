@@ -65,7 +65,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) Save(ctx context.Context, 
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetByID(ctx context.Context, id string) (*domain.ReconciliationDiscrepancy, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, account_uuid, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,
@@ -79,7 +79,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) GetByID(ctx context.Contex
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetBySettlementBatchID(ctx context.Context, batchID string) (*domain.ReconciliationDiscrepancy, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, account_uuid, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,
@@ -93,13 +93,13 @@ func (r *PostgresReconciliationDiscrepancyRepository) GetBySettlementBatchID(ctx
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetByLedgerID(ctx context.Context, ledgerID string, limit, offset int) ([]domain.ReconciliationDiscrepancy, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, account_uuid, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,
 		       status, detected_at, resolved_at, resolution_notes, created_at, updated_at
 		FROM reconciliation_discrepancies
-		WHERE ledger_id = $1
+		WHERE account_uuid = $1
 		ORDER BY detected_at DESC
 		LIMIT $2 OFFSET $3
 	`, ledgerID, limit, offset)
@@ -114,7 +114,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) GetByLedgerID(ctx context.
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetPendingDiscrepancies(ctx context.Context, limit int) ([]domain.ReconciliationDiscrepancy, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, account_uuid, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,

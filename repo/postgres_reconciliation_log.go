@@ -45,11 +45,11 @@ func (r *PostgresReconciliationLogRepository) Save(ctx context.Context, log *dom
 
 func (r *PostgresReconciliationLogRepository) GetByLedgerID(ctx context.Context, ledgerID string, limit, offset int) ([]domain.ReconciliationLog, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT uuid, randid, ledger_id, previous_pending, previous_available,
+		SELECT uuid, randid, account_uuid, previous_pending, previous_available,
 		       current_pending, current_available, pending_diff, available_diff,
-		       is_settlement, settled_amount, fee_amount, notes, created_at
+		       is_settlement, settled_amount, fee_amount, notes, created_at, updated_at
 		FROM reconciliation_logs
-		WHERE ledger_id = $1
+		WHERE account_uuid = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`, ledgerID, limit, offset)
@@ -79,6 +79,7 @@ func (r *PostgresReconciliationLogRepository) GetByLedgerID(ctx context.Context,
 			&log.FeeAmount,
 			&log.Notes,
 			&log.CreatedAt,
+			&log.UpdatedAt,
 		)
 
 		if err != nil {

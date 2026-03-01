@@ -60,3 +60,32 @@ type ReconciliationDiscrepancyRepository interface {
 	GetPendingDiscrepancies(ctx context.Context, limit int) ([]ReconciliationDiscrepancy, error)
 	MarkResolved(ctx context.Context, id string, notes string) error
 }
+
+// NewReconciliationDiscrepancy creates a new reconciliation discrepancy
+func NewReconciliationDiscrepancy(
+	ledgerUUID string,
+	settlementBatchUUID string,
+	discrepancyType DiscrepancyType,
+	expectedPending, actualPending int64,
+	expectedAvailable, actualAvailable int64,
+	itemDiscrepancyCount int,
+	totalItemDiscrepancy int64,
+) *ReconciliationDiscrepancy {
+	discrepancy := &ReconciliationDiscrepancy{
+		LedgerUUID:           ledgerUUID,
+		SettlementBatchUUID:  settlementBatchUUID,
+		DiscrepancyType:      discrepancyType,
+		ExpectedPending:      expectedPending,
+		ActualPending:        actualPending,
+		ExpectedAvailable:    expectedAvailable,
+		ActualAvailable:      actualAvailable,
+		PendingDiff:          actualPending - expectedPending,
+		AvailableDiff:        actualAvailable - expectedAvailable,
+		ItemDiscrepancyCount: itemDiscrepancyCount,
+		TotalItemDiscrepancy: totalItemDiscrepancy,
+		Status:               DiscrepancyStatusPending,
+		DetectedAt:           time.Now(),
+	}
+	redifu.InitRecord(discrepancy)
+	return discrepancy
+}

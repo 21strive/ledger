@@ -80,7 +80,7 @@ func NewProductTransaction(
 	fee FeeBreakdown,
 	metadata map[string]any,
 ) *ProductTransaction {
-	return &ProductTransaction{
+	pt := &ProductTransaction{
 		BuyerAccountID:  buyerAccountID,
 		SellerAccountID: sellerAccountID,
 		ProductID:       productID,
@@ -89,6 +89,10 @@ func NewProductTransaction(
 		Status:          TransactionStatusPending,
 		Metadata:        metadata,
 	}
+
+	redifu.InitRecord(pt)
+
+	return pt
 }
 
 // GetSellerPayout returns the amount seller receives (100% of their price)
