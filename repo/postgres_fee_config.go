@@ -75,16 +75,16 @@ func (r *PostgresFeeConfigRepository) Save(ctx context.Context, fc *domain.FeeCo
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		fc.Record.UUID,
-		fc.Record.Foundation.RandId,
+		fc.UUID,
+		fc.RandId,
 		string(fc.ConfigType),
 		toNullString(fc.PaymentChannel),
 		string(fc.FeeType),
 		fc.FixedAmount,
 		fc.Percentage,
 		fc.IsActive,
-		fc.Record.Foundation.CreatedAt,
-		fc.Record.Foundation.UpdatedAt,
+		fc.CreatedAt,
+		fc.UpdatedAt,
 	)
 
 	if err != nil {
@@ -94,7 +94,7 @@ func (r *PostgresFeeConfigRepository) Save(ctx context.Context, fc *domain.FeeCo
 }
 
 func (r *PostgresFeeConfigRepository) Update(ctx context.Context, fc *domain.FeeConfig) error {
-	fc.Record.Foundation.UpdatedAt = time.Now()
+	fc.UpdatedAt = time.Now()
 
 	query := `
 		UPDATE fee_configs
@@ -108,8 +108,8 @@ func (r *PostgresFeeConfigRepository) Update(ctx context.Context, fc *domain.Fee
 		fc.FixedAmount,
 		fc.Percentage,
 		fc.IsActive,
-		fc.Record.Foundation.UpdatedAt,
-		fc.Record.UUID,
+		fc.UpdatedAt,
+		fc.UUID,
 	)
 	if err != nil {
 		return ErrFailedUpdateSQL.WithError(err)
@@ -146,27 +146,55 @@ func (r *PostgresFeeConfigRepository) scanMany(ctx context.Context, query string
 
 	var configs []*domain.FeeConfig
 	for rows.Next() {
-		var fc domain.FeeConfig
-		fc.Record = &redifu.Record{}
-		var paymentChannel sql.NullString
+		var (
+			uuid           string
+			randid         string
+			configType     string
+			paymentChannel sql.NullString
+			feeType        string
+			fixedAmount    int64
+			percentage     float64
+			isActive       bool
+			createdAt      time.Time
+			updatedAt      time.Time
+		)
 
 		err := rows.Scan(
-			&fc.Record.UUID,
-			&fc.Record.Foundation.RandId,
-			&fc.ConfigType,
+			&uuid,
+			&randid,
+			&configType,
 			&paymentChannel,
-			&fc.FeeType,
-			&fc.FixedAmount,
-			&fc.Percentage,
-			&fc.IsActive,
-			&fc.Record.Foundation.CreatedAt,
-			&fc.Record.Foundation.UpdatedAt,
+			&feeType,
+			&fixedAmount,
+			&percentage,
+			&isActive,
+			&createdAt,
+			&updatedAt,
 		)
 		if err != nil {
 			return nil, ErrFailedQuerySQL.WithError(err)
 		}
-		fc.PaymentChannel = paymentChannel.String
-		configs = append(configs, &fc)
+
+		fc := &domain.FeeConfig{
+			Record:      &redifu.Record{},
+			ConfigType:  domain.FeeConfigType(configType),
+			FeeType:     domain.FeeType(feeType),
+			FixedAmount: fixedAmount,
+			Percentage:  percentage,
+			IsActive:    isActive,
+		}
+		redifu.InitRecord(fc)
+		// Override auto-generated values with database values
+		fc.UUID = uuid
+		fc.RandId = randid
+		fc.CreatedAt = createdAt
+		fc.UpdatedAt = updatedAt
+
+		if paymentChannel.Valid {
+			fc.PaymentChannel = paymentChannel.String
+		}
+
+		configs = append(configs, fc)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -180,25 +208,53 @@ type feeConfigScanner interface {
 }
 
 func (r *PostgresFeeConfigRepository) scanRow(scanner feeConfigScanner) (*domain.FeeConfig, error) {
-	var fc domain.FeeConfig
-	fc.Record = &redifu.Record{}
-	var paymentChannel sql.NullString
+	var (
+		uuid           string
+		randid         string
+		configType     string
+		paymentChannel sql.NullString
+		feeType        string
+		fixedAmount    int64
+		percentage     float64
+		isActive       bool
+		createdAt      time.Time
+		updatedAt      time.Time
+	)
 
 	err := scanner.Scan(
-		&fc.Record.UUID,
-		&fc.Record.Foundation.RandId,
-		&fc.ConfigType,
+		&uuid,
+		&randid,
+		&configType,
 		&paymentChannel,
-		&fc.FeeType,
-		&fc.FixedAmount,
-		&fc.Percentage,
-		&fc.IsActive,
-		&fc.Record.Foundation.CreatedAt,
-		&fc.Record.Foundation.UpdatedAt,
+		&feeType,
+		&fixedAmount,
+		&percentage,
+		&isActive,
+		&createdAt,
+		&updatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
-	fc.PaymentChannel = paymentChannel.String
-	return &fc, nil
+
+	fc := &domain.FeeConfig{
+		Record:      &redifu.Record{},
+		ConfigType:  domain.FeeConfigType(configType),
+		FeeType:     domain.FeeType(feeType),
+		FixedAmount: fixedAmount,
+		Percentage:  percentage,
+		IsActive:    isActive,
+	}
+	redifu.InitRecord(fc)
+	// Override auto-generated values with database values
+	fc.UUID = uuid
+	fc.RandId = randid
+	fc.CreatedAt = createdAt
+	fc.UpdatedAt = updatedAt
+
+	if paymentChannel.Valid {
+		fc.PaymentChannel = paymentChannel.String
+	}
+
+	return fc, nil
 }

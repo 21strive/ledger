@@ -245,10 +245,12 @@ func (r *PostgresPaymentRequestRepository) scanRow(rows *sql.Rows) (*domain.Paym
 		CompletedAt:            completedAt,
 		ExpiresAt:              row.ExpiresAt,
 	}
-	pr.Foundation.UUID = row.UUID
-	pr.Foundation.RandId = row.RandId
-	pr.Foundation.CreatedAt = row.CreatedAt
-	pr.Foundation.UpdatedAt = row.UpdatedAt
+	redifu.InitRecord(pr)
+	// Override auto-generated values with database values
+	pr.UUID = row.UUID
+	pr.RandId = row.RandId
+	pr.CreatedAt = row.CreatedAt
+	pr.UpdatedAt = row.UpdatedAt
 	return pr, nil
 }
 

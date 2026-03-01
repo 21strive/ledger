@@ -889,8 +889,8 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			Notes:             fmt.Sprintf("CSV reconciliation: %s, matched: %d, unmatched: %d", req.ReportFileName, batch.MatchedCount, batch.UnmatchedCount),
 		}
 		redifu.InitRecord(reconciliationLog)
-		reconciliationLog.Foundation.CreatedAt = now
-		reconciliationLog.Foundation.UpdatedAt = now
+		reconciliationLog.CreatedAt = now
+		reconciliationLog.UpdatedAt = now
 		if err := tx.ReconciliationLog().Save(ctx, reconciliationLog); err != nil {
 			c.logger.WarnContext(ctx, "Failed to save reconciliation log", "error", err)
 		}
@@ -964,8 +964,8 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 					DetectedAt:           now,
 				}
 				redifu.InitRecord(discrepancy)
-				discrepancy.Foundation.CreatedAt = now
-				discrepancy.Foundation.UpdatedAt = now
+				discrepancy.CreatedAt = now
+				discrepancy.UpdatedAt = now
 
 				if err := c.repoProvider.ReconciliationDiscrepancy().Save(ctx, discrepancy); err != nil {
 					c.logger.ErrorContext(ctx, "Failed to save reconciliation discrepancy", "error", err)

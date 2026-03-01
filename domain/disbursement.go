@@ -125,7 +125,7 @@ func NewDisbursementWithID(
 		Description: description,
 	}
 	redifu.InitRecord(d)
-	d.Foundation.UUID = id
+	d.UUID = id
 	return d, nil
 }
 

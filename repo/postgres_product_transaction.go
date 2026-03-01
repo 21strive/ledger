@@ -138,8 +138,8 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 	_, err = r.db.ExecContext(
 		ctx,
 		query,
-		tx.Record.UUID,
-		tx.Record.Foundation.RandId,
+		tx.UUID,
+		tx.RandId,
 		tx.BuyerAccountID,
 		tx.SellerAccountID,
 		tx.ProductID,
@@ -150,8 +150,8 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.Fee.TotalCharged,
 		tx.Fee.Currency,
 		tx.Status,
-		tx.Record.Foundation.CreatedAt,
-		tx.Record.Foundation.UpdatedAt,
+		tx.CreatedAt,
+		tx.UpdatedAt,
 		tx.CompletedAt,
 		tx.SettledAt,
 		string(metadataJSON),
@@ -319,9 +319,11 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		CompletedAt: completedAt,
 		SettledAt:   settledAt,
 	}
-	tx.Record.Foundation.UUID = row.UUID
-	tx.Record.Foundation.RandId = row.RandId
-	tx.Record.Foundation.CreatedAt = row.CreatedAt
-	tx.Record.Foundation.UpdatedAt = row.UpdatedAt
+	redifu.InitRecord(tx)
+	// Override auto-generated values with database values
+	tx.UUID = row.UUID
+	tx.RandId = row.RandId
+	tx.CreatedAt = row.CreatedAt
+	tx.UpdatedAt = row.UpdatedAt
 	return tx, nil
 }
