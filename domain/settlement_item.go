@@ -55,7 +55,6 @@ func NewSettlementItem(
 	}
 
 	si := &SettlementItem{
-		Record:                 &redifu.Record{},
 		SettlementBatchUUID:    settlementBatchID,
 		ProductTransactionUUID: "", // Will be set when matched
 		InvoiceNumber:          invoiceNumber,

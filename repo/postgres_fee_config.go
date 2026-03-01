@@ -65,9 +65,6 @@ func (r *PostgresFeeConfigRepository) GetAllActive(ctx context.Context) ([]*doma
 }
 
 func (r *PostgresFeeConfigRepository) Save(ctx context.Context, fc *domain.FeeConfig) error {
-	if fc.Record == nil {
-		fc.Record = &redifu.Record{}
-	}
 	redifu.InitRecord(fc)
 
 	query := `
@@ -176,7 +173,6 @@ func (r *PostgresFeeConfigRepository) scanMany(ctx context.Context, query string
 		}
 
 		fc := &domain.FeeConfig{
-			Record:      &redifu.Record{},
 			ConfigType:  domain.FeeConfigType(configType),
 			FeeType:     domain.FeeType(feeType),
 			FixedAmount: fixedAmount,
@@ -238,7 +234,6 @@ func (r *PostgresFeeConfigRepository) scanRow(scanner feeConfigScanner) (*domain
 	}
 
 	fc := &domain.FeeConfig{
-		Record:      &redifu.Record{},
 		ConfigType:  domain.FeeConfigType(configType),
 		FeeType:     domain.FeeType(feeType),
 		FixedAmount: fixedAmount,

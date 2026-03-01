@@ -232,7 +232,6 @@ func (r *PostgresPaymentRequestRepository) scanRow(rows *sql.Rows) (*domain.Paym
 	}
 
 	pr := &domain.PaymentRequest{
-		Record:                 &redifu.Record{},
 		ProductTransactionUUID: row.ProductTransactionUUID,
 		RequestID:              row.RequestID,
 		PaymentCode:            row.PaymentCode.String,

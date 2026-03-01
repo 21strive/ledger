@@ -36,7 +36,6 @@ type Account struct {
 
 func NewAccount(ownerType OwnerType, dokuSubAccountID string, ownerID string, currency Currency) Account {
 	a := Account{
-		Record:           &redifu.Record{},
 		DokuSubAccountID: dokuSubAccountID,
 		OwnerType:        ownerType,
 		OwnerID:          ownerID,

@@ -56,7 +56,6 @@ func NewPaymentRequest(
 	expiresAt time.Time,
 ) *PaymentRequest {
 	pr := &PaymentRequest{
-		Record:                 &redifu.Record{},
 		ProductTransactionUUID: productTransactionID,
 		RequestID:              requestID,
 		PaymentChannel:         paymentChannel,

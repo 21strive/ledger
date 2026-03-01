@@ -119,7 +119,6 @@ func NewPaymentEntries(
 	journalID := uuid.New().String()
 
 	sellerEntry := &LedgerEntry{
-		Record:        &redifu.Record{},
 		JournalUUID:   journalID,
 		AccountUUID:   sellerAccountID,
 		Amount:        sellerAmount,
@@ -131,7 +130,6 @@ func NewPaymentEntries(
 	redifu.InitRecord(sellerEntry)
 
 	platformEntry := &LedgerEntry{
-		Record:        &redifu.Record{},
 		JournalUUID:   journalID,
 		AccountUUID:   platformAccountID,
 		Amount:        platformFee,
@@ -143,7 +141,6 @@ func NewPaymentEntries(
 	redifu.InitRecord(platformEntry)
 
 	dokuEntry := &LedgerEntry{
-		Record:        &redifu.Record{},
 		JournalUUID:   journalID,
 		AccountUUID:   dokuAccountID,
 		Amount:        dokuFee,
@@ -173,7 +170,6 @@ func NewSettlementEntriesForAccount(
 	// TODO: VALIDATE ALL THE LEDGER ENTRY
 
 	pendingEntry := &LedgerEntry{
-		Record:        &redifu.Record{},
 		JournalUUID:   journalID,
 		AccountUUID:   accountID,
 		Amount:        -amount,
@@ -185,7 +181,6 @@ func NewSettlementEntriesForAccount(
 	redifu.InitRecord(pendingEntry)
 
 	availableEntry := &LedgerEntry{
-		Record:        &redifu.Record{},
 		JournalUUID:   journalID,
 		AccountUUID:   accountID,
 		Amount:        amount,
@@ -211,7 +206,6 @@ func NewDokuFeeSettlementEntry(
 	dokuFee int64,
 ) *LedgerEntry {
 	entry := &LedgerEntry{
-		Record:        &redifu.Record{},
 		JournalUUID:   uuid.New().String(),
 		AccountUUID:   dokuAccountID,
 		Amount:        -dokuFee,
@@ -234,7 +228,6 @@ func NewDisbursementEntry(
 	amount int64,
 ) *LedgerEntry {
 	entry := &LedgerEntry{
-		Record:        &redifu.Record{},
 		JournalUUID:   uuid.New().String(),
 		AccountUUID:   accountID,
 		Amount:        -amount,

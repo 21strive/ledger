@@ -875,7 +875,6 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		// Reconciliation log
 		currentPending, currentAvailable, _ := tx.LedgerEntry().GetAllBalances(ctx, account.UUID)
 		reconciliationLog := &domain.ReconciliationLog{
-			Record:            &redifu.Record{},
 			LedgerUUID:        account.UUID,
 			PreviousPending:   previousPending,
 			PreviousAvailable: previousAvailable,
@@ -948,7 +947,6 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 				}
 
 				discrepancy := &domain.ReconciliationDiscrepancy{
-					Record:               &redifu.Record{},
 					LedgerUUID:           account.UUID,
 					SettlementBatchUUID:  batch.UUID,
 					DiscrepancyType:      discrepancyType,

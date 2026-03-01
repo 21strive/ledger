@@ -82,7 +82,6 @@ func NewDisbursement(
 	}
 
 	d := &Disbursement{
-		Record:      &redifu.Record{},
 		LedgerUUID:  ledgerID,
 		Amount:      amount,
 		Currency:    currency,
@@ -116,7 +115,6 @@ func NewDisbursementWithID(
 	}
 
 	d := &Disbursement{
-		Record:      &redifu.Record{},
 		LedgerUUID:  ledgerID,
 		Amount:      amount,
 		Currency:    currency,

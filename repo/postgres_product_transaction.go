@@ -302,7 +302,6 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 	}
 
 	tx := &domain.ProductTransaction{
-		Record:          &redifu.Record{},
 		BuyerAccountID:  row.BuyerAccountID,
 		SellerAccountID: row.SellerAccountID,
 		ProductID:       row.ProductID,

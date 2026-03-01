@@ -68,7 +68,6 @@ func NewSettlementBatch(
 	}
 
 	sb := &SettlementBatch{
-		Record:           &redifu.Record{},
 		LedgerUUID:       ledgerID,
 		ReportFileName:   reportFileName,
 		SettlementDate:   settlementDate,
