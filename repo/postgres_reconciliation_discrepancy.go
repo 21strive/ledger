@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 )
 
 type PostgresReconciliationDiscrepancyRepository struct {
@@ -155,6 +156,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) MarkResolved(ctx context.C
 
 func (r *PostgresReconciliationDiscrepancyRepository) scanRow(row *sql.Row) (*domain.ReconciliationDiscrepancy, error) {
 	var d domain.ReconciliationDiscrepancy
+	redifu.InitRecord(&d)
 	var discrepancyType string
 	var status string
 	var resolvedAt sql.NullTime
@@ -203,6 +205,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) scanRows(rows *sql.Rows) (
 
 	for rows.Next() {
 		var d domain.ReconciliationDiscrepancy
+		redifu.InitRecord(&d)
 		var discrepancyType string
 		var status string
 		var resolvedAt sql.NullTime

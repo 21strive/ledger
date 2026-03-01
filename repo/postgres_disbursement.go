@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 )
 
 type PostgresDisbursementRepository struct {
@@ -29,6 +30,7 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 	row := r.db.QueryRowContext(ctx, query, id)
 
 	var d domain.Disbursement
+	redifu.InitRecord(&d)
 	var externalTxID sql.NullString
 	var failureReason sql.NullString
 	var description sql.NullString
@@ -195,6 +197,7 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 
 	for rows.Next() {
 		var d domain.Disbursement
+		redifu.InitRecord(&d)
 		var externalTxID sql.NullString
 		var failureReason sql.NullString
 		var description sql.NullString

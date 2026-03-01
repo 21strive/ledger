@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 )
 
 // PostgresLedgerEntryRepository implements domain.LedgerEntryRepository.
@@ -294,6 +295,7 @@ type scannable interface {
 
 func scanLedgerEntry(s scannable) (*domain.LedgerEntry, error) {
 	var entry domain.LedgerEntry
+	redifu.InitRecord(&entry)
 	var metadataRaw []byte
 	var createdAt time.Time
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 )
 
 type PostgresSettlementItemRepository struct {
@@ -148,6 +149,7 @@ func (r *PostgresSettlementItemRepository) SaveBatch(ctx context.Context, items 
 
 func (r *PostgresSettlementItemRepository) scanSettlementItem(row *sql.Row) (*domain.SettlementItem, error) {
 	var item domain.SettlementItem
+	redifu.InitRecord(&item)
 	var productTxID sql.NullString
 	var invoiceNumber sql.NullString
 	var rawCSVDataJSON []byte
@@ -194,6 +196,7 @@ func (r *PostgresSettlementItemRepository) scanSettlementItems(rows *sql.Rows) (
 
 	for rows.Next() {
 		var item domain.SettlementItem
+		redifu.InitRecord(&item)
 		var productTxID sql.NullString
 		var invoiceNumber sql.NullString
 		var rawCSVDataJSON []byte

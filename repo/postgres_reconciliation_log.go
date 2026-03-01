@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 )
 
 type PostgresReconciliationLogRepository struct {
@@ -59,6 +60,7 @@ func (r *PostgresReconciliationLogRepository) GetByLedgerID(ctx context.Context,
 	logs := []domain.ReconciliationLog{}
 	for rows.Next() {
 		var log domain.ReconciliationLog
+		redifu.InitRecord(&log)
 
 		err := rows.Scan(
 			&log.UUID,

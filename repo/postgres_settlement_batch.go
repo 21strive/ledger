@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 )
 
 type PostgresSettlementBatchRepository struct {
@@ -149,6 +150,7 @@ func (r *PostgresSettlementBatchRepository) UpdateStatus(ctx context.Context, id
 
 func (r *PostgresSettlementBatchRepository) scanSettlementBatch(row *sql.Row) (*domain.SettlementBatch, error) {
 	var batch domain.SettlementBatch
+	redifu.InitRecord(&batch)
 	var processedAt sql.NullTime
 	var failureReason sql.NullString
 	var metadataJSON []byte
@@ -198,6 +200,7 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatches(rows *sql.Rows
 
 	for rows.Next() {
 		var batch domain.SettlementBatch
+		redifu.InitRecord(&batch)
 		var processedAt sql.NullTime
 		var failureReason sql.NullString
 		var metadataJSON []byte

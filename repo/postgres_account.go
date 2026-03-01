@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 )
 
 type PostgresAccountRepository struct {
@@ -25,6 +26,7 @@ func scanAccount(row interface {
 	Scan(dest ...any) error
 }) (*domain.Account, error) {
 	var a domain.Account
+	redifu.InitRecord(&a)
 	var dokuSubAccountID sql.NullString
 
 	err := row.Scan(
