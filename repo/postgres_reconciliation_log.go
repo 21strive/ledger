@@ -18,12 +18,13 @@ func NewPostgresReconciliationLogRepository(db DBTX) *PostgresReconciliationLogR
 func (r *PostgresReconciliationLogRepository) Save(ctx context.Context, log *domain.ReconciliationLog) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO reconciliation_logs (
-			uuid, ledger_id, previous_pending, previous_available,
+			uuid, randid, account_uuid, previous_pending, previous_available,
 			current_pending, current_available, pending_diff, available_diff,
-			is_settlement, settled_amount, fee_amount, notes, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			is_settlement, settled_amount, fee_amount, notes, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 	`,
 		log.UUID,
+		log.RandId,
 		log.LedgerUUID,
 		log.PreviousPending,
 		log.PreviousAvailable,
@@ -36,6 +37,7 @@ func (r *PostgresReconciliationLogRepository) Save(ctx context.Context, log *dom
 		log.FeeAmount,
 		log.Notes,
 		log.CreatedAt,
+		log.UpdatedAt,
 	)
 
 	return ErrFailedInsertSQL.WithError(err)

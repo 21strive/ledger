@@ -128,15 +128,16 @@ func (r *PostgresDisbursementRepository) GetPendingByLedgerID(ctx context.Contex
 func (r *PostgresDisbursementRepository) Save(ctx context.Context, d *domain.Disbursement) error {
 	query := `
 		INSERT INTO disbursements (
-			uuid, ledger_id, amount, currency, status,
+			uuid, randid, account_uuid, amount, currency, status,
 			bank_code, account_number, account_name,
 			description, external_transaction_id, failure_reason,
-			created_at, processed_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			created_at, updated_at, processed_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			external_transaction_id = EXCLUDED.external_transaction_id,
 			failure_reason = EXCLUDED.failure_reason,
+			updated_at = EXCLUDED.updated_at,
 			processed_at = EXCLUDED.processed_at
 	`
 
@@ -144,6 +145,7 @@ func (r *PostgresDisbursementRepository) Save(ctx context.Context, d *domain.Dis
 		ctx,
 		query,
 		d.UUID,
+		d.RandId,
 		d.LedgerUUID,
 		d.Amount,
 		d.Currency,
@@ -155,6 +157,7 @@ func (r *PostgresDisbursementRepository) Save(ctx context.Context, d *domain.Dis
 		toNullString(d.ExternalTransactionID),
 		toNullString(d.FailureReason),
 		d.CreatedAt,
+		d.UpdatedAt,
 		toNullTime(d.ProcessedAt),
 	)
 	if err != nil {

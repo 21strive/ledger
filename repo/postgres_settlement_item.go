@@ -99,16 +99,17 @@ func (r *PostgresSettlementItemRepository) Save(ctx context.Context, item *domai
 
 	query := `
 		INSERT INTO settlement_items (
-			uuid, settlement_batch_uuid, product_transaction_uuid,
+			uuid, randid, settlement_batch_uuid, product_transaction_uuid,
 			invoice_number, transaction_amount, pay_to_merchant,
 			allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
-			csv_row_number, raw_csv_data, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			csv_row_number, raw_csv_data, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT (uuid) DO UPDATE SET
 			product_transaction_uuid = EXCLUDED.product_transaction_uuid,
 			is_matched = EXCLUDED.is_matched,
 			expected_net_amount = EXCLUDED.expected_net_amount,
-			amount_discrepancy = EXCLUDED.amount_discrepancy
+			amount_discrepancy = EXCLUDED.amount_discrepancy,
+			updated_at = EXCLUDED.updated_at
 	`
 
 	var productTxID *string
@@ -118,6 +119,7 @@ func (r *PostgresSettlementItemRepository) Save(ctx context.Context, item *domai
 
 	_, err = r.db.ExecContext(ctx, query,
 		item.UUID,
+		item.RandId,
 		item.SettlementBatchUUID,
 		productTxID,
 		item.InvoiceNumber,
@@ -130,6 +132,7 @@ func (r *PostgresSettlementItemRepository) Save(ctx context.Context, item *domai
 		item.CSVRowNumber,
 		rawCSVDataJSON,
 		item.CreatedAt,
+		item.UpdatedAt,
 	)
 	if err != nil {
 		return ErrFailedInsertSQL.WithError(err)

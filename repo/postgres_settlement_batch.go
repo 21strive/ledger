@@ -20,7 +20,7 @@ func NewPostgresSettlementBatchRepository(db DBTX) *PostgresSettlementBatchRepos
 
 func (r *PostgresSettlementBatchRepository) GetByID(ctx context.Context, id string) (*domain.SettlementBatch, error) {
 	query := `
-		SELECT uuid, randid, ledger_id, report_file_name, settlement_date,
+		SELECT uuid, randid, account_uuid, report_file_name, settlement_date,
 		       gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
 		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
@@ -42,12 +42,12 @@ func (r *PostgresSettlementBatchRepository) GetByLedgerID(ctx context.Context, l
 	offset := (page - 1) * pageSize
 
 	query := `
-		SELECT uuid, randid, ledger_id, report_file_name, settlement_date,
+		SELECT uuid, randid, account_uuid, report_file_name, settlement_date,
 		       gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
 		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
-		WHERE ledger_id = $1
+		WHERE account_uuid = $1
 		ORDER BY settlement_date DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -63,12 +63,12 @@ func (r *PostgresSettlementBatchRepository) GetByLedgerID(ctx context.Context, l
 
 func (r *PostgresSettlementBatchRepository) GetByLedgerIDAndDate(ctx context.Context, ledgerID string, settlementDate time.Time) (*domain.SettlementBatch, error) {
 	query := `
-		SELECT uuid, randid, ledger_id, report_file_name, settlement_date,
+		SELECT uuid, randid, account_uuid, report_file_name, settlement_date,
 		       gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
 		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
-		WHERE ledger_id = $1 AND DATE(settlement_date) = DATE($2)
+		WHERE account_uuid = $1 AND DATE(settlement_date) = DATE($2)
 	`
 
 	row := r.db.QueryRowContext(ctx, query, ledgerID, settlementDate)
@@ -83,11 +83,12 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 
 	query := `
 		INSERT INTO settlement_batches (
-			uuid, ledger_id, report_file_name, settlement_date,
+			uuid, randid, account_uuid, report_file_name, settlement_date,
 			gross_amount, net_amount, doku_fee, currency,
 			uploaded_by, uploaded_at, processed_at, processing_status,
-			matched_count, unmatched_count, failure_reason, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			matched_count, unmatched_count, failure_reason, metadata,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (uuid) DO UPDATE SET
 			gross_amount = EXCLUDED.gross_amount,
 			net_amount = EXCLUDED.net_amount,
@@ -97,12 +98,12 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 			matched_count = EXCLUDED.matched_count,
 			unmatched_count = EXCLUDED.unmatched_count,
 			failure_reason = EXCLUDED.failure_reason,
-			metadata = EXCLUDED.metadata
+			metadata = EXCLUDED.metadata,
+			updated_at = EXCLUDED.updated_at
 	`
 
 	_, err = r.db.ExecContext(ctx, query,
-		batch.UUID,
-		batch.LedgerUUID,
+		batch.UUID, batch.RandId, batch.LedgerUUID,
 		batch.ReportFileName,
 		batch.SettlementDate,
 		batch.GrossAmount,
@@ -117,6 +118,8 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 		batch.UnmatchedCount,
 		batch.FailureReason,
 		metadataJSON,
+		batch.CreatedAt,
+		batch.UpdatedAt,
 	)
 	if err != nil {
 		return ErrFailedInsertSQL.WithError(err)

@@ -331,6 +331,8 @@ CREATE TABLE IF NOT EXISTS settlement_batches (
     unmatched_count INT DEFAULT 0,
     failure_reason TEXT,
     metadata JSONB,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
     FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid),
     UNIQUE(account_uuid, settlement_date)
 );
@@ -395,6 +397,8 @@ CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
     detected_at TIMESTAMP NOT NULL,
     resolved_at TIMESTAMP,
     resolution_notes TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
     FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid),
     FOREIGN KEY (settlement_batch_uuid) REFERENCES settlement_batches(uuid),
     UNIQUE (settlement_batch_uuid) -- One discrepancy per batch

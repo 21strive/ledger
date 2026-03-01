@@ -124,13 +124,14 @@ func (r *PostgresAccountRepository) GetPaymentGatewayAccount(ctx context.Context
 func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Account) error {
 	query := `
 		INSERT INTO ledger_accounts (
-			uuid, doku_subaccount_id, owner_type, owner_id, currency, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6)
+			uuid, randid, doku_subaccount_id, owner_type, owner_id, currency, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (uuid) DO UPDATE SET
 			doku_subaccount_id = EXCLUDED.doku_subaccount_id,
 			owner_type         = EXCLUDED.owner_type,
 			owner_id           = EXCLUDED.owner_id,
-			currency           = EXCLUDED.currency
+			currency           = EXCLUDED.currency,
+			updated_at         = EXCLUDED.updated_at
 	`
 
 	dokuSubAccountID := sql.NullString{
@@ -142,11 +143,14 @@ func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Ac
 		ctx,
 		query,
 		account.UUID,
+		account.RandId,
+		account.RandId,
 		dokuSubAccountID,
 		account.OwnerType,
 		account.OwnerID,
 		account.Currency,
 		account.CreatedAt,
+		account.UpdatedAt,
 	)
 	if err != nil {
 		return ErrFailedInsertSQL.WithError(err)

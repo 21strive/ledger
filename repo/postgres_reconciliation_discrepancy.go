@@ -25,19 +25,20 @@ func (r *PostgresReconciliationDiscrepancyRepository) Save(ctx context.Context, 
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO reconciliation_discrepancies (
-			uuid, ledger_id, settlement_batch_uuid, discrepancy_type,
+			uuid, randid, account_uuid, settlement_batch_uuid, discrepancy_type,
 			expected_pending, actual_pending, expected_available, actual_available,
 			pending_diff, available_diff,
 			item_discrepancy_count, total_item_discrepancy,
-			status, detected_at, resolved_at, resolution_notes
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			status, detected_at, resolved_at, resolution_notes,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (settlement_batch_uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			resolved_at = EXCLUDED.resolved_at,
-			resolution_notes = EXCLUDED.resolution_notes
+			resolution_notes = EXCLUDED.resolution_notes,
+			updated_at = EXCLUDED.updated_at
 	`,
-		discrepancy.UUID,
-		discrepancy.LedgerUUID,
+		discrepancy.UUID, discrepancy.RandId, discrepancy.LedgerUUID,
 		discrepancy.SettlementBatchUUID,
 		string(discrepancy.DiscrepancyType),
 		discrepancy.ExpectedPending,
@@ -52,6 +53,8 @@ func (r *PostgresReconciliationDiscrepancyRepository) Save(ctx context.Context, 
 		discrepancy.DetectedAt,
 		discrepancy.ResolvedAt,
 		discrepancy.ResolutionNotes,
+		discrepancy.CreatedAt,
+		discrepancy.UpdatedAt,
 	)
 
 	if err != nil {

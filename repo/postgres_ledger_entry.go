@@ -28,9 +28,9 @@ func NewPostgresLedgerEntryRepository(db DBTX) *PostgresLedgerEntryRepository {
 func (r *PostgresLedgerEntryRepository) Save(ctx context.Context, entry *domain.LedgerEntry) error {
 	query := `
 		INSERT INTO ledger_entries (
-			uuid, journal_uuid, account_uuid, amount, balance_bucket,
-			entry_type, source_type, source_id, metadata, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			uuid, randid, journal_uuid, account_uuid, amount, balance_bucket,
+			entry_type, source_type, source_id, metadata, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
 
 	metadataJSON, err := marshalMetadata(entry.Metadata)
@@ -42,6 +42,7 @@ func (r *PostgresLedgerEntryRepository) Save(ctx context.Context, entry *domain.
 		ctx,
 		query,
 		entry.UUID,
+		entry.RandId,
 		entry.JournalUUID,
 		entry.AccountUUID,
 		entry.Amount,
@@ -51,6 +52,7 @@ func (r *PostgresLedgerEntryRepository) Save(ctx context.Context, entry *domain.
 		entry.SourceID,
 		metadataJSON,
 		entry.CreatedAt,
+		entry.UpdatedAt,
 	)
 	if err != nil {
 		return ErrFailedInsertSQL.WithError(err)
@@ -68,9 +70,9 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 
 	query := `
 		INSERT INTO ledger_entries (
-			uuid, journal_uuid, account_uuid, amount, balance_bucket,
-			entry_type, source_type, source_id, metadata, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			uuid, randid, journal_uuid, account_uuid, amount, balance_bucket,
+			entry_type, source_type, source_id, metadata, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
 
 	for _, entry := range entries {
@@ -83,6 +85,7 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 			ctx,
 			query,
 			entry.UUID,
+			entry.RandId,
 			entry.JournalUUID,
 			entry.AccountUUID,
 			entry.Amount,
@@ -92,6 +95,7 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 			entry.SourceID,
 			metadataJSON,
 			entry.CreatedAt,
+			entry.UpdatedAt,
 		)
 		if err != nil {
 			return ErrFailedInsertSQL.WithError(err)
