@@ -63,3 +63,7 @@ func (p *RepositoryProvider) SettlementItem() domain.SettlementItemRepository {
 func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
 	return NewPostgresReconciliationDiscrepancyRepository(p.db)
 }
+
+func (p *RepositoryProvider) Verification() domain.VerificationRepository {
+	return NewPostgresVerificationRepository(p.db)
+}

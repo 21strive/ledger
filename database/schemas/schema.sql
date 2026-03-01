@@ -432,3 +432,57 @@ CREATE TABLE IF NOT EXISTS reconciliation_logs (
 );
 
 CREATE INDEX idx_reconciliation_logs_account_created ON reconciliation_logs(account_uuid, created_at DESC);
+
+-- Ledger verifications for KYC (Know Your Customer)
+-- Purpose: Track seller identity verification using Indonesian KTP (ID card)
+-- Status lifecycle: PENDING → APPROVED/REJECTED
+-- PENDING: KTP and selfie photos uploaded, awaiting admin review
+-- APPROVED: Admin verified identity, seller can create disbursements
+-- REJECTED: Identity verification failed, seller must resubmit
+--
+-- Photos stored in S3:
+-- - KTP photo: verification/ktp/{seller_id}/ktp.{ext}
+-- - Selfie photo: verification/kyc/{seller_id}/kyc-selfie.{ext}
+CREATE TABLE IF NOT EXISTS ledger_verifications (
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    account_uuid VARCHAR(255) NOT NULL,
+    -- KTP form information
+    identity_id VARCHAR(16) NOT NULL,
+    -- Indonesian KTP number (16 digits)
+    fullname VARCHAR(255) NOT NULL,
+    birth_date DATE NOT NULL,
+    province VARCHAR(255) NOT NULL,
+    city VARCHAR(255) NOT NULL,
+    district VARCHAR(255) NOT NULL,
+    postal_code VARCHAR(10) NOT NULL,
+    -- Photo URLs from S3
+    ktp_photo_url TEXT NOT NULL,
+    selfie_photo_url TEXT NOT NULL,
+    -- Approval workflow
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (
+        status IN ('PENDING', 'APPROVED', 'REJECTED')
+    ),
+    approved_by VARCHAR(255),
+    -- Admin user ID who approved/rejected
+    approved_at TIMESTAMP,
+    rejection_reason TEXT,
+    -- Additional data
+    metadata JSONB,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid),
+    UNIQUE (account_uuid),
+    -- One verification per account
+    UNIQUE (identity_id) -- One KTP per system (prevent duplicate)
+);
+
+CREATE INDEX idx_verifications_account_uuid ON ledger_verifications(account_uuid);
+
+CREATE INDEX idx_verifications_identity_id ON ledger_verifications(identity_id);
+
+CREATE INDEX idx_verifications_status ON ledger_verifications(status);
+
+CREATE INDEX idx_verifications_pending ON ledger_verifications(status, created_at ASC)
+WHERE
+    status = 'PENDING';
