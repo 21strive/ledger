@@ -19,10 +19,10 @@ func NewPostgresPaymentRequestRepository(db DBTX) *PostgresPaymentRequestReposit
 
 func (r *PostgresPaymentRequestRepository) GetByID(ctx context.Context, id string) (*domain.PaymentRequest, error) {
 	query := `
-		SELECT id, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
+		SELECT uuid, randid, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
 		       amount, currency, status, failure_reason, created_at, updated_at, completed_at, expires_at
 		FROM payment_requests
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	return r.scanOne(ctx, query, id)
@@ -30,7 +30,7 @@ func (r *PostgresPaymentRequestRepository) GetByID(ctx context.Context, id strin
 
 func (r *PostgresPaymentRequestRepository) GetByRequestID(ctx context.Context, requestID string) (*domain.PaymentRequest, error) {
 	query := `
-		SELECT id, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
+		SELECT uuid, randid, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
 		       amount, currency, status, failure_reason, created_at, updated_at, completed_at, expires_at
 		FROM payment_requests
 		WHERE request_id = $1
@@ -41,7 +41,7 @@ func (r *PostgresPaymentRequestRepository) GetByRequestID(ctx context.Context, r
 
 func (r *PostgresPaymentRequestRepository) GetByPaymentCode(ctx context.Context, paymentCode string) (*domain.PaymentRequest, error) {
 	query := `
-		SELECT id, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
+		SELECT uuid, randid, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
 		       amount, currency, status, failure_reason, created_at, updated_at, completed_at, expires_at
 		FROM payment_requests
 		WHERE payment_code = $1
@@ -52,7 +52,7 @@ func (r *PostgresPaymentRequestRepository) GetByPaymentCode(ctx context.Context,
 
 func (r *PostgresPaymentRequestRepository) GetByProductTransactionID(ctx context.Context, productTransactionID string) (*domain.PaymentRequest, error) {
 	query := `
-		SELECT id, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
+		SELECT uuid, randid, product_transaction_uuid, request_id, payment_code, payment_channel, payment_url,
 		       amount, currency, status, failure_reason, created_at, updated_at, completed_at, expires_at
 		FROM payment_requests
 		WHERE product_transaction_uuid = $1

@@ -20,12 +20,12 @@ func NewPostgresSettlementBatchRepository(db DBTX) *PostgresSettlementBatchRepos
 
 func (r *PostgresSettlementBatchRepository) GetByID(ctx context.Context, id string) (*domain.SettlementBatch, error) {
 	query := `
-		SELECT id, ledger_id, report_file_name, settlement_date,
+		SELECT uuid, randid, ledger_id, report_file_name, settlement_date,
 		       gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
-		       matched_count, unmatched_count, failure_reason, metadata
+		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	row := r.db.QueryRowContext(ctx, query, id)
@@ -42,10 +42,10 @@ func (r *PostgresSettlementBatchRepository) GetByLedgerID(ctx context.Context, l
 	offset := (page - 1) * pageSize
 
 	query := `
-		SELECT id, ledger_id, report_file_name, settlement_date,
+		SELECT uuid, randid, ledger_id, report_file_name, settlement_date,
 		       gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
-		       matched_count, unmatched_count, failure_reason, metadata
+		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
 		WHERE ledger_id = $1
 		ORDER BY settlement_date DESC
@@ -63,10 +63,10 @@ func (r *PostgresSettlementBatchRepository) GetByLedgerID(ctx context.Context, l
 
 func (r *PostgresSettlementBatchRepository) GetByLedgerIDAndDate(ctx context.Context, ledgerID string, settlementDate time.Time) (*domain.SettlementBatch, error) {
 	query := `
-		SELECT id, ledger_id, report_file_name, settlement_date,
+		SELECT uuid, randid, ledger_id, report_file_name, settlement_date,
 		       gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
-		       matched_count, unmatched_count, failure_reason, metadata
+		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
 		WHERE ledger_id = $1 AND DATE(settlement_date) = DATE($2)
 	`
@@ -83,12 +83,12 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 
 	query := `
 		INSERT INTO settlement_batches (
-			id, ledger_id, report_file_name, settlement_date,
+			uuid, ledger_id, report_file_name, settlement_date,
 			gross_amount, net_amount, doku_fee, currency,
 			uploaded_by, uploaded_at, processed_at, processing_status,
 			matched_count, unmatched_count, failure_reason, metadata
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-		ON CONFLICT (id) DO UPDATE SET
+		ON CONFLICT (uuid) DO UPDATE SET
 			gross_amount = EXCLUDED.gross_amount,
 			net_amount = EXCLUDED.net_amount,
 			doku_fee = EXCLUDED.doku_fee,
@@ -129,7 +129,7 @@ func (r *PostgresSettlementBatchRepository) UpdateStatus(ctx context.Context, id
 	query := `
 		UPDATE settlement_batches
 		SET processing_status = $2, processed_at = $3, failure_reason = $4
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	result, err := r.db.ExecContext(ctx, query, id, status, processedAt, failureReason)
@@ -157,6 +157,7 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatch(row *sql.Row) (*
 
 	err := row.Scan(
 		&batch.UUID,
+		&batch.RandId,
 		&batch.LedgerUUID,
 		&batch.ReportFileName,
 		&batch.SettlementDate,
@@ -172,6 +173,8 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatch(row *sql.Row) (*
 		&batch.UnmatchedCount,
 		&failureReason,
 		&metadataJSON,
+		&batch.CreatedAt,
+		&batch.UpdatedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -207,6 +210,7 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatches(rows *sql.Rows
 
 		err := rows.Scan(
 			&batch.UUID,
+			&batch.RandId,
 			&batch.LedgerUUID,
 			&batch.ReportFileName,
 			&batch.SettlementDate,
@@ -222,6 +226,8 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatches(rows *sql.Rows
 			&batch.UnmatchedCount,
 			&failureReason,
 			&metadataJSON,
+			&batch.CreatedAt,
+			&batch.UpdatedAt,
 		)
 		if err != nil {
 			return nil, ErrFailedScanSQL.WithError(err)

@@ -18,7 +18,7 @@ func NewPostgresReconciliationLogRepository(db DBTX) *PostgresReconciliationLogR
 func (r *PostgresReconciliationLogRepository) Save(ctx context.Context, log *domain.ReconciliationLog) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO reconciliation_logs (
-			id, ledger_id, previous_pending, previous_available,
+			uuid, ledger_id, previous_pending, previous_available,
 			current_pending, current_available, pending_diff, available_diff,
 			is_settlement, settled_amount, fee_amount, notes, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -43,7 +43,7 @@ func (r *PostgresReconciliationLogRepository) Save(ctx context.Context, log *dom
 
 func (r *PostgresReconciliationLogRepository) GetByLedgerID(ctx context.Context, ledgerID string, limit, offset int) ([]domain.ReconciliationLog, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, ledger_id, previous_pending, previous_available,
+		SELECT uuid, randid, ledger_id, previous_pending, previous_available,
 		       current_pending, current_available, pending_diff, available_diff,
 		       is_settlement, settled_amount, fee_amount, notes, created_at
 		FROM reconciliation_logs
@@ -64,6 +64,7 @@ func (r *PostgresReconciliationLogRepository) GetByLedgerID(ctx context.Context,
 
 		err := rows.Scan(
 			&log.UUID,
+			&log.RandId,
 			&log.LedgerUUID,
 			&log.PreviousPending,
 			&log.PreviousAvailable,

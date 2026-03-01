@@ -19,12 +19,12 @@ func NewPostgresDisbursementRepository(db DBTX) *PostgresDisbursementRepository 
 
 func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string) (*domain.Disbursement, error) {
 	query := `
-		SELECT id, ledger_id, amount, currency, status,
+		SELECT uuid, randid, ledger_id, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
-		       created_at, processed_at
+		       created_at, updated_at, processed_at
 		FROM disbursements
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	row := r.db.QueryRowContext(ctx, query, id)
@@ -38,6 +38,7 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 
 	err := row.Scan(
 		&d.UUID,
+		&d.RandId,
 		&d.LedgerUUID,
 		&d.Amount,
 		&d.Currency,
@@ -49,6 +50,7 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 		&externalTxID,
 		&failureReason,
 		&d.CreatedAt,
+		&d.UpdatedAt,
 		&processedAt,
 	)
 	if err != nil {
@@ -84,10 +86,10 @@ func (r *PostgresDisbursementRepository) GetByLedgerID(ctx context.Context, ledg
 	offset := (page - 1) * pageSize
 
 	query := `
-		SELECT id, ledger_id, amount, currency, status,
+		SELECT uuid, randid, ledger_id, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
-		       created_at, processed_at
+		       created_at, updated_at, processed_at
 		FROM disbursements
 		WHERE ledger_id = $1
 		ORDER BY created_at DESC
@@ -105,10 +107,10 @@ func (r *PostgresDisbursementRepository) GetByLedgerID(ctx context.Context, ledg
 
 func (r *PostgresDisbursementRepository) GetPendingByLedgerID(ctx context.Context, ledgerID string) ([]*domain.Disbursement, error) {
 	query := `
-		SELECT id, ledger_id, amount, currency, status,
+		SELECT uuid, randid, ledger_id, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
-		       created_at, processed_at
+		       created_at, updated_at, processed_at
 		FROM disbursements
 		WHERE ledger_id = $1 AND status = $2
 		ORDER BY created_at ASC
@@ -126,12 +128,12 @@ func (r *PostgresDisbursementRepository) GetPendingByLedgerID(ctx context.Contex
 func (r *PostgresDisbursementRepository) Save(ctx context.Context, d *domain.Disbursement) error {
 	query := `
 		INSERT INTO disbursements (
-			id, ledger_id, amount, currency, status,
+			uuid, ledger_id, amount, currency, status,
 			bank_code, account_number, account_name,
 			description, external_transaction_id, failure_reason,
 			created_at, processed_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		ON CONFLICT (id) DO UPDATE SET
+		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			external_transaction_id = EXCLUDED.external_transaction_id,
 			failure_reason = EXCLUDED.failure_reason,
@@ -172,7 +174,7 @@ func (r *PostgresDisbursementRepository) UpdateStatus(
 	query := `
 		UPDATE disbursements
 		SET status = $2, processed_at = $3, failure_reason = $4
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	result, err := r.db.ExecContext(ctx, query, id, status, toNullTime(processedAt), toNullString(failureReason))
@@ -205,6 +207,7 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 
 		err := rows.Scan(
 			&d.UUID,
+			&d.RandId,
 			&d.LedgerUUID,
 			&d.Amount,
 			&d.Currency,
@@ -216,6 +219,7 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 			&externalTxID,
 			&failureReason,
 			&d.CreatedAt,
+			&d.UpdatedAt,
 			&processedAt,
 		)
 		if err != nil {

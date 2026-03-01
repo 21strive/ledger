@@ -26,7 +26,7 @@ func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id s
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	return r.scanOne(ctx, query, id)

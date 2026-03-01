@@ -19,12 +19,12 @@ func NewPostgresSettlementItemRepository(db DBTX) *PostgresSettlementItemReposit
 
 func (r *PostgresSettlementItemRepository) GetByID(ctx context.Context, id string) (*domain.SettlementItem, error) {
 	query := `
-		SELECT id, settlement_batch_uuid, product_transaction_uuid,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
 		       invoice_number, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
-		       csv_row_number, raw_csv_data, created_at
+		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	row := r.db.QueryRowContext(ctx, query, id)
@@ -33,10 +33,10 @@ func (r *PostgresSettlementItemRepository) GetByID(ctx context.Context, id strin
 
 func (r *PostgresSettlementItemRepository) GetBySettlementBatchID(ctx context.Context, batchID string) ([]*domain.SettlementItem, error) {
 	query := `
-		SELECT id, settlement_batch_uuid, product_transaction_uuid,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
 		       invoice_number, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
-		       csv_row_number, raw_csv_data, created_at
+		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
 		WHERE settlement_batch_uuid = $1
 		ORDER BY csv_row_number ASC
@@ -53,10 +53,10 @@ func (r *PostgresSettlementItemRepository) GetBySettlementBatchID(ctx context.Co
 
 func (r *PostgresSettlementItemRepository) GetByProductTransactionID(ctx context.Context, productTxID string) ([]*domain.SettlementItem, error) {
 	query := `
-		SELECT id, settlement_batch_uuid, product_transaction_uuid,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
 		       invoice_number, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
-		       csv_row_number, raw_csv_data, created_at
+		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
 		WHERE product_transaction_uuid = $1
 		ORDER BY created_at DESC
@@ -73,10 +73,10 @@ func (r *PostgresSettlementItemRepository) GetByProductTransactionID(ctx context
 
 func (r *PostgresSettlementItemRepository) GetUnmatchedByBatchID(ctx context.Context, batchID string) ([]*domain.SettlementItem, error) {
 	query := `
-		SELECT id, settlement_batch_uuid, product_transaction_uuid,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
 		       invoice_number, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
-		       csv_row_number, raw_csv_data, created_at
+		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
 		WHERE settlement_batch_uuid = $1 AND is_matched = false
 		ORDER BY csv_row_number ASC
@@ -99,12 +99,12 @@ func (r *PostgresSettlementItemRepository) Save(ctx context.Context, item *domai
 
 	query := `
 		INSERT INTO settlement_items (
-			id, settlement_batch_uuid, product_transaction_uuid,
+			uuid, settlement_batch_uuid, product_transaction_uuid,
 			invoice_number, transaction_amount, pay_to_merchant,
 			allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
 			csv_row_number, raw_csv_data, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		ON CONFLICT (id) DO UPDATE SET
+		ON CONFLICT (uuid) DO UPDATE SET
 			product_transaction_uuid = EXCLUDED.product_transaction_uuid,
 			is_matched = EXCLUDED.is_matched,
 			expected_net_amount = EXCLUDED.expected_net_amount,
@@ -156,6 +156,7 @@ func (r *PostgresSettlementItemRepository) scanSettlementItem(row *sql.Row) (*do
 
 	err := row.Scan(
 		&item.UUID,
+		&item.RandId,
 		&item.SettlementBatchUUID,
 		&productTxID,
 		&invoiceNumber,
@@ -168,6 +169,7 @@ func (r *PostgresSettlementItemRepository) scanSettlementItem(row *sql.Row) (*do
 		&item.CSVRowNumber,
 		&rawCSVDataJSON,
 		&item.CreatedAt,
+		&item.UpdatedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -203,6 +205,7 @@ func (r *PostgresSettlementItemRepository) scanSettlementItems(rows *sql.Rows) (
 
 		err := rows.Scan(
 			&item.UUID,
+			&item.RandId,
 			&item.SettlementBatchUUID,
 			&productTxID,
 			&invoiceNumber,
@@ -215,6 +218,7 @@ func (r *PostgresSettlementItemRepository) scanSettlementItems(rows *sql.Rows) (
 			&item.CSVRowNumber,
 			&rawCSVDataJSON,
 			&item.CreatedAt,
+			&item.UpdatedAt,
 		)
 		if err != nil {
 			return nil, ErrFailedScanSQL.WithError(err)

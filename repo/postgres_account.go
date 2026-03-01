@@ -17,7 +17,7 @@ func NewPostgresAccountRepository(db DBTX) *PostgresAccountRepository {
 }
 
 const accountSelectColumns = `
-	id, doku_subaccount_id, owner_type, owner_id, currency, created_at
+	uuid, randid, doku_subaccount_id, owner_type, owner_id, currency, created_at, updated_at
 `
 
 // scanAccount scans a single row into a domain.Account.
@@ -31,11 +31,13 @@ func scanAccount(row interface {
 
 	err := row.Scan(
 		&a.UUID,
+		&a.RandId,
 		&dokuSubAccountID,
 		&a.OwnerType,
 		&a.OwnerID,
 		&a.Currency,
 		&a.CreatedAt,
+		&a.UpdatedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -55,7 +57,7 @@ func (r *PostgresAccountRepository) GetByID(ctx context.Context, id string) (*do
 	query := `
 		SELECT` + accountSelectColumns + `
 		FROM ledger_accounts
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 
 	row := r.db.QueryRowContext(ctx, query, id)
@@ -122,9 +124,9 @@ func (r *PostgresAccountRepository) GetPaymentGatewayAccount(ctx context.Context
 func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Account) error {
 	query := `
 		INSERT INTO ledger_accounts (
-			id, doku_subaccount_id, owner_type, owner_id, currency, created_at
+			uuid, doku_subaccount_id, owner_type, owner_id, currency, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (id) DO UPDATE SET
+		ON CONFLICT (uuid) DO UPDATE SET
 			doku_subaccount_id = EXCLUDED.doku_subaccount_id,
 			owner_type         = EXCLUDED.owner_type,
 			owner_id           = EXCLUDED.owner_id,
@@ -154,7 +156,7 @@ func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Ac
 }
 
 func (r *PostgresAccountRepository) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM ledger_accounts WHERE id = $1`
+	query := `DELETE FROM ledger_accounts WHERE uuid = $1`
 
 	res, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {

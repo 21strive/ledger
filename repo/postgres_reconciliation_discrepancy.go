@@ -25,7 +25,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) Save(ctx context.Context, 
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO reconciliation_discrepancies (
-			id, ledger_id, settlement_batch_uuid, discrepancy_type,
+			uuid, ledger_id, settlement_batch_uuid, discrepancy_type,
 			expected_pending, actual_pending, expected_available, actual_available,
 			pending_diff, available_diff,
 			item_discrepancy_count, total_item_discrepancy,
@@ -62,13 +62,13 @@ func (r *PostgresReconciliationDiscrepancyRepository) Save(ctx context.Context, 
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetByID(ctx context.Context, id string) (*domain.ReconciliationDiscrepancy, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,
-		       status, detected_at, resolved_at, resolution_notes
+		       status, detected_at, resolved_at, resolution_notes, created_at, updated_at
 		FROM reconciliation_discrepancies
-		WHERE id = $1
+		WHERE uuid = $1
 	`, id)
 
 	return r.scanRow(row)
@@ -76,11 +76,11 @@ func (r *PostgresReconciliationDiscrepancyRepository) GetByID(ctx context.Contex
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetBySettlementBatchID(ctx context.Context, batchID string) (*domain.ReconciliationDiscrepancy, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,
-		       status, detected_at, resolved_at, resolution_notes
+		       status, detected_at, resolved_at, resolution_notes, created_at, updated_at
 		FROM reconciliation_discrepancies
 		WHERE settlement_batch_uuid = $1
 	`, batchID)
@@ -90,11 +90,11 @@ func (r *PostgresReconciliationDiscrepancyRepository) GetBySettlementBatchID(ctx
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetByLedgerID(ctx context.Context, ledgerID string, limit, offset int) ([]domain.ReconciliationDiscrepancy, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,
-		       status, detected_at, resolved_at, resolution_notes
+		       status, detected_at, resolved_at, resolution_notes, created_at, updated_at
 		FROM reconciliation_discrepancies
 		WHERE ledger_id = $1
 		ORDER BY detected_at DESC
@@ -111,11 +111,11 @@ func (r *PostgresReconciliationDiscrepancyRepository) GetByLedgerID(ctx context.
 
 func (r *PostgresReconciliationDiscrepancyRepository) GetPendingDiscrepancies(ctx context.Context, limit int) ([]domain.ReconciliationDiscrepancy, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, ledger_id, settlement_batch_uuid, discrepancy_type,
+		SELECT uuid, randid, ledger_id, settlement_batch_uuid, discrepancy_type,
 		       expected_pending, actual_pending, expected_available, actual_available,
 		       pending_diff, available_diff,
 		       item_discrepancy_count, total_item_discrepancy,
-		       status, detected_at, resolved_at, resolution_notes
+		       status, detected_at, resolved_at, resolution_notes, created_at, updated_at
 		FROM reconciliation_discrepancies
 		WHERE status = 'PENDING'
 		ORDER BY detected_at DESC
@@ -135,7 +135,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) MarkResolved(ctx context.C
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE reconciliation_discrepancies
 		SET status = 'RESOLVED', resolved_at = $1, resolution_notes = $2
-		WHERE id = $3 AND status = 'PENDING'
+		WHERE uuid = $3 AND status = 'PENDING'
 	`, now, notes, id)
 
 	if err != nil {
@@ -164,6 +164,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) scanRow(row *sql.Row) (*do
 
 	err := row.Scan(
 		&d.UUID,
+		&d.RandId,
 		&d.LedgerUUID,
 		&d.SettlementBatchUUID,
 		&discrepancyType,
@@ -179,6 +180,8 @@ func (r *PostgresReconciliationDiscrepancyRepository) scanRow(row *sql.Row) (*do
 		&d.DetectedAt,
 		&resolvedAt,
 		&resolutionNotes,
+		&d.CreatedAt,
+		&d.UpdatedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -213,6 +216,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) scanRows(rows *sql.Rows) (
 
 		err := rows.Scan(
 			&d.UUID,
+			&d.RandId,
 			&d.LedgerUUID,
 			&d.SettlementBatchUUID,
 			&discrepancyType,
@@ -228,6 +232,8 @@ func (r *PostgresReconciliationDiscrepancyRepository) scanRows(rows *sql.Rows) (
 			&d.DetectedAt,
 			&resolvedAt,
 			&resolutionNotes,
+			&d.CreatedAt,
+			&d.UpdatedAt,
 		)
 		if err != nil {
 			return nil, ErrFailedScanSQL.WithError(err)
