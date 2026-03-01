@@ -144,7 +144,6 @@ func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Ac
 		query,
 		account.UUID,
 		account.RandId,
-		account.RandId,
 		dokuSubAccountID,
 		account.OwnerType,
 		account.OwnerID,
