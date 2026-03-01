@@ -60,7 +60,7 @@ CREATE TABLE ledger_entries (
             'MANUAL_ADJUSTMENT'
         )
     ),
-    source_uuid VARCHAR(255) NOT NULL,
+    source_id VARCHAR(255) NOT NULL,
     metadata JSONB,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     updated_at TIMESTAMP NOT NULL DEFAULT now()
