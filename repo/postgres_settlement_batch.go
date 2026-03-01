@@ -100,8 +100,8 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 	`
 
 	_, err = r.db.ExecContext(ctx, query,
-		batch.ID,
-		batch.LedgerID,
+		batch.UUID,
+		batch.LedgerUUID,
 		batch.ReportFileName,
 		batch.SettlementDate,
 		batch.GrossAmount,
@@ -154,8 +154,8 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatch(row *sql.Row) (*
 	var metadataJSON []byte
 
 	err := row.Scan(
-		&batch.ID,
-		&batch.LedgerID,
+		&batch.UUID,
+		&batch.LedgerUUID,
 		&batch.ReportFileName,
 		&batch.SettlementDate,
 		&batch.GrossAmount,
@@ -203,8 +203,8 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatches(rows *sql.Rows
 		var metadataJSON []byte
 
 		err := rows.Scan(
-			&batch.ID,
-			&batch.LedgerID,
+			&batch.UUID,
+			&batch.LedgerUUID,
 			&batch.ReportFileName,
 			&batch.SettlementDate,
 			&batch.GrossAmount,

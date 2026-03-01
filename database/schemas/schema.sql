@@ -1,5 +1,6 @@
 CREATE TABLE ledger_accounts (
-    id UUID PRIMARY KEY,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
     doku_subaccount_id VARCHAR(100) UNIQUE,
     owner_type VARCHAR(20) NOT NULL CHECK (
         owner_type IN (
@@ -13,31 +14,32 @@ CREATE TABLE ledger_accounts (
     -- e.g. seller_id for SELLER ledger_accounts, platform for PLATFORM ledger_accounts,
     -- payment gateway name for PAYMENT_GATEWAY_EXPENSE ledger_accounts, etc.
     currency VARCHAR(3) NOT NULL,
-    created_at TIMESTAMP NOT NULL
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
 );
 
 -- Ensure there is at most one PLATFORM and one PAYMENT_GATEWAY account
-CREATE UNIQUE INDEX idx_accounts_unique_platform ON ledger_accounts(owner_type) WHERE owner_type = 'PLATFORM';
-CREATE UNIQUE INDEX idx_accounts_unique_payment_gateway ON ledger_accounts(owner_type) WHERE owner_type = 'PAYMENT_GATEWAY';
+CREATE UNIQUE INDEX idx_accounts_unique_platform ON ledger_accounts(owner_type)
+WHERE
+    owner_type = 'PLATFORM';
 
+CREATE UNIQUE INDEX idx_accounts_unique_payment_gateway ON ledger_accounts(owner_type)
+WHERE
+    owner_type = 'PAYMENT_GATEWAY';
 
 CREATE TABLE ledger_entries (
-    id UUID PRIMARY KEY,
-
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
     -- Double-entry grouping
-    journal_id UUID NOT NULL,
-
+    journal_uuid VARCHAR(255) NOT NULL,
     -- Account affected
-    account_id UUID NOT NULL REFERENCES ledger_accounts(id),
-
+    account_uuid VARCHAR(255) NOT NULL REFERENCES ledger_accounts(uuid),
     -- Money movement
     amount BIGINT NOT NULL,
     -- positive = credit, negative = debit
-
     balance_bucket VARCHAR(10) NOT NULL CHECK (
         balance_bucket IN ('PENDING', 'AVAILABLE')
     ),
-
     -- Financial classification (accounting meaning)
     entry_type VARCHAR(50) NOT NULL CHECK (
         entry_type IN (
@@ -49,7 +51,6 @@ CREATE TABLE ledger_entries (
             'RECONCILIATION'
         )
     ),
-
     -- Business origin (what table generated this)
     source_type VARCHAR(50) NOT NULL CHECK (
         source_type IN (
@@ -59,12 +60,10 @@ CREATE TABLE ledger_entries (
             'MANUAL_ADJUSTMENT'
         )
     ),
-
-    source_id UUID NOT NULL,
-
+    source_uuid VARCHAR(255) NOT NULL,
     metadata JSONB,
-
-    created_at TIMESTAMP NOT NULL DEFAULT now()
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 -- ProductTransaction: BUSINESS TRANSACTION RECORD
@@ -86,10 +85,11 @@ CREATE TABLE ledger_entries (
 -- {"photo_id": "...", "title": "Sunset Beach", "resolution": "4K", 
 -- "license_type": "Commercial", "download_url": "https://..."}
 CREATE TABLE IF NOT EXISTS product_transactions (
-    id UUID PRIMARY KEY,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
     buyer_account_id VARCHAR(255) NOT NULL,
     seller_account_id VARCHAR(255) NOT NULL,
-    product_id UUID NOT NULL,
+    product_uuid VARCHAR(255) NOT NULL,
     invoice_number VARCHAR(50) NOT NULL UNIQUE,
     -- Our internal invoice number
     -- Pricing breakdown (buyer pays ALL fees)
@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS product_transactions (
         )
     ),
     created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
     completed_at TIMESTAMP,
     -- When user paid (DOKU webhook)
     settled_at TIMESTAMP,
@@ -125,7 +126,7 @@ CREATE INDEX idx_product_transactions_buyer ON product_transactions(buyer_accoun
 
 CREATE INDEX idx_product_transactions_seller ON product_transactions(seller_account_id, created_at DESC);
 
-CREATE INDEX idx_product_transactions_product ON product_transactions(product_id);
+CREATE INDEX idx_product_transactions_product ON product_transactions(product_uuid);
 
 CREATE INDEX idx_product_transactions_invoice ON product_transactions(invoice_number);
 
@@ -143,8 +144,9 @@ CREATE INDEX idx_product_transactions_status_settled ON product_transactions(sta
 --
 -- This table handles DOKU webhook notifications and payment status updates
 CREATE TABLE IF NOT EXISTS payment_requests (
-    id UUID PRIMARY KEY,
-    product_transaction_id UUID NOT NULL,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    product_transaction_uuid VARCHAR(255) NOT NULL,
     -- DOKU payment gateway details
     request_id VARCHAR(100) NOT NULL UNIQUE,
     -- DOKU's payment request ID
@@ -170,10 +172,10 @@ CREATE TABLE IF NOT EXISTS payment_requests (
     -- Payment link expiration
     -- Error handling
     failure_reason TEXT,
-    FOREIGN KEY (product_transaction_id) REFERENCES product_transactions(id)
+    FOREIGN KEY (product_transaction_uuid) REFERENCES product_transactions(uuid)
 );
 
-CREATE INDEX idx_payment_requests_product_transaction ON payment_requests(product_transaction_id);
+CREATE INDEX idx_payment_requests_product_transaction ON payment_requests(product_transaction_uuid);
 
 CREATE INDEX idx_payment_requests_request_id ON payment_requests(request_id);
 
@@ -184,8 +186,9 @@ CREATE INDEX idx_payment_requests_status ON payment_requests(status);
 CREATE INDEX idx_payment_requests_expires ON payment_requests(expires_at);
 
 CREATE TABLE IF NOT EXISTS disbursements (
-    id UUID PRIMARY KEY,
-    account_id UUID NOT NULL,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    account_uuid VARCHAR(255) NOT NULL,
     amount BIGINT NOT NULL,
     currency VARCHAR(3) NOT NULL CHECK (currency IN ('IDR', 'USD')),
     status VARCHAR(20) NOT NULL CHECK (
@@ -204,18 +207,20 @@ CREATE TABLE IF NOT EXISTS disbursements (
     external_transaction_id VARCHAR(100),
     failure_reason TEXT,
     created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
     processed_at TIMESTAMP,
-    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id)
+    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid)
 );
 
-CREATE INDEX idx_disbursements_account_id ON disbursements(account_id);
+CREATE INDEX idx_disbursements_account_id ON disbursements(account_uuid);
 
-CREATE INDEX idx_disbursements_account_created ON disbursements(account_id, created_at DESC);
+CREATE INDEX idx_disbursements_account_created ON disbursements(account_uuid, created_at DESC);
 
 CREATE INDEX idx_disbursements_status ON disbursements(status);
 
 CREATE TABLE IF NOT EXISTS fee_configs (
-    id SERIAL PRIMARY KEY,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
     config_type VARCHAR(20) NOT NULL CHECK (config_type IN ('PLATFORM', 'DOKU')),
     payment_channel VARCHAR(50) CHECK (
         payment_channel IN (
@@ -248,6 +253,8 @@ CREATE UNIQUE INDEX idx_fee_configs_platform ON fee_configs(payment_channel);
 -- Insert default configurations
 INSERT INTO
     fee_configs (
+        uuid,
+        randid,
         config_type,
         payment_channel,
         fee_type,
@@ -258,6 +265,12 @@ INSERT INTO
     )
 VALUES
     (
+        gen_random_uuid() :: text,
+        substring(
+            md5(random() :: text)
+            from
+                1 for 16
+        ),
         'PLATFORM',
         'PLATFORM',
         'FIXED',
@@ -267,6 +280,12 @@ VALUES
         NOW()
     ),
     (
+        gen_random_uuid() :: text,
+        substring(
+            md5(random() :: text)
+            from
+                1 for 16
+        ),
         'DOKU',
         'QRIS',
         'PERCENTAGE',
@@ -276,6 +295,12 @@ VALUES
         NOW()
     ),
     (
+        gen_random_uuid() :: text,
+        substring(
+            md5(random() :: text)
+            from
+                1 for 16
+        ),
         'DOKU',
         'VIRTUAL_ACCOUNT',
         'FIXED',
@@ -287,8 +312,9 @@ VALUES
 
 -- Settlement batch tracking (CSV uploads from DOKU)
 CREATE TABLE IF NOT EXISTS settlement_batches (
-    id UUID PRIMARY KEY,
-    account_id UUID NOT NULL,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    account_uuid VARCHAR(255) NOT NULL,
     report_file_name VARCHAR(255) NOT NULL,
     settlement_date DATE NOT NULL,
     gross_amount BIGINT NOT NULL DEFAULT 0,
@@ -305,21 +331,22 @@ CREATE TABLE IF NOT EXISTS settlement_batches (
     unmatched_count INT DEFAULT 0,
     failure_reason TEXT,
     metadata JSONB,
-    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id),
-    UNIQUE(account_id, settlement_date)
+    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid),
+    UNIQUE(account_uuid, settlement_date)
 );
 
-CREATE INDEX idx_settlement_batches_account_id ON settlement_batches(account_id);
+CREATE INDEX idx_settlement_batches_account_id ON settlement_batches(account_uuid);
 
-CREATE INDEX idx_settlement_batches_date ON settlement_batches(account_id, settlement_date DESC);
+CREATE INDEX idx_settlement_batches_date ON settlement_batches(account_uuid, settlement_date DESC);
 
 CREATE INDEX idx_settlement_batches_status ON settlement_batches(processing_status);
 
 -- Settlement item linking (individual CSV rows matched to transactions)
 CREATE TABLE IF NOT EXISTS settlement_items (
-    id UUID PRIMARY KEY,
-    settlement_batch_id UUID NOT NULL,
-    product_transaction_id UUID,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    settlement_batch_uuid VARCHAR(255) NOT NULL,
+    product_transaction_uuid VARCHAR(255),
     invoice_number VARCHAR(100),
     transaction_amount BIGINT NOT NULL,
     pay_to_merchant BIGINT NOT NULL,
@@ -330,17 +357,18 @@ CREATE TABLE IF NOT EXISTS settlement_items (
     csv_row_number INT NOT NULL,
     raw_csv_data JSONB,
     created_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (settlement_batch_id) REFERENCES settlement_batches(id),
-    FOREIGN KEY (product_transaction_id) REFERENCES product_transactions(id)
+    updated_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (settlement_batch_uuid) REFERENCES settlement_batches(uuid),
+    FOREIGN KEY (product_transaction_uuid) REFERENCES product_transactions(uuid)
 );
 
-CREATE INDEX idx_settlement_items_batch_id ON settlement_items(settlement_batch_id);
+CREATE INDEX idx_settlement_items_batch_id ON settlement_items(settlement_batch_uuid);
 
-CREATE INDEX idx_settlement_items_product_tx_id ON settlement_items(product_transaction_id);
+CREATE INDEX idx_settlement_items_product_tx_id ON settlement_items(product_transaction_uuid);
 
 CREATE INDEX idx_settlement_items_invoice ON settlement_items(invoice_number);
 
-CREATE INDEX idx_settlement_items_unmatched ON settlement_items(settlement_batch_id)
+CREATE INDEX idx_settlement_items_unmatched ON settlement_items(settlement_batch_uuid)
 WHERE
     is_matched = false;
 
@@ -348,9 +376,10 @@ WHERE
 -- Linked to SettlementBatch - each batch can have at most one discrepancy record
 -- Per-transaction discrepancies are tracked in settlement_items.amount_discrepancy
 CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
-    id UUID PRIMARY KEY,
-    account_id UUID NOT NULL,
-    settlement_batch_id UUID NOT NULL,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    account_uuid VARCHAR(255) NOT NULL,
+    settlement_batch_uuid VARCHAR(255) NOT NULL,
     discrepancy_type VARCHAR(50) NOT NULL,
     expected_pending BIGINT NOT NULL,
     actual_pending BIGINT NOT NULL,
@@ -366,21 +395,22 @@ CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
     detected_at TIMESTAMP NOT NULL,
     resolved_at TIMESTAMP,
     resolution_notes TEXT,
-    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id),
-    FOREIGN KEY (settlement_batch_id) REFERENCES settlement_batches(id),
-    UNIQUE (settlement_batch_id) -- One discrepancy per batch
+    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid),
+    FOREIGN KEY (settlement_batch_uuid) REFERENCES settlement_batches(uuid),
+    UNIQUE (settlement_batch_uuid) -- One discrepancy per batch
 );
 
-CREATE INDEX idx_reconciliation_discrepancies_account_id ON reconciliation_discrepancies(account_id);
+CREATE INDEX idx_reconciliation_discrepancies_account_id ON reconciliation_discrepancies(account_uuid);
 
 CREATE INDEX idx_reconciliation_discrepancies_detected ON reconciliation_discrepancies(detected_at DESC);
 
-CREATE INDEX idx_reconciliation_discrepancies_batch ON reconciliation_discrepancies(settlement_batch_id);
+CREATE INDEX idx_reconciliation_discrepancies_batch ON reconciliation_discrepancies(settlement_batch_uuid);
 
 -- Reconciliation logs to track all reconciliation attempts and outcomes
 CREATE TABLE IF NOT EXISTS reconciliation_logs (
-    id UUID PRIMARY KEY,
-    account_id UUID NOT NULL,
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    account_uuid VARCHAR(255) NOT NULL,
     previous_pending BIGINT NOT NULL,
     previous_available BIGINT NOT NULL,
     current_pending BIGINT NOT NULL,
@@ -392,7 +422,8 @@ CREATE TABLE IF NOT EXISTS reconciliation_logs (
     fee_amount BIGINT DEFAULT 0,
     notes TEXT,
     created_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (account_id) REFERENCES ledger_accounts(id)
+    updated_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid)
 );
 
-CREATE INDEX idx_reconciliation_logs_account_created ON reconciliation_logs(account_id, created_at DESC);
+CREATE INDEX idx_reconciliation_logs_account_created ON reconciliation_logs(account_uuid, created_at DESC);

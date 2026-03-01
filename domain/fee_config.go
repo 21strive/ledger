@@ -3,7 +3,8 @@ package domain
 import (
 	"context"
 	"math"
-	"time"
+
+	"github.com/21strive/redifu"
 )
 
 // FeeConfigType represents the type of fee configuration
@@ -24,20 +25,18 @@ const (
 
 // FeeConfig represents a fee configuration for a payment channel
 type FeeConfig struct {
-	ID             int64
+	*redifu.Record `json:",inline" bson:",inline" db:"-"`
 	ConfigType     FeeConfigType // PLATFORM or DOKU
 	PaymentChannel string        // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
 	FeeType        FeeType       // FIXED or PERCENTAGE
 	FixedAmount    int64         // Fixed fee amount in smallest currency unit
 	Percentage     float64       // Percentage fee (e.g., 2.2 means 2.2%)
 	IsActive       bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
 }
 
 // FeeConfigRepository defines data access for fee configurations
 type FeeConfigRepository interface {
-	GetByID(ctx context.Context, id int64) (*FeeConfig, error)
+	GetByID(ctx context.Context, id string) (*FeeConfig, error)
 	GetByConfigTypeAndChannel(ctx context.Context, configType FeeConfigType, paymentChannel string) (*FeeConfig, error)
 	GetActiveByPaymentChannel(ctx context.Context, paymentChannel string) ([]*FeeConfig, error)
 	GetPlatformFee(ctx context.Context) (*FeeConfig, error)

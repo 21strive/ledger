@@ -1,11 +1,12 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
 	"time"
 
 	"github.com/21strive/ledger/ledgererr"
-	"github.com/google/uuid"
 )
 
 // TransactionStatus represents the lifecycle state of a product transaction
@@ -31,7 +32,7 @@ type FeeBreakdown struct {
 
 // ProductTransaction represents a product sale between buyer and seller
 type ProductTransaction struct {
-	ID              string
+	*redifu.Record  `json:",inline" bson:",inline" db:"-"`
 	BuyerAccountID  string
 	SellerAccountID string
 	ProductID       string
@@ -39,9 +40,8 @@ type ProductTransaction struct {
 	Fee             FeeBreakdown
 	Status          TransactionStatus
 	Metadata        map[string]any // Caller-defined metadata (product details, buyer/seller info, etc.)
-	CreatedAt       time.Time
-	CompletedAt     *time.Time // When user paid (DOKU webhook)
-	SettledAt       *time.Time // When appeared in settlement CSV
+	CompletedAt     *time.Time     // When user paid (DOKU webhook)
+	SettledAt       *time.Time     // When appeared in settlement CSV
 }
 
 // ProductTransactionRepository defines data access for product transactions
@@ -81,7 +81,6 @@ func NewProductTransaction(
 	metadata map[string]any,
 ) *ProductTransaction {
 	return &ProductTransaction{
-		ID:              uuid.New().String(),
 		BuyerAccountID:  buyerAccountID,
 		SellerAccountID: sellerAccountID,
 		ProductID:       productID,
@@ -89,7 +88,6 @@ func NewProductTransaction(
 		Fee:             fee,
 		Status:          TransactionStatusPending,
 		Metadata:        metadata,
-		CreatedAt:       time.Now(),
 	}
 }
 

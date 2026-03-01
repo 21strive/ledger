@@ -1,11 +1,12 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
 	"time"
 
 	"github.com/21strive/ledger/ledgererr"
-	"github.com/google/uuid"
 )
 
 // SettlementBatchStatus represents the processing state of a settlement batch
@@ -21,8 +22,8 @@ const (
 // SettlementBatch represents a CSV settlement upload from DOKU
 // It contains the totals and tracks the reconciliation process
 type SettlementBatch struct {
-	ID               string
-	LedgerID         string
+	*redifu.Record   `json:",inline" bson:",inline" db:"-"`
+	LedgerUUID       string
 	ReportFileName   string
 	SettlementDate   time.Time
 	GrossAmount      int64 // Total amount before DOKU fees
@@ -66,9 +67,9 @@ func NewSettlementBatch(
 		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "uploaded_by is required", nil)
 	}
 
-	return &SettlementBatch{
-		ID:               uuid.New().String(),
-		LedgerID:         ledgerID,
+	sb := &SettlementBatch{
+		Record:           &redifu.Record{},
+		LedgerUUID:       ledgerID,
 		ReportFileName:   reportFileName,
 		SettlementDate:   settlementDate,
 		GrossAmount:      0,
@@ -81,7 +82,9 @@ func NewSettlementBatch(
 		MatchedCount:     0,
 		UnmatchedCount:   0,
 		Metadata:         make(map[string]any),
-	}, nil
+	}
+	redifu.InitRecord(sb)
+	return sb, nil
 }
 
 // IsPending checks if batch is waiting to be processed

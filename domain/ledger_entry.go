@@ -1,8 +1,9 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -43,18 +44,17 @@ const (
 // LedgerEntry is an immutable financial record.
 // Positive amount = credit to the account's bucket.
 // Negative amount = debit from the account's bucket.
-// Balances are never stored — always derived via SUM(amount) GROUP BY account_id, balance_bucket.
+// Balances are never stored — always derived via SUM(amount) GROUP BY account_uuid, balance_bucket.
 type LedgerEntry struct {
-	ID            string
-	JournalID     string // Double-entry grouping
-	AccountID     string
-	Amount        int64 // positive = credit, negative = debit
-	BalanceBucket BalanceBucket
-	EntryType     EntryType
-	SourceType    SourceType
-	SourceID      string // product_transaction_id, settlement_batch_id, disbursement_id, etc.
-	Metadata      map[string]any
-	CreatedAt     time.Time
+	*redifu.Record `json:",inline" bson:",inline" db:"-"`
+	JournalUUID    string // Double-entry grouping
+	AccountUUID    string
+	Amount         int64 // positive = credit, negative = debit
+	BalanceBucket  BalanceBucket
+	EntryType      EntryType
+	SourceType     SourceType
+	SourceID       string // product_transaction_uuid, settlement_batch_uuid, disbursement_id, etc.
+	Metadata       map[string]any
 }
 
 // LedgerEntryRepository defines data access for immutable ledger entries.
@@ -116,44 +116,45 @@ func NewPaymentEntries(
 	dokuAccountID string,
 	dokuFee int64,
 ) []*LedgerEntry {
-	now := time.Now()
 	journalID := uuid.New().String()
 
-	return []*LedgerEntry{
-		{
-			ID:            uuid.New().String(),
-			JournalID:     journalID,
-			AccountID:     sellerAccountID,
-			Amount:        sellerAmount,
-			BalanceBucket: BalanceBucketPending,
-			EntryType:     EntryTypeProductPayment,
-			SourceType:    SourceTypeProductTransaction,
-			SourceID:      productTransactionID,
-			CreatedAt:     now,
-		},
-		{
-			ID:            uuid.New().String(),
-			JournalID:     journalID,
-			AccountID:     platformAccountID,
-			Amount:        platformFee,
-			BalanceBucket: BalanceBucketPending,
-			EntryType:     EntryTypePlatformCommission,
-			SourceType:    SourceTypeProductTransaction,
-			SourceID:      productTransactionID,
-			CreatedAt:     now,
-		},
-		{
-			ID:            uuid.New().String(),
-			JournalID:     journalID,
-			AccountID:     dokuAccountID,
-			Amount:        dokuFee,
-			BalanceBucket: BalanceBucketPending,
-			EntryType:     EntryTypeProcessorFee,
-			SourceType:    SourceTypeProductTransaction,
-			SourceID:      productTransactionID,
-			CreatedAt:     now,
-		},
+	sellerEntry := &LedgerEntry{
+		Record:        &redifu.Record{},
+		JournalUUID:   journalID,
+		AccountUUID:   sellerAccountID,
+		Amount:        sellerAmount,
+		BalanceBucket: BalanceBucketPending,
+		EntryType:     EntryTypeProductPayment,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
 	}
+	redifu.InitRecord(sellerEntry)
+
+	platformEntry := &LedgerEntry{
+		Record:        &redifu.Record{},
+		JournalUUID:   journalID,
+		AccountUUID:   platformAccountID,
+		Amount:        platformFee,
+		BalanceBucket: BalanceBucketPending,
+		EntryType:     EntryTypePlatformCommission,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
+	}
+	redifu.InitRecord(platformEntry)
+
+	dokuEntry := &LedgerEntry{
+		Record:        &redifu.Record{},
+		JournalUUID:   journalID,
+		AccountUUID:   dokuAccountID,
+		Amount:        dokuFee,
+		BalanceBucket: BalanceBucketPending,
+		EntryType:     EntryTypeProcessorFee,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
+	}
+	redifu.InitRecord(dokuEntry)
+
+	return []*LedgerEntry{sellerEntry, platformEntry, dokuEntry}
 }
 
 // NewSettlementEntriesForAccount creates the PENDING→AVAILABLE conversion pair
@@ -168,34 +169,34 @@ func NewSettlementEntriesForAccount(
 	accountID string,
 	amount int64,
 ) []*LedgerEntry {
-	now := time.Now()
 	journalID := uuid.New().String()
 	// TODO: VALIDATE ALL THE LEDGER ENTRY
 
-	return []*LedgerEntry{
-		{
-			ID:            uuid.New().String(),
-			JournalID:     journalID,
-			AccountID:     accountID,
-			Amount:        -amount,
-			BalanceBucket: BalanceBucketPending,
-			EntryType:     EntryTypeSettlement,
-			SourceType:    SourceTypeSettlementBatch,
-			SourceID:      settlementBatchID,
-			CreatedAt:     now,
-		},
-		{
-			ID:            uuid.New().String(),
-			JournalID:     journalID,
-			AccountID:     accountID,
-			Amount:        amount,
-			BalanceBucket: BalanceBucketAvailable,
-			EntryType:     EntryTypeSettlement,
-			SourceType:    SourceTypeSettlementBatch,
-			SourceID:      settlementBatchID,
-			CreatedAt:     now,
-		},
+	pendingEntry := &LedgerEntry{
+		Record:        &redifu.Record{},
+		JournalUUID:   journalID,
+		AccountUUID:   accountID,
+		Amount:        -amount,
+		BalanceBucket: BalanceBucketPending,
+		EntryType:     EntryTypeSettlement,
+		SourceType:    SourceTypeSettlementBatch,
+		SourceID:      settlementBatchID,
 	}
+	redifu.InitRecord(pendingEntry)
+
+	availableEntry := &LedgerEntry{
+		Record:        &redifu.Record{},
+		JournalUUID:   journalID,
+		AccountUUID:   accountID,
+		Amount:        amount,
+		BalanceBucket: BalanceBucketAvailable,
+		EntryType:     EntryTypeSettlement,
+		SourceType:    SourceTypeSettlementBatch,
+		SourceID:      settlementBatchID,
+	}
+	redifu.InitRecord(availableEntry)
+
+	return []*LedgerEntry{pendingEntry, availableEntry}
 }
 
 // NewDokuFeeSettlementEntry creates the single PENDING clearance entry for the
@@ -209,17 +210,18 @@ func NewDokuFeeSettlementEntry(
 	dokuAccountID string,
 	dokuFee int64,
 ) *LedgerEntry {
-	return &LedgerEntry{
-		ID:            uuid.New().String(),
-		JournalID:     uuid.New().String(),
-		AccountID:     dokuAccountID,
+	entry := &LedgerEntry{
+		Record:        &redifu.Record{},
+		JournalUUID:   uuid.New().String(),
+		AccountUUID:   dokuAccountID,
 		Amount:        -dokuFee,
 		BalanceBucket: BalanceBucketPending,
 		EntryType:     EntryTypeSettlement,
 		SourceType:    SourceTypeSettlementBatch,
 		SourceID:      settlementBatchID,
-		CreatedAt:     time.Now(),
 	}
+	redifu.InitRecord(entry)
+	return entry
 }
 
 // NewDisbursementEntry creates the AVAILABLE debit entry for a seller withdrawal
@@ -231,17 +233,18 @@ func NewDisbursementEntry(
 	accountID string,
 	amount int64,
 ) *LedgerEntry {
-	return &LedgerEntry{
-		ID:            uuid.New().String(),
-		JournalID:     uuid.New().String(),
-		AccountID:     accountID,
+	entry := &LedgerEntry{
+		Record:        &redifu.Record{},
+		JournalUUID:   uuid.New().String(),
+		AccountUUID:   accountID,
 		Amount:        -amount,
 		BalanceBucket: BalanceBucketAvailable,
 		EntryType:     EntryTypeDisbursement,
 		SourceType:    SourceTypeDisbursement,
 		SourceID:      disbursementID,
-		CreatedAt:     time.Now(),
 	}
+	redifu.InitRecord(entry)
+	return entry
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,10 +254,10 @@ func NewDisbursementEntry(
 
 // DerivedBalance holds the computed balances for an account derived from entries.
 type DerivedBalance struct {
-	AccountID string
-	Pending   int64
-	Available int64
-	Currency  Currency // populated by the caller from the account record
+	AccountUUID string
+	Pending     int64
+	Available   int64
+	Currency    Currency // populated by the caller from the account record
 }
 
 // Total returns the sum of pending and available balances.

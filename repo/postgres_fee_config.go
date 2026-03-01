@@ -7,6 +7,7 @@ import (
 
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
+	"github.com/21strive/redifu"
 )
 
 type PostgresFeeConfigRepository struct {
@@ -17,18 +18,18 @@ func NewPostgresFeeConfigRepository(db DBTX) *PostgresFeeConfigRepository {
 	return &PostgresFeeConfigRepository{db: db}
 }
 
-func (r *PostgresFeeConfigRepository) GetByID(ctx context.Context, id int64) (*domain.FeeConfig, error) {
+func (r *PostgresFeeConfigRepository) GetByID(ctx context.Context, id string) (*domain.FeeConfig, error) {
 	query := `
-		SELECT id, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
-		WHERE id = $1
+		WHERE uuid = $1
 	`
 	return r.scanOne(ctx, query, id)
 }
 
 func (r *PostgresFeeConfigRepository) GetByConfigTypeAndChannel(ctx context.Context, configType domain.FeeConfigType, paymentChannel string) (*domain.FeeConfig, error) {
 	query := `
-		SELECT id, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE config_type = $1 AND payment_channel = $2
 	`
@@ -37,7 +38,7 @@ func (r *PostgresFeeConfigRepository) GetByConfigTypeAndChannel(ctx context.Cont
 
 func (r *PostgresFeeConfigRepository) GetActiveByPaymentChannel(ctx context.Context, paymentChannel string) ([]*domain.FeeConfig, error) {
 	query := `
-		SELECT id, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE payment_channel = $1 AND is_active = true
 	`
@@ -46,7 +47,7 @@ func (r *PostgresFeeConfigRepository) GetActiveByPaymentChannel(ctx context.Cont
 
 func (r *PostgresFeeConfigRepository) GetPlatformFee(ctx context.Context) (*domain.FeeConfig, error) {
 	query := `
-		SELECT id, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE config_type = 'PLATFORM' AND payment_channel = 'PLATFORM' AND is_active = true
 	`
@@ -55,7 +56,7 @@ func (r *PostgresFeeConfigRepository) GetPlatformFee(ctx context.Context) (*doma
 
 func (r *PostgresFeeConfigRepository) GetAllActive(ctx context.Context) ([]*domain.FeeConfig, error) {
 	query := `
-		SELECT id, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE is_active = true
 		ORDER BY config_type, payment_channel
@@ -64,25 +65,27 @@ func (r *PostgresFeeConfigRepository) GetAllActive(ctx context.Context) ([]*doma
 }
 
 func (r *PostgresFeeConfigRepository) Save(ctx context.Context, fc *domain.FeeConfig) error {
-	now := time.Now()
-	fc.CreatedAt = now
-	fc.UpdatedAt = now
+	if fc.Record == nil {
+		fc.Record = &redifu.Record{}
+	}
+	redifu.InitRecord(fc)
 
 	query := `
-		INSERT INTO fee_configs (config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id
+		INSERT INTO fee_configs (uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
-	err := r.db.QueryRowContext(ctx, query,
+	_, err := r.db.ExecContext(ctx, query,
+		fc.Record.UUID,
+		fc.Record.Foundation.RandId,
 		string(fc.ConfigType),
 		toNullString(fc.PaymentChannel),
 		string(fc.FeeType),
 		fc.FixedAmount,
 		fc.Percentage,
 		fc.IsActive,
-		fc.CreatedAt,
-		fc.UpdatedAt,
-	).Scan(&fc.ID)
+		fc.Record.Foundation.CreatedAt,
+		fc.Record.Foundation.UpdatedAt,
+	)
 
 	if err != nil {
 		return ErrFailedInsertSQL.WithError(err)
@@ -91,12 +94,12 @@ func (r *PostgresFeeConfigRepository) Save(ctx context.Context, fc *domain.FeeCo
 }
 
 func (r *PostgresFeeConfigRepository) Update(ctx context.Context, fc *domain.FeeConfig) error {
-	fc.UpdatedAt = time.Now()
+	fc.Record.Foundation.UpdatedAt = time.Now()
 
 	query := `
 		UPDATE fee_configs
 		SET config_type = $1, payment_channel = $2, fee_type = $3, fixed_amount = $4, percentage = $5, is_active = $6, updated_at = $7
-		WHERE id = $8
+		WHERE uuid = $8
 	`
 	result, err := r.db.ExecContext(ctx, query,
 		string(fc.ConfigType),
@@ -105,8 +108,8 @@ func (r *PostgresFeeConfigRepository) Update(ctx context.Context, fc *domain.Fee
 		fc.FixedAmount,
 		fc.Percentage,
 		fc.IsActive,
-		fc.UpdatedAt,
-		fc.ID,
+		fc.Record.Foundation.UpdatedAt,
+		fc.Record.UUID,
 	)
 	if err != nil {
 		return ErrFailedUpdateSQL.WithError(err)
@@ -144,18 +147,20 @@ func (r *PostgresFeeConfigRepository) scanMany(ctx context.Context, query string
 	var configs []*domain.FeeConfig
 	for rows.Next() {
 		var fc domain.FeeConfig
+		fc.Record = &redifu.Record{}
 		var paymentChannel sql.NullString
 
 		err := rows.Scan(
-			&fc.ID,
+			&fc.Record.UUID,
+			&fc.Record.Foundation.RandId,
 			&fc.ConfigType,
 			&paymentChannel,
 			&fc.FeeType,
 			&fc.FixedAmount,
 			&fc.Percentage,
 			&fc.IsActive,
-			&fc.CreatedAt,
-			&fc.UpdatedAt,
+			&fc.Record.Foundation.CreatedAt,
+			&fc.Record.Foundation.UpdatedAt,
 		)
 		if err != nil {
 			return nil, ErrFailedQuerySQL.WithError(err)
@@ -176,18 +181,20 @@ type feeConfigScanner interface {
 
 func (r *PostgresFeeConfigRepository) scanRow(scanner feeConfigScanner) (*domain.FeeConfig, error) {
 	var fc domain.FeeConfig
+	fc.Record = &redifu.Record{}
 	var paymentChannel sql.NullString
 
 	err := scanner.Scan(
-		&fc.ID,
+		&fc.Record.UUID,
+		&fc.Record.Foundation.RandId,
 		&fc.ConfigType,
 		&paymentChannel,
 		&fc.FeeType,
 		&fc.FixedAmount,
 		&fc.Percentage,
 		&fc.IsActive,
-		&fc.CreatedAt,
-		&fc.UpdatedAt,
+		&fc.Record.Foundation.CreatedAt,
+		&fc.Record.Foundation.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err

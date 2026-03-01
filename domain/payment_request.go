@@ -1,11 +1,12 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
 	"time"
 
 	"github.com/21strive/ledger/ledgererr"
-	"github.com/google/uuid"
 )
 
 // PaymentStatus represents the lifecycle state of a payment request
@@ -20,20 +21,18 @@ const (
 
 // PaymentRequest tracks DOKU payment lifecycle for a transaction
 type PaymentRequest struct {
-	ID                   string
-	ProductTransactionID string
-	RequestID            string // DOKU's payment request ID
-	PaymentCode          string // VA number, QRIS code, etc.
-	PaymentChannel       string // Payment method (QRIS, VA_BCA, etc.)
-	PaymentURL           string // URL for user to complete payment
-	Amount               int64  // Total charged to buyer
-	Currency             Currency
-	Status               PaymentStatus
-	FailureReason        string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	CompletedAt          *time.Time // When DOKU webhook confirmed payment
-	ExpiresAt            time.Time  // Payment link expiration
+	*redifu.Record         `json:",inline" bson:",inline" db:"-"`
+	ProductTransactionUUID string
+	RequestID              string // DOKU's payment request ID
+	PaymentCode            string // VA number, QRIS code, etc.
+	PaymentChannel         string // Payment method (QRIS, VA_BCA, etc.)
+	PaymentURL             string // URL for user to complete payment
+	Amount                 int64  // Total charged to buyer
+	Currency               Currency
+	Status                 PaymentStatus
+	FailureReason          string
+	CompletedAt            *time.Time // When DOKU webhook confirmed payment
+	ExpiresAt              time.Time  // Payment link expiration
 }
 
 // PaymentRequestRepository defines data access for payment requests
@@ -56,19 +55,18 @@ func NewPaymentRequest(
 	currency Currency,
 	expiresAt time.Time,
 ) *PaymentRequest {
-	now := time.Now()
-	return &PaymentRequest{
-		ID:                   uuid.New().String(),
-		ProductTransactionID: productTransactionID,
-		RequestID:            requestID,
-		PaymentChannel:       paymentChannel,
-		Amount:               amount,
-		Currency:             currency,
-		Status:               PaymentStatusPending,
-		CreatedAt:            now,
-		UpdatedAt:            now,
-		ExpiresAt:            expiresAt,
+	pr := &PaymentRequest{
+		Record:                 &redifu.Record{},
+		ProductTransactionUUID: productTransactionID,
+		RequestID:              requestID,
+		PaymentChannel:         paymentChannel,
+		Amount:                 amount,
+		Currency:               currency,
+		Status:                 PaymentStatusPending,
+		ExpiresAt:              expiresAt,
 	}
+	redifu.InitRecord(pr)
+	return pr
 }
 
 // SetPaymentCode sets the payment code (VA number, QRIS code, etc.)

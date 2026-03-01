@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
 	"time"
 
@@ -42,8 +44,8 @@ func (ba *BankAccount) Validate() error {
 
 // Disbursement represents a withdrawal request to an external bank account
 type Disbursement struct {
-	ID                    string
-	LedgerID              string
+	*redifu.Record        `json:",inline" bson:",inline" db:"-"`
+	LedgerUUID            string
 	Amount                int64
 	Currency              Currency
 	Status                DisbursementStatus
@@ -51,7 +53,6 @@ type Disbursement struct {
 	Description           string
 	ExternalTransactionID string // DOKU transaction ID
 	FailureReason         string
-	CreatedAt             time.Time
 	ProcessedAt           *time.Time
 }
 
@@ -80,16 +81,17 @@ func NewDisbursement(
 		return nil, err
 	}
 
-	return &Disbursement{
-		ID:          uuid.New().String(),
-		LedgerID:    ledgerID,
+	d := &Disbursement{
+		Record:      &redifu.Record{},
+		LedgerUUID:  ledgerID,
 		Amount:      amount,
 		Currency:    currency,
 		Status:      DisbursementStatusPending,
 		BankAccount: bankAccount,
 		Description: description,
-		CreatedAt:   time.Now(),
-	}, nil
+	}
+	redifu.InitRecord(d)
+	return d, nil
 }
 
 // NewDisbursementWithID creates a new disbursement with a pre-generated ID
@@ -113,16 +115,18 @@ func NewDisbursementWithID(
 		return nil, err
 	}
 
-	return &Disbursement{
-		ID:          id,
-		LedgerID:    ledgerID,
+	d := &Disbursement{
+		Record:      &redifu.Record{},
+		LedgerUUID:  ledgerID,
 		Amount:      amount,
 		Currency:    currency,
 		Status:      DisbursementStatusPending,
 		BankAccount: bankAccount,
 		Description: description,
-		CreatedAt:   time.Now(),
-	}, nil
+	}
+	redifu.InitRecord(d)
+	d.Foundation.UUID = id
+	return d, nil
 }
 
 // GenerateID generates a new UUID string for use as entity ID

@@ -27,7 +27,7 @@ func NewPostgresLedgerEntryRepository(db DBTX) *PostgresLedgerEntryRepository {
 func (r *PostgresLedgerEntryRepository) Save(ctx context.Context, entry *domain.LedgerEntry) error {
 	query := `
 		INSERT INTO ledger_entries (
-			id, journal_id, account_id, amount, balance_bucket,
+			id, journal_uuid, account_uuid, amount, balance_bucket,
 			entry_type, source_type, source_id, metadata, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
@@ -40,9 +40,9 @@ func (r *PostgresLedgerEntryRepository) Save(ctx context.Context, entry *domain.
 	_, err = r.db.ExecContext(
 		ctx,
 		query,
-		entry.ID,
-		entry.JournalID,
-		entry.AccountID,
+		entry.UUID,
+		entry.JournalUUID,
+		entry.AccountUUID,
 		entry.Amount,
 		entry.BalanceBucket,
 		entry.EntryType,
@@ -67,7 +67,7 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 
 	query := `
 		INSERT INTO ledger_entries (
-			id, journal_id, account_id, amount, balance_bucket,
+			id, journal_uuid, account_uuid, amount, balance_bucket,
 			entry_type, source_type, source_id, metadata, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
@@ -81,9 +81,9 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 		_, err = r.db.ExecContext(
 			ctx,
 			query,
-			entry.ID,
-			entry.JournalID,
-			entry.AccountID,
+			entry.UUID,
+			entry.JournalUUID,
+			entry.AccountUUID,
 			entry.Amount,
 			entry.BalanceBucket,
 			entry.EntryType,
@@ -110,7 +110,7 @@ func (r *PostgresLedgerEntryRepository) GetBalance(ctx context.Context, accountI
 	query := `
 		SELECT COALESCE(SUM(amount), 0)
 		FROM ledger_entries
-		WHERE account_id = $1 AND balance_bucket = $2
+		WHERE account_uuid = $1 AND balance_bucket = $2
 	`
 
 	var balance int64
@@ -130,7 +130,7 @@ func (r *PostgresLedgerEntryRepository) GetAllBalances(ctx context.Context, acco
 			COALESCE(SUM(amount) FILTER (WHERE balance_bucket = 'PENDING'),   0) AS pending,
 			COALESCE(SUM(amount) FILTER (WHERE balance_bucket = 'AVAILABLE'), 0) AS available
 		FROM ledger_entries
-		WHERE account_id = $1
+		WHERE account_uuid = $1
 	`
 
 	row := r.db.QueryRowContext(ctx, query, accountID)
@@ -161,7 +161,7 @@ func (r *PostgresLedgerEntryRepository) sumSellerBalance(ctx context.Context, se
 	query := `
 		SELECT COALESCE(SUM(le.amount), 0)
 		FROM ledger_entries le
-		JOIN ledger_accounts a ON a.id = le.account_id
+		JOIN ledger_accounts a ON a.id = le.account_uuid
 		WHERE a.owner_type = 'SELLER'
 		  AND a.owner_id  = $1
 		  AND le.balance_bucket = $2
@@ -184,7 +184,7 @@ func (r *PostgresLedgerEntryRepository) GetAllBalancesBySellerID(ctx context.Con
 			COALESCE(SUM(le.amount) FILTER (WHERE le.balance_bucket = 'PENDING'),   0) AS pending,
 			COALESCE(SUM(le.amount) FILTER (WHERE le.balance_bucket = 'AVAILABLE'), 0) AS available
 		FROM ledger_entries le
-		JOIN ledger_accounts a ON a.id = le.account_id
+		JOIN ledger_accounts a ON a.id = le.account_uuid
 		WHERE a.owner_type = 'SELLER'
 		  AND a.owner_id  = $1
 	`
@@ -204,10 +204,10 @@ func (r *PostgresLedgerEntryRepository) GetAllBalancesBySellerID(ctx context.Con
 // GetByJournalID returns all entries grouped in a specific journal.
 func (r *PostgresLedgerEntryRepository) GetByJournalID(ctx context.Context, journalID string) ([]*domain.LedgerEntry, error) {
 	query := `
-		SELECT id, journal_id, account_id, amount, balance_bucket,
+		SELECT id, journal_uuid, account_uuid, amount, balance_bucket,
 		       entry_type, source_type, source_id, metadata, created_at
 		FROM ledger_entries
-		WHERE journal_id = $1
+		WHERE journal_uuid = $1
 		ORDER BY created_at ASC
 	`
 
@@ -223,7 +223,7 @@ func (r *PostgresLedgerEntryRepository) GetByJournalID(ctx context.Context, jour
 // GetBySourceID returns all entries originating from a given source.
 func (r *PostgresLedgerEntryRepository) GetBySourceID(ctx context.Context, sourceID string) ([]*domain.LedgerEntry, error) {
 	query := `
-		SELECT id, journal_id, account_id, amount, balance_bucket,
+		SELECT id, journal_uuid, account_uuid, amount, balance_bucket,
 		       entry_type, source_type, source_id, metadata, created_at
 		FROM ledger_entries
 		WHERE source_id = $1
@@ -249,10 +249,10 @@ func (r *PostgresLedgerEntryRepository) GetByAccountID(ctx context.Context, acco
 	}
 
 	query := `
-		SELECT id, journal_id, account_id, amount, balance_bucket,
+		SELECT id, journal_uuid, account_uuid, amount, balance_bucket,
 		       entry_type, source_type, source_id, metadata, created_at
 		FROM ledger_entries
-		WHERE account_id = $1
+		WHERE account_uuid = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
@@ -298,9 +298,9 @@ func scanLedgerEntry(s scannable) (*domain.LedgerEntry, error) {
 	var createdAt time.Time
 
 	err := s.Scan(
-		&entry.ID,
-		&entry.JournalID,
-		&entry.AccountID,
+		&entry.UUID,
+		&entry.JournalUUID,
+		&entry.AccountUUID,
 		&entry.Amount,
 		&entry.BalanceBucket,
 		&entry.EntryType,

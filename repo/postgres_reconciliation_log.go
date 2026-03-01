@@ -22,8 +22,8 @@ func (r *PostgresReconciliationLogRepository) Save(ctx context.Context, log *dom
 			is_settlement, settled_amount, fee_amount, notes, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 	`,
-		log.ID,
-		log.LedgerID,
+		log.UUID,
+		log.LedgerUUID,
 		log.PreviousPending,
 		log.PreviousAvailable,
 		log.CurrentPending,
@@ -61,8 +61,8 @@ func (r *PostgresReconciliationLogRepository) GetByLedgerID(ctx context.Context,
 		var log domain.ReconciliationLog
 
 		err := rows.Scan(
-			&log.ID,
-			&log.LedgerID,
+			&log.UUID,
+			&log.LedgerUUID,
 			&log.PreviousPending,
 			&log.PreviousAvailable,
 			&log.CurrentPending,

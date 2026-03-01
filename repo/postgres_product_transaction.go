@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/21strive/ledger/domain"
+	"github.com/21strive/redifu"
 	"github.com/lib/pq"
 )
 
@@ -21,9 +22,9 @@ func NewPostgresProductTransactionRepository(db DBTX) *PostgresProductTransactio
 
 func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id string) (*domain.ProductTransaction, error) {
 	query := `
-		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
-		       status, created_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE id = $1
 	`
@@ -33,9 +34,9 @@ func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id s
 
 func (r *PostgresProductTransactionRepository) GetByInvoiceNumber(ctx context.Context, invoiceNumber string) (*domain.ProductTransaction, error) {
 	query := `
-		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
-		       status, created_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE invoice_number = $1
 	`
@@ -46,9 +47,9 @@ func (r *PostgresProductTransactionRepository) GetByInvoiceNumber(ctx context.Co
 func (r *PostgresProductTransactionRepository) GetBySellerAccountID(ctx context.Context, sellerAccountID string, page, pageSize int) ([]*domain.ProductTransaction, error) {
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
-		       status, created_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
 		ORDER BY created_at DESC
@@ -61,9 +62,9 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountID(ctx context.
 func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.Context, buyerAccountID string, page, pageSize int) ([]*domain.ProductTransaction, error) {
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
-		       status, created_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE buyer_account_id = $1
 		ORDER BY created_at DESC
@@ -75,9 +76,9 @@ func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.C
 
 func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
-		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
-		       status, created_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'PENDING'
 		ORDER BY created_at DESC
@@ -88,9 +89,9 @@ func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx c
 
 func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
-		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
-		       status, created_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'COMPLETED'
 		ORDER BY created_at ASC
@@ -101,9 +102,9 @@ func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx contex
 
 func (r *PostgresProductTransactionRepository) GetAllBySellerID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
-		SELECT id, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
-		       status, created_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
 		ORDER BY created_at DESC
@@ -120,11 +121,11 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 
 	query := `
 		INSERT INTO product_transactions (
-			id, buyer_account_id, seller_account_id, product_id, invoice_number,
+			uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
 			seller_price, platform_fee, doku_fee, total_charged, currency,
-			status, created_at, completed_at, settled_at, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-		ON CONFLICT (id) DO UPDATE SET
+			status, created_at, updated_at, completed_at, settled_at, metadata
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
 			settled_at = EXCLUDED.settled_at,
@@ -137,7 +138,8 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 	_, err = r.db.ExecContext(
 		ctx,
 		query,
-		tx.ID,
+		tx.Record.UUID,
+		tx.Record.Foundation.RandId,
 		tx.BuyerAccountID,
 		tx.SellerAccountID,
 		tx.ProductID,
@@ -148,7 +150,8 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.Fee.TotalCharged,
 		tx.Fee.Currency,
 		tx.Status,
-		tx.CreatedAt,
+		tx.Record.Foundation.CreatedAt,
+		tx.Record.Foundation.UpdatedAt,
 		tx.CompletedAt,
 		tx.SettledAt,
 		string(metadataJSON),
@@ -170,13 +173,13 @@ func (r *PostgresProductTransactionRepository) UpdateStatus(ctx context.Context,
 
 	switch status {
 	case domain.TransactionStatusCompleted:
-		query = `UPDATE product_transactions SET status = $1, completed_at = $2 WHERE id = $3`
+		query = `UPDATE product_transactions SET status = $1, completed_at = $2 WHERE uuid = $3`
 		args = []any{status, timestamp, id}
 	case domain.TransactionStatusSettled:
-		query = `UPDATE product_transactions SET status = $1, settled_at = $2 WHERE id = $3`
+		query = `UPDATE product_transactions SET status = $1, settled_at = $2 WHERE uuid = $3`
 		args = []any{status, timestamp, id}
 	default:
-		query = `UPDATE product_transactions SET status = $1 WHERE id = $2`
+		query = `UPDATE product_transactions SET status = $1 WHERE uuid = $2`
 		args = []any{status, id}
 	}
 
@@ -239,7 +242,8 @@ func (r *PostgresProductTransactionRepository) scanMany(ctx context.Context, que
 // scanRow scans a single row into a ProductTransaction
 func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.ProductTransaction, error) {
 	var row struct {
-		ID              string
+		UUID            string
+		RandId          string
 		BuyerAccountID  string
 		SellerAccountID string
 		ProductID       string
@@ -251,13 +255,15 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		Currency        string
 		Status          string
 		CreatedAt       time.Time
+		UpdatedAt       time.Time
 		CompletedAt     sql.NullTime
 		SettledAt       sql.NullTime
 		Metadata        []byte
 	}
 
 	err := rows.Scan(
-		&row.ID,
+		&row.UUID,
+		&row.RandId,
 		&row.BuyerAccountID,
 		&row.SellerAccountID,
 		&row.ProductID,
@@ -269,6 +275,7 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		&row.Currency,
 		&row.Status,
 		&row.CreatedAt,
+		&row.UpdatedAt,
 		&row.CompletedAt,
 		&row.SettledAt,
 		&row.Metadata,
@@ -294,8 +301,8 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		}
 	}
 
-	return &domain.ProductTransaction{
-		ID:              row.ID,
+	tx := &domain.ProductTransaction{
+		Record:          &redifu.Record{},
 		BuyerAccountID:  row.BuyerAccountID,
 		SellerAccountID: row.SellerAccountID,
 		ProductID:       row.ProductID,
@@ -309,8 +316,12 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		},
 		Status:      domain.TransactionStatus(row.Status),
 		Metadata:    metadata,
-		CreatedAt:   row.CreatedAt,
 		CompletedAt: completedAt,
 		SettledAt:   settledAt,
-	}, nil
+	}
+	tx.Record.Foundation.UUID = row.UUID
+	tx.Record.Foundation.RandId = row.RandId
+	tx.Record.Foundation.CreatedAt = row.CreatedAt
+	tx.Record.Foundation.UpdatedAt = row.UpdatedAt
+	return tx, nil
 }

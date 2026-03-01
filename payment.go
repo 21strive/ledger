@@ -109,7 +109,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 
 	productTx := domain.NewProductTransaction(
 		req.BuyerAccountID,
-		sellerAcccount.ID,
+		sellerAcccount.UUID,
 		req.ProductID,
 		invoiceNumber,
 		feeBreakdown,
@@ -161,7 +161,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 
 	// Create PaymentRequest
 	paymentReq := domain.NewPaymentRequest(
-		productTx.ID,
+		productTx.UUID,
 		dokuRequestID,
 		req.PaymentChannel,
 		feeBreakdown.TotalCharged,
@@ -197,7 +197,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	}
 
 	c.logger.InfoContext(ctx, "Payment generated successfully",
-		"transaction_id", productTx.ID,
+		"transaction_id", productTx.UUID,
 		"invoice_number", invoiceNumber,
 		"total_charged", feeBreakdown.TotalCharged,
 		"payment_channel", req.PaymentChannel,
@@ -205,7 +205,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	)
 
 	return &GeneratePaymentResponse{
-		TransactionID: productTx.ID,
+		TransactionID: productTx.UUID,
 		InvoiceNumber: invoiceNumber,
 		PaymentURL:    paymentURL,
 		PaymentCode:   paymentCode,
@@ -263,7 +263,7 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 	}
 
 	// 3. Fetch related PaymentRequest
-	paymentReq, err := c.repoProvider.PaymentRequest().GetByProductTransactionID(ctx, productTx.ID)
+	paymentReq, err := c.repoProvider.PaymentRequest().GetByProductTransactionID(ctx, productTx.UUID)
 	if err != nil {
 		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to get payment request", err)
 	}
@@ -281,12 +281,12 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 
 	// 5. Generate ledger entries (PENDING credit to seller, platform, and doku)
 	ledgerEntries := domain.NewPaymentEntries(
-		productTx.ID,
+		productTx.UUID,
 		productTx.SellerAccountID,
 		productTx.Fee.SellerPrice,
-		platformAccount.ID,
+		platformAccount.UUID,
 		productTx.Fee.PlatformFee,
-		dokuAccount.ID,
+		dokuAccount.UUID,
 		productTx.Fee.DokuFee,
 	)
 
@@ -304,7 +304,7 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 		if err := productTx.MarkCompleted(); err != nil {
 			return err
 		}
-		if err := tx.ProductTransaction().UpdateStatus(ctx, productTx.ID, productTx.Status, *productTx.CompletedAt); err != nil {
+		if err := tx.ProductTransaction().UpdateStatus(ctx, productTx.UUID, productTx.Status, *productTx.CompletedAt); err != nil {
 			return err
 		}
 
@@ -321,7 +321,7 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to persist payment success transaction", err)
 	}
 
-	c.logger.InfoContext(ctx, "Payment success securely handled", "invoice_number", invoiceNumber, "product_tx_id", productTx.ID)
+	c.logger.InfoContext(ctx, "Payment success securely handled", "invoice_number", invoiceNumber, "product_tx_id", productTx.UUID)
 
 	return nil
 }

@@ -16,9 +16,9 @@ import (
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
 	"github.com/21strive/ledger/repo"
+	"github.com/21strive/redifu"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/google/uuid"
 )
 
 // LedgerClient is the entry point for all ledger operations.
@@ -105,7 +105,7 @@ func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, emai
 	// Check for existing account
 	existing, err := c.repoProvider.Account().GetByOwner(ctx, domain.OwnerTypeSeller, accountID)
 	if err == nil {
-		c.logger.InfoContext(ctx, "Account already exists for owner ID", "owner_id", accountID, "account_id", existing.ID)
+		c.logger.InfoContext(ctx, "Account already exists for owner ID", "owner_id", accountID, "account_id", existing.UUID)
 		return nil, ledgererr.ErrLedgerAlreadyExists
 	} else if !ledgererr.IsErrorCode(ledgererr.CodeNotFound, err) {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to check existing account", err)
@@ -160,7 +160,7 @@ func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, 
 	ownerID := "PLATFORM"
 	existing, err := c.repoProvider.Account().GetByOwner(ctx, domain.OwnerTypePlatform, ownerID)
 	if err == nil {
-		c.logger.InfoContext(ctx, "Platform account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.ID)
+		c.logger.InfoContext(ctx, "Platform account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.UUID)
 		return existing, nil
 	}
 	if !ledgererr.IsAppError(err, repo.ErrNotFound) {
@@ -225,7 +225,7 @@ func (c *LedgerClient) DeleteAccount(ctx context.Context, id string) error {
 		}
 
 		// Derive current balances from entries
-		pending, available, err := tx.LedgerEntry().GetAllBalances(ctx, account.ID)
+		pending, available, err := tx.LedgerEntry().GetAllBalances(ctx, account.UUID)
 		if err != nil {
 			return ledgererr.NewError(ledgererr.CodeInternal, "failed to derive account balance", err)
 		}
@@ -261,7 +261,7 @@ func (c *LedgerClient) GetBalance(ctx context.Context, accountID string) (*Balan
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account", err)
 	}
 
-	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.ID)
+	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive balance", err)
 	}
@@ -290,7 +290,7 @@ func (c *LedgerClient) GetBalanceByAccountUUID(ctx context.Context, accountUUID 
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account", err)
 	}
 
-	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.ID)
+	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive balance", err)
 	}
@@ -454,7 +454,7 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	}
 
 	// Derive available balance
-	_, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.ID)
+	_, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive available balance", err)
 	}
@@ -462,7 +462,7 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	if req.Amount > available {
 		c.logger.WarnContext(ctx, "Insufficient available balance for withdrawal",
 			"seller_id", sellerID,
-			"account_id", account.ID,
+			"account_id", account.UUID,
 			"requested_amount", req.Amount,
 			"available_balance", available,
 		)
@@ -476,7 +476,7 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 
 	c.logger.InfoContext(ctx, "Calling DOKU SendPayoutSubAccount",
 		"disbursement_id", disbursementID,
-		"account_id", account.ID,
+		"account_id", account.UUID,
 		"doku_sub_account_id", account.DokuSubAccountID,
 		"amount", req.Amount,
 	)
@@ -518,7 +518,7 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		AccountName:   req.AccountName,
 	}
 
-	disbursement, err := domain.NewDisbursementWithID(disbursementID, account.ID, req.Amount, currency, bankAccount, req.Description)
+	disbursement, err := domain.NewDisbursementWithID(disbursementID, account.UUID, req.Amount, currency, bankAccount, req.Description)
 	if err != nil {
 		c.logger.ErrorContext(ctx, "Failed to create disbursement entity after DOKU success",
 			"disbursement_id", disbursementID,
@@ -536,7 +536,7 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	}
 
 	// Debit entry: -amount AVAILABLE
-	debitEntry := domain.NewDisbursementEntry(disbursementID, account.ID, req.Amount)
+	debitEntry := domain.NewDisbursementEntry(disbursementID, account.UUID, req.Amount)
 
 	// Persist disbursement record + ledger entry atomically
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
@@ -554,20 +554,20 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 			"doku_status", dokuStatus,
 			"doku_invoice", dokuResp.Payout.InvoiceNumber,
 			"amount", req.Amount,
-			"account_id", account.ID,
+			"account_id", account.UUID,
 			"error", err,
 		)
 		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save disbursement after DOKU success", err)
 	}
 
 	c.logger.InfoContext(ctx, "Withdrawal completed",
-		"disbursement_id", disbursement.ID,
+		"disbursement_id", disbursement.UUID,
 		"status", disbursement.Status,
 		"amount", req.Amount,
 	)
 
 	return &WithdrawResponse{
-		DisbursementID: disbursement.ID,
+		DisbursementID: disbursement.UUID,
 		Status:         string(disbursement.Status),
 		Amount:         req.Amount,
 		Currency:       string(currency),
@@ -678,7 +678,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	}
 
 	// Derive pre-settlement balances
-	previousPending, previousAvailable, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.ID)
+	previousPending, previousAvailable, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive pre-settlement balances", err)
 	}
@@ -695,7 +695,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	}
 
 	c.logger.InfoContext(ctx, "Parsed settlement CSV",
-		"account_id", account.ID,
+		"account_id", account.UUID,
 		"total_rows", len(csvRows),
 		"skipped_rows", parser.GetSkippedRows(),
 		"parse_errors", len(parser.GetParseErrors()),
@@ -708,7 +708,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 
 	// Create settlement batch (uses AccountID in place of old LedgerID)
 	batch, err := domain.NewSettlementBatch(
-		account.ID,
+		account.UUID,
 		req.ReportFileName,
 		settlementDate,
 		req.UploadedBy,
@@ -729,7 +729,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	var totalDokuFee int64
 
 	for _, csvRow := range csvRows {
-		item, err := csvRow.ToSettlementItem(batch.ID)
+		item, err := csvRow.ToSettlementItem(batch.UUID)
 		if err != nil {
 			c.logger.WarnContext(ctx, "Failed to create settlement item",
 				"row_number", csvRow.RowNumber,
@@ -768,7 +768,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		if err := item.MatchToTransaction(productTx); err != nil {
 			c.logger.WarnContext(ctx, "Failed to match settlement item",
 				"invoice_number", csvRow.InvoiceNumber,
-				"product_tx_id", productTx.ID,
+				"product_tx_id", productTx.UUID,
 				"error", err,
 			)
 			batch.IncrementUnmatched()
@@ -779,7 +779,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		if item.HasAmountDiscrepancy() {
 			c.logger.WarnContext(ctx, "Amount discrepancy in settlement",
 				"invoice_number", csvRow.InvoiceNumber,
-				"product_tx_id", productTx.ID,
+				"product_tx_id", productTx.UUID,
 				"csv_pay_to_merchant", csvRow.PayToMerchant,
 				"expected_net_amount", item.ExpectedNetAmount,
 				"discrepancy", item.AmountDiscrepancy,
@@ -818,21 +818,21 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	// Seller: PENDING → AVAILABLE
 	if totalSettledSellerAmount > 0 {
 		allSettlementEntries = append(allSettlementEntries,
-			domain.NewSettlementEntriesForAccount(batch.ID, account.ID, totalSettledSellerAmount)...,
+			domain.NewSettlementEntriesForAccount(batch.UUID, account.UUID, totalSettledSellerAmount)...,
 		)
 	}
 
 	// Platform: PENDING → AVAILABLE
 	if totalSettledPlatformAmount > 0 && platformAccount != nil {
 		allSettlementEntries = append(allSettlementEntries,
-			domain.NewSettlementEntriesForAccount(batch.ID, platformAccount.ID, totalSettledPlatformAmount)...,
+			domain.NewSettlementEntriesForAccount(batch.UUID, platformAccount.UUID, totalSettledPlatformAmount)...,
 		)
 	}
 
 	// DOKU expense: clear PENDING (no AVAILABLE credit)
 	if totalDokuFee > 0 && dokuAccount != nil {
 		allSettlementEntries = append(allSettlementEntries,
-			domain.NewDokuFeeSettlementEntry(batch.ID, dokuAccount.ID, totalDokuFee),
+			domain.NewDokuFeeSettlementEntry(batch.UUID, dokuAccount.UUID, totalDokuFee),
 		)
 	}
 
@@ -858,9 +858,9 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		// Update matched product transactions to SETTLED
 		for _, item := range settlementItems {
 			if item.IsMatched {
-				if err := tx.ProductTransaction().UpdateStatus(ctx, item.ProductTransactionID, domain.TransactionStatusSettled, now); err != nil {
+				if err := tx.ProductTransaction().UpdateStatus(ctx, item.ProductTransactionUUID, domain.TransactionStatusSettled, now); err != nil {
 					c.logger.WarnContext(ctx, "Failed to update product transaction status",
-						"product_tx_id", item.ProductTransactionID,
+						"product_tx_id", item.ProductTransactionUUID,
 						"error", err,
 					)
 				}
@@ -873,10 +873,10 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		}
 
 		// Reconciliation log
-		currentPending, currentAvailable, _ := tx.LedgerEntry().GetAllBalances(ctx, account.ID)
+		currentPending, currentAvailable, _ := tx.LedgerEntry().GetAllBalances(ctx, account.UUID)
 		reconciliationLog := &domain.ReconciliationLog{
-			ID:                uuid.New().String(),
-			LedgerID:          account.ID,
+			Record:            &redifu.Record{},
+			LedgerUUID:        account.UUID,
 			PreviousPending:   previousPending,
 			PreviousAvailable: previousAvailable,
 			CurrentPending:    currentPending,
@@ -887,8 +887,10 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			SettledAmount:     totalSettledSellerAmount + totalSettledPlatformAmount,
 			FeeAmount:         totalDokuFee,
 			Notes:             fmt.Sprintf("CSV reconciliation: %s, matched: %d, unmatched: %d", req.ReportFileName, batch.MatchedCount, batch.UnmatchedCount),
-			CreatedAt:         now,
 		}
+		redifu.InitRecord(reconciliationLog)
+		reconciliationLog.Foundation.CreatedAt = now
+		reconciliationLog.Foundation.UpdatedAt = now
 		if err := tx.ReconciliationLog().Save(ctx, reconciliationLog); err != nil {
 			c.logger.WarnContext(ctx, "Failed to save reconciliation log", "error", err)
 		}
@@ -902,7 +904,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	}
 
 	// Derive post-settlement balances for the response
-	postPending, postAvailable, _ := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.ID)
+	postPending, postAvailable, _ := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
 
 	// Optionally verify with DOKU GetBalance API (non-blocking)
 	verification := ReconciliationVerify{
@@ -946,9 +948,9 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 				}
 
 				discrepancy := &domain.ReconciliationDiscrepancy{
-					ID:                   uuid.New().String(),
-					LedgerID:             account.ID,
-					SettlementBatchID:    batch.ID,
+					Record:               &redifu.Record{},
+					LedgerUUID:           account.UUID,
+					SettlementBatchUUID:  batch.UUID,
 					DiscrepancyType:      discrepancyType,
 					ExpectedPending:      postPending,
 					ActualPending:        dokuPending,
@@ -961,6 +963,9 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 					Status:               domain.DiscrepancyStatusPending,
 					DetectedAt:           now,
 				}
+				redifu.InitRecord(discrepancy)
+				discrepancy.Foundation.CreatedAt = now
+				discrepancy.Foundation.UpdatedAt = now
 
 				if err := c.repoProvider.ReconciliationDiscrepancy().Save(ctx, discrepancy); err != nil {
 					c.logger.ErrorContext(ctx, "Failed to save reconciliation discrepancy", "error", err)
@@ -973,7 +978,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 				})
 
 				c.logger.WarnContext(ctx, "Balance discrepancy detected after reconciliation",
-					"account_id", account.ID,
+					"account_id", account.UUID,
 					"expected_pending", postPending,
 					"doku_pending", dokuPending,
 					"expected_available", postAvailable,
@@ -984,15 +989,15 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			}
 		} else {
 			c.logger.WarnContext(ctx, "Failed to verify with DOKU GetBalance API",
-				"account_id", account.ID,
+				"account_id", account.UUID,
 				"error", dokuErr,
 			)
 		}
 	}
 
 	c.logger.InfoContext(ctx, "Reconciliation completed",
-		"account_id", account.ID,
-		"batch_id", batch.ID,
+		"account_id", account.UUID,
+		"batch_id", batch.UUID,
 		"matched", batch.MatchedCount,
 		"unmatched", batch.UnmatchedCount,
 		"seller_settled", totalSettledSellerAmount,
@@ -1003,7 +1008,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	)
 
 	return &ReconciliationResponse{
-		ReconciliationID: batch.ID,
+		ReconciliationID: batch.UUID,
 		UploadedBy:       req.UploadedBy,
 		UploadedAt:       batch.UploadedAt,
 		SettlementDate:   settlementDate.Format("2006-01-02"),
@@ -1044,7 +1049,8 @@ func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string) (*Earni
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account by seller ID", err)
 	}
 
-	transactions, err := c.repoProvider.ProductTransaction().GetAllBySellerID(ctx, account.ID)
+	// Get all transactions (using a large page size to get all)
+	transactions, err := c.repoProvider.ProductTransaction().GetBySellerAccountID(ctx, account.Record.UUID, 1, 10000)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get transactions", err)
 	}

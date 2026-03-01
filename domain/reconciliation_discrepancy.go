@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
 	"time"
 )
@@ -9,9 +11,9 @@ import (
 // Linked to a SettlementBatch - each batch can have at most one discrepancy record.
 // Per-transaction discrepancies are tracked in SettlementItem.AmountDiscrepancy.
 type ReconciliationDiscrepancy struct {
-	ID                string
-	LedgerID          string
-	SettlementBatchID string // Which batch caused this discrepancy
+	*redifu.Record      `json:",inline" bson:",inline" db:"-"`
+	LedgerUUID          string
+	SettlementBatchUUID string // Which batch caused this discrepancy
 
 	// Balance comparison (our calculation vs DOKU GetBalance API)
 	ExpectedPending   int64

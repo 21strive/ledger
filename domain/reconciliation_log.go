@@ -1,13 +1,14 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
-	"time"
 )
 
 type ReconciliationLog struct {
-	ID                string
-	LedgerID          string
+	*redifu.Record    `json:",inline" bson:",inline" db:"-"`
+	LedgerUUID        string
 	PreviousPending   int64
 	PreviousAvailable int64
 	CurrentPending    int64
@@ -18,7 +19,6 @@ type ReconciliationLog struct {
 	SettledAmount     int64
 	FeeAmount         int64
 	Notes             string
-	CreatedAt         time.Time
 }
 
 type ReconciliationLogRepository interface {

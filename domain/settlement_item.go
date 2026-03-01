@@ -1,27 +1,26 @@
 package domain
 
 import (
+	"github.com/21strive/redifu"
+
 	"context"
-	"time"
 
 	"github.com/21strive/ledger/ledgererr"
-	"github.com/google/uuid"
 )
 
 // SettlementItem represents a matched row from the settlement CSV
 // Links a SettlementBatch to a ProductTransaction via invoice_number
 type SettlementItem struct {
-	ID                   string
-	SettlementBatchID    string
-	ProductTransactionID string            // Empty if unmatched
-	InvoiceNumber        string            // INVOICE NUMBER from CSV (matches our product_transactions.invoice_number)
-	TransactionAmount    int64             // AMOUNT from CSV
-	PayToMerchant        int64             // PAY TO MERCHANT from CSV
-	AllocatedFee         int64             // FEE from CSV
-	IsMatched            bool              // Whether this item was matched to a transaction
-	CSVRowNumber         int               // Original row number in CSV for debugging
-	RawCSVData           map[string]string // Original CSV row data
-	CreatedAt            time.Time
+	*redifu.Record         `json:",inline" bson:",inline" db:"-"`
+	SettlementBatchUUID    string
+	ProductTransactionUUID string            // Empty if unmatched
+	InvoiceNumber          string            // INVOICE NUMBER from CSV (matches our product_transactions.invoice_number)
+	TransactionAmount      int64             // AMOUNT from CSV
+	PayToMerchant          int64             // PAY TO MERCHANT from CSV
+	AllocatedFee           int64             // FEE from CSV
+	IsMatched              bool              // Whether this item was matched to a transaction
+	CSVRowNumber           int               // Original row number in CSV for debugging
+	RawCSVData             map[string]string // Original CSV row data
 
 	// Reconciliation fields (populated when matched)
 	ExpectedNetAmount int64 // SellerPrice + PlatformFee from ProductTransaction
@@ -49,25 +48,26 @@ func NewSettlementItem(
 	rawCSVData map[string]string,
 ) (*SettlementItem, error) {
 	if settlementBatchID == "" {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "settlement_batch_id is required", nil)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "settlement_batch_uuid is required", nil)
 	}
 	if amount < 0 || fee < 0 || payToMerchant < 0 {
 		return nil, ledgererr.ErrInvalidSettlementItem
 	}
 
-	return &SettlementItem{
-		ID:                   uuid.New().String(),
-		SettlementBatchID:    settlementBatchID,
-		ProductTransactionID: "", // Will be set when matched
-		InvoiceNumber:        invoiceNumber,
-		TransactionAmount:    amount,
-		PayToMerchant:        payToMerchant,
-		AllocatedFee:         fee,
-		IsMatched:            false,
-		CSVRowNumber:         csvRowNumber,
-		RawCSVData:           rawCSVData,
-		CreatedAt:            time.Now(),
-	}, nil
+	si := &SettlementItem{
+		Record:                 &redifu.Record{},
+		SettlementBatchUUID:    settlementBatchID,
+		ProductTransactionUUID: "", // Will be set when matched
+		InvoiceNumber:          invoiceNumber,
+		TransactionAmount:      amount,
+		PayToMerchant:          payToMerchant,
+		AllocatedFee:           fee,
+		IsMatched:              false,
+		CSVRowNumber:           csvRowNumber,
+		RawCSVData:             rawCSVData,
+	}
+	redifu.InitRecord(si)
+	return si, nil
 }
 
 // MatchToTransaction links this item to a product transaction and reconciles amounts
@@ -77,11 +77,11 @@ func (si *SettlementItem) MatchToTransaction(productTx *ProductTransaction) erro
 	if productTx == nil {
 		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "product_transaction is required", nil)
 	}
-	if productTx.ID == "" {
-		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "product_transaction_id is required", nil)
+	if productTx.Record.UUID == "" {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "product_transaction_uuid is required", nil)
 	}
 
-	si.ProductTransactionID = productTx.ID
+	si.ProductTransactionUUID = productTx.Record.UUID
 	si.IsMatched = true
 
 	// Reconcile amounts: CSV PayToMerchant should equal ProductTransaction's (SellerPrice + PlatformFee)

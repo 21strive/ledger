@@ -28,7 +28,7 @@ func scanAccount(row interface {
 	var dokuSubAccountID sql.NullString
 
 	err := row.Scan(
-		&a.ID,
+		&a.UUID,
 		&dokuSubAccountID,
 		&a.OwnerType,
 		&a.OwnerID,
@@ -137,7 +137,7 @@ func (r *PostgresAccountRepository) Save(ctx context.Context, account *domain.Ac
 	_, err := r.db.ExecContext(
 		ctx,
 		query,
-		account.ID,
+		account.UUID,
 		dokuSubAccountID,
 		account.OwnerType,
 		account.OwnerID,

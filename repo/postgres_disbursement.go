@@ -35,8 +35,8 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 	var processedAt sql.NullTime
 
 	err := row.Scan(
-		&d.ID,
-		&d.LedgerID,
+		&d.UUID,
+		&d.LedgerUUID,
 		&d.Amount,
 		&d.Currency,
 		&d.Status,
@@ -139,8 +139,8 @@ func (r *PostgresDisbursementRepository) Save(ctx context.Context, d *domain.Dis
 	_, err := r.db.ExecContext(
 		ctx,
 		query,
-		d.ID,
-		d.LedgerID,
+		d.UUID,
+		d.LedgerUUID,
 		d.Amount,
 		d.Currency,
 		d.Status,
@@ -201,8 +201,8 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 		var processedAt sql.NullTime
 
 		err := rows.Scan(
-			&d.ID,
-			&d.LedgerID,
+			&d.UUID,
+			&d.LedgerUUID,
 			&d.Amount,
 			&d.Currency,
 			&d.Status,

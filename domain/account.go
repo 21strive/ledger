@@ -2,9 +2,8 @@ package domain
 
 import (
 	"context"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/21strive/redifu"
 )
 
 type Money struct {
@@ -28,25 +27,23 @@ const (
 )
 
 type Account struct {
-	ID               string    `json:"id"`
+	*redifu.Record   `json:",inline" bson:",inline" db:"-"`
 	DokuSubAccountID string    `json:"doku_sub_account_id,omitempty"`
 	OwnerType        OwnerType `json:"owner_type"`
 	OwnerID          string    `json:"owner_id"`
 	Currency         Currency  `json:"currency"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func NewAccount(ownerType OwnerType, dokuSubAccountID string, ownerID string, currency Currency) Account {
-	return Account{
-		ID:               uuid.New().String(),
+	a := Account{
+		Record:           &redifu.Record{},
 		DokuSubAccountID: dokuSubAccountID,
 		OwnerType:        ownerType,
 		OwnerID:          ownerID,
 		Currency:         currency,
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
 	}
+	redifu.InitRecord(&a)
+	return a
 }
 
 func NewPlatformAccount(dokuSubAccountID string, ownerID string, currency Currency) Account {

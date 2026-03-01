@@ -130,8 +130,8 @@ func TestNewDisbursement(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, d)
-				assert.NotEmpty(t, d.ID)
-				assert.Equal(t, tt.ledgerID, d.LedgerID)
+				assert.NotEmpty(t, d.UUID)
+				assert.Equal(t, tt.ledgerID, d.LedgerUUID)
 				assert.Equal(t, tt.amount, d.Amount)
 				assert.Equal(t, tt.currency, d.Currency)
 				assert.Equal(t, DisbursementStatusPending, d.Status)
