@@ -34,10 +34,11 @@ func (c *LedgerClient) GetPhotoKTPPresignedURL(ctx context.Context, sellerID str
 
 	presignClient := s3.NewPresignClient(c.s3)
 	presignResult, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket:  aws.String(bucketName),
-		Key:     aws.String(key),
-		Expires: aws.Time(time.Now().Add(15 * time.Minute)),
-	})
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+	}, s3.WithPresignExpires(15*time.Minute),
+	)
 
 	if err != nil {
 		return "", ledgererr.ErrInvalidRequest.WithError(err)
@@ -60,12 +61,11 @@ func (c *LedgerClient) GetPhotoKYCSelfiePresignedURL(ctx context.Context, seller
 	presignResult, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(key),
-		ContentType: aws.String(validatedExt),
-		Expires:     aws.Time(time.Now().Add(15 * time.Minute)),
-	})
+		ContentType: aws.String(contentType),
+	}, s3.WithPresignExpires(15*time.Minute))
 
 	if err != nil {
-		return "", err
+		return "", ledgererr.ErrInvalidRequest.WithError(err)
 	}
 
 	return presignResult.URL, nil
