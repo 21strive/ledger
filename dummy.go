@@ -217,6 +217,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 	dummyDisbursements := []map[string]any{
 		{
 			"account_id":     sellerAccount.Record.UUID,
+			"reference_id":   "DISB-001", // Unique reference for idempotency
 			"amount":         400000,
 			"bank_code":      "014", // BCA
 			"account_number": "1234567890",
@@ -225,6 +226,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"account_id":     sellerAccount.Record.UUID,
+			"reference_id":   "DISB-002",
 			"amount":         350000,
 			"bank_code":      "008", // Mandiri
 			"account_number": "0987654321",
@@ -233,6 +235,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"account_id":     sellerAccount.Record.UUID,
+			"reference_id":   "DISB-003",
 			"amount":         250000,
 			"bank_code":      "009", // BNI
 			"account_number": "5555666677",
@@ -385,6 +388,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		// Process disbursements (withdrawals)
 		for _, disbData := range dummyDisbursements {
 			accountID := disbData["account_id"].(string)
+			referenceID := disbData["reference_id"].(string)
 			amount := int64(disbData["amount"].(int))
 			bankAccount := domain.BankAccount{
 				BankCode:      disbData["bank_code"].(string),
@@ -393,7 +397,18 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			}
 			description := disbData["description"].(string)
 
-			// Create disbursement
+			// Check if disbursement already exists by looking for ledger entry with this reference
+			existingEntries, err := tx.LedgerEntry().GetBySourceID(context.Background(), referenceID)
+			if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
+				c.logger.ErrorContext(context.Background(), "Failed to check existing disbursement", "reference_id", referenceID, "error", err)
+				return err
+			}
+			if len(existingEntries) > 0 {
+				c.logger.InfoContext(context.Background(), "Skipping existing disbursement", "reference_id", referenceID)
+				continue
+			}
+
+			// Create disbursement with reference ID as external transaction ID
 			disbursement, err := domain.NewDisbursement(
 				accountID,
 				amount,
@@ -406,19 +421,8 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				return err
 			}
 
-			// Check if disbursement already exists (by checking for entries with same source_id)
-			existingDisb, err := tx.Disbursement().GetByID(context.Background(), disbursement.Record.UUID)
-			if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
-				c.logger.ErrorContext(context.Background(), "Failed to check existing disbursement", "error", err)
-				return err
-			}
-			if existingDisb != nil {
-				c.logger.InfoContext(context.Background(), "Skipping existing disbursement", "disbursement_id", disbursement.Record.UUID)
-				continue
-			}
-
-			// Mark as completed for dummy data
-			if err := disbursement.MarkCompleted("DUMMY-DOKU-TX-" + disbursement.Record.UUID[:8]); err != nil {
+			// Mark as completed for dummy data using reference ID
+			if err := disbursement.MarkCompleted(referenceID); err != nil {
 				c.logger.ErrorContext(context.Background(), "Failed to mark disbursement as completed", "error", err)
 				return err
 			}
@@ -430,8 +434,9 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			}
 
 			// Create ledger entry for withdrawal (debits available balance)
+			// Use reference ID as source_id for idempotency checking
 			withdrawalEntry := domain.NewDisbursementEntry(
-				disbursement.Record.UUID,
+				referenceID, // Use reference_id instead of disbursement UUID
 				accountID,
 				amount,
 			)
