@@ -1069,8 +1069,8 @@ func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string, cursor 
 	}
 
 	resp := &EarningsResponse{
-		PendingTransactions: make([]*domain.ProductTransaction, 0),
-		SettledTransactions: make([]*domain.ProductTransaction, 0),
+		PendingTransactions: []*domain.ProductTransaction{},
+		SettledTransactions: []*domain.ProductTransaction{},
 	}
 
 	// Check if there are more results
