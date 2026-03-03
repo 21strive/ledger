@@ -249,8 +249,8 @@ func (c *LedgerClient) DeleteAccount(ctx context.Context, id string) error {
 // Balance queries (always derived from ledger_entries)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GetBalance returns the derived PENDING + AVAILABLE balances for an account.
-// This is a pure read from ledger_entries — no DOKU sync.
+// GetBalance returns the cached balances for an account.
+// This reads from ledger_accounts table (cached values updated on each ledger entry save).
 func (c *LedgerClient) GetBalance(ctx context.Context, accountID string) (*BalanceResponse, error) {
 	account, err := c.repoProvider.Account().GetByOwner(ctx, domain.OwnerTypeSeller, accountID)
 	if err != nil {
@@ -260,26 +260,29 @@ func (c *LedgerClient) GetBalance(ctx context.Context, accountID string) (*Balan
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account", err)
 	}
 
-	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
-	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive balance", err)
-	}
-
 	currency := string(account.Currency)
 	return &BalanceResponse{
 		PendingBalance: MoneyResponse{
-			Amount:   pending,
+			Amount:   account.PendingBalance,
 			Currency: currency,
 		},
 		AvailableBalance: MoneyResponse{
-			Amount:   available,
+			Amount:   account.AvailableBalance,
+			Currency: currency,
+		},
+		TotalWithdrawalAmount: MoneyResponse{
+			Amount:   account.TotalWithdrawalAmount,
+			Currency: currency,
+		},
+		TotalDepositAmount: MoneyResponse{
+			Amount:   account.TotalDepositAmount,
 			Currency: currency,
 		},
 		Currency: currency,
 	}, nil
 }
 
-// GetBalanceByAccountUUID returns derived balances directly by the account's internal UUID.
+// GetBalanceByAccountUUID returns cached balances directly by the account's internal UUID.
 func (c *LedgerClient) GetBalanceByAccountUUID(ctx context.Context, accountUUID string) (*BalanceResponse, error) {
 	account, err := c.repoProvider.Account().GetByID(ctx, accountUUID)
 	if err != nil {
@@ -289,27 +292,30 @@ func (c *LedgerClient) GetBalanceByAccountUUID(ctx context.Context, accountUUID 
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account", err)
 	}
 
-	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
-	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive balance", err)
-	}
-
 	currency := string(account.Currency)
 	return &BalanceResponse{
 		PendingBalance: MoneyResponse{
-			Amount:   pending,
+			Amount:   account.PendingBalance,
 			Currency: currency,
 		},
 		AvailableBalance: MoneyResponse{
-			Amount:   available,
+			Amount:   account.AvailableBalance,
+			Currency: currency,
+		},
+		TotalWithdrawalAmount: MoneyResponse{
+			Amount:   account.TotalWithdrawalAmount,
+			Currency: currency,
+		},
+		TotalDepositAmount: MoneyResponse{
+			Amount:   account.TotalDepositAmount,
 			Currency: currency,
 		},
 		Currency: currency,
 	}, nil
 }
 
-// GetAllBalancesBySellerID returns both PENDING and AVAILABLE derived balances for a seller directly.
-// This is a pure read from ledger_entries — no DOKU sync.
+// GetAllBalancesBySellerID returns cached balances for a seller's account.
+// This is a pure read from ledger_accounts — no DOKU sync.
 func (c *LedgerClient) GetAllBalancesBySellerID(ctx context.Context, sellerID string) (*BalanceResponse, error) {
 	account, err := c.repoProvider.Account().GetBySellerID(ctx, sellerID)
 	if err != nil {
@@ -319,19 +325,22 @@ func (c *LedgerClient) GetAllBalancesBySellerID(ctx context.Context, sellerID st
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account by seller ID", err)
 	}
 
-	pending, available, err := c.repoProvider.LedgerEntry().GetAllBalancesBySellerID(ctx, sellerID)
-	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive balance", err)
-	}
-
 	currency := string(account.Currency)
 	return &BalanceResponse{
 		PendingBalance: MoneyResponse{
-			Amount:   pending,
+			Amount:   account.PendingBalance,
 			Currency: currency,
 		},
 		AvailableBalance: MoneyResponse{
-			Amount:   available,
+			Amount:   account.AvailableBalance,
+			Currency: currency,
+		},
+		TotalWithdrawalAmount: MoneyResponse{
+			Amount:   account.TotalWithdrawalAmount,
+			Currency: currency,
+		},
+		TotalDepositAmount: MoneyResponse{
+			Amount:   account.TotalDepositAmount,
 			Currency: currency,
 		},
 		Currency: currency,
@@ -1050,9 +1059,10 @@ func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string) (*Earni
 	}
 
 	for _, tx := range transactions {
-		if tx.Status == domain.TransactionStatusCompleted {
+		switch tx.Status {
+		case domain.TransactionStatusCompleted:
 			resp.PendingTransactions = append(resp.PendingTransactions, tx)
-		} else if tx.Status == domain.TransactionStatusSettled {
+		case domain.TransactionStatusSettled:
 			resp.SettledTransactions = append(resp.SettledTransactions, tx)
 		}
 	}

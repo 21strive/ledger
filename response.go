@@ -6,10 +6,12 @@ type MoneyResponse struct {
 	Currency string `json:"currency"`
 }
 
-// BalanceResponse represents the derived balance for an account.
-// Values are always calculated from ledger_entries — never stored fields.
+// BalanceResponse represents the balance for an account.
+// Values are cached in ledger_accounts table and updated automatically on ledger entry saves.
 type BalanceResponse struct {
-	PendingBalance   MoneyResponse `json:"pending_balance"`
-	AvailableBalance MoneyResponse `json:"available_balance"`
-	Currency         string        `json:"currency"`
+	PendingBalance        MoneyResponse `json:"pending_balance"`
+	AvailableBalance      MoneyResponse `json:"available_balance"`
+	TotalWithdrawalAmount MoneyResponse `json:"total_withdrawal_amount"`
+	TotalDepositAmount    MoneyResponse `json:"total_deposit_amount"`
+	Currency              string        `json:"currency"`
 }
