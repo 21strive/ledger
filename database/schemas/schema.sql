@@ -117,15 +117,15 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     -- Payment gateway fee
     total_charged BIGINT NOT NULL,
     -- seller_price + platform_fee + doku_fee
-    currency VARCHAR(3) NOT NULL CHECK (currency IN (' IDR ', ' USD ')),
+    currency VARCHAR(3) NOT NULL CHECK (currency IN ('IDR', 'USD')),
     -- Transaction status and lifecycle
     status VARCHAR(20) NOT NULL CHECK (
         status IN (
-            ' PENDING ',
-            ' COMPLETED ',
-            ' SETTLED ',
-            ' FAILED ',
-            ' REFUNDED '
+            'PENDING',
+            'COMPLETED',
+            'SETTLED',
+            'FAILED',
+            'REFUNDED'
         )
     ),
     created_at TIMESTAMP NOT NULL,
@@ -142,7 +142,7 @@ CREATE INDEX idx_product_transactions_buyer ON product_transactions(buyer_accoun
 
 CREATE INDEX idx_product_transactions_seller ON product_transactions(seller_account_id, created_at DESC);
 
-CREATE INDEX idx_product_transactions_product ON product_transactions(product_uuid);
+CREATE INDEX idx_product_transactions_product ON product_transactions(product_id);
 
 CREATE INDEX idx_product_transactions_invoice ON product_transactions(invoice_number);
 
@@ -165,7 +165,8 @@ CREATE TABLE IF NOT EXISTS payment_requests (
     product_transaction_uuid VARCHAR(255) NOT NULL,
     -- DOKU payment gateway details
     request_id VARCHAR(100) NOT NULL UNIQUE,
-    -- DOKU' s payment request ID payment_code VARCHAR(100),
+    -- DOKU' s payment request ID 
+    payment_code VARCHAR(100),
     -- VA number, QRIS code, etc.
     payment_channel VARCHAR(50) NOT NULL,
     -- QRIS, VA_BCA, VA_BRI, etc.

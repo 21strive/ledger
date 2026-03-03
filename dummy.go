@@ -223,6 +223,34 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 	}
 
+	// Dummy disbursements for seller withdrawals
+	dummyDisbursements := []map[string]any{
+		{
+			"account_id":     sellerAccount.Record.UUID,
+			"amount":         500000,
+			"bank_code":      "014", // BCA
+			"account_number": "1234567890",
+			"account_name":   "John Doe",
+			"description":    "Withdrawal to BCA - January 2024",
+		},
+		{
+			"account_id":     sellerAccount.Record.UUID,
+			"amount":         750000,
+			"bank_code":      "008", // Mandiri
+			"account_number": "0987654321",
+			"account_name":   "John Doe",
+			"description":    "Withdrawal to Mandiri - February 2024",
+		},
+		{
+			"account_id":     sellerAccount.Record.UUID,
+			"amount":         300000,
+			"bank_code":      "009", // BNI
+			"account_number": "5555666677",
+			"account_name":   "John Doe",
+			"description":    "Withdrawal to BNI - March 2024",
+		},
+	}
+
 	// Creating dummy transactions
 	err = c.txProvider.Transact(context.Background(), func(tx repo.Tx) error {
 		// Dummy transaction creation logic would go here
@@ -346,6 +374,72 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			}
 
 			c.logger.InfoContext(context.Background(), "Generated dummy transaction and ledger entries", "transaction_id", productTx.Record.UUID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
+		}
+
+		// Process disbursements (withdrawals)
+		for _, disbData := range dummyDisbursements {
+			accountID := disbData["account_id"].(string)
+			amount := int64(disbData["amount"].(int))
+			bankAccount := domain.BankAccount{
+				BankCode:      disbData["bank_code"].(string),
+				AccountNumber: disbData["account_number"].(string),
+				AccountName:   disbData["account_name"].(string),
+			}
+			description := disbData["description"].(string)
+
+			// Create disbursement
+			disbursement, err := domain.NewDisbursement(
+				accountID,
+				amount,
+				domain.CurrencyIDR,
+				bankAccount,
+				description,
+			)
+			if err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to create disbursement", "error", err)
+				return err
+			}
+
+			// Check if disbursement already exists (by checking for entries with same source_id)
+			existingDisb, err := tx.Disbursement().GetByID(context.Background(), disbursement.Record.UUID)
+			if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
+				c.logger.ErrorContext(context.Background(), "Failed to check existing disbursement", "error", err)
+				return err
+			}
+			if existingDisb != nil {
+				c.logger.InfoContext(context.Background(), "Skipping existing disbursement", "disbursement_id", disbursement.Record.UUID)
+				continue
+			}
+
+			// Mark as completed for dummy data
+			if err := disbursement.MarkCompleted("DUMMY-DOKU-TX-" + disbursement.Record.UUID[:8]); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to mark disbursement as completed", "error", err)
+				return err
+			}
+
+			// Save disbursement
+			if err := tx.Disbursement().Save(context.Background(), disbursement); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to save disbursement", "error", err)
+				return err
+			}
+
+			// Create ledger entry for withdrawal (debits available balance)
+			withdrawalEntry := domain.NewDisbursementEntry(
+				disbursement.Record.UUID,
+				accountID,
+				amount,
+			)
+
+			// Save ledger entry (this will automatically update account balances)
+			if err := tx.LedgerEntry().Save(context.Background(), withdrawalEntry); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to save withdrawal entry", "error", err)
+				return err
+			}
+
+			c.logger.InfoContext(context.Background(), "Generated dummy disbursement",
+				"disbursement_id", disbursement.Record.UUID,
+				"amount", amount,
+				"bank_code", bankAccount.BankCode)
 		}
 
 		return nil
