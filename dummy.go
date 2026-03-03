@@ -61,82 +61,8 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 	dummyBuyerUUID := uuid.New().String()
 	dummyProductID := uuid.New().String()
 
-	dummyPendingTransactions := []map[string]any{
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.Record.UUID,
-			"product_id":     dummyProductID,
-			"price":          100000,
-			"invoice_number": "INV-001-001",
-			"metadata": map[string]any{
-				"title":     "Ngawi Lari Santai",
-				"full_name": "Alice Johnson",
-				"type":      "Photos",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.Record.UUID,
-			"product_id":     dummyProductID,
-			"price":          200000,
-			"invoice_number": "INV-001-002",
-			"metadata": map[string]any{
-				"title":     "Jakarta Fun Run",
-				"full_name": "Charlie Krik",
-				"type":      "Folder",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.Record.UUID,
-			"product_id":     dummyProductID,
-			"price":          300000,
-			"invoice_number": "INV-001-003",
-			"metadata": map[string]any{
-				"title":     "Bali Sunset Photos",
-				"full_name": "Emily Carter",
-				"type":      "Folder",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.Record.UUID,
-			"product_id":     dummyProductID,
-			"price":          312012,
-			"invoice_number": "INV-001-004",
-			"metadata": map[string]any{
-				"title":     "Surabaya Marathon",
-				"full_name": "David Lee",
-				"type":      "Photos",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.Record.UUID,
-			"product_id":     dummyProductID,
-			"price":          150000,
-			"invoice_number": "INV-001-005",
-			"metadata": map[string]any{
-				"title":     "Yogyakarta Street Food",
-				"full_name": "Sophia Kim",
-				"type":      "Folder",
-			},
-		},
-		{
-			"buyer_id":       dummyBuyerUUID,
-			"seller_id":      sellerAccount.Record.UUID,
-			"product_id":     dummyProductID,
-			"price":          250000,
-			"invoice_number": "INV-001-006",
-			"metadata": map[string]any{
-				"title":     "Bandung Artisanal Coffee",
-				"full_name": "Michael Chen",
-				"type":      "Photos",
-			},
-		},
-	}
-
-	dummyPaidTransactions := []map[string]any{
+	// Transactions with COMPLETED status (paid by user, money in pending_balance)
+	dummyCompletedTransactions := []map[string]any{
 		{
 			"buyer_id":       dummyBuyerUUID,
 			"seller_id":      sellerAccount.Record.UUID,
@@ -223,11 +149,75 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 	}
 
+	// Transactions with SETTLED status (settled via CSV, money in available_balance)
+	dummySettledTransactions := []map[string]any{
+		{
+			"buyer_id":       dummyBuyerUUID,
+			"seller_id":      sellerAccount.Record.UUID,
+			"product_id":     dummyProductID,
+			"price":          100000,
+			"invoice_number": "INV-003-001",
+			"metadata": map[string]any{
+				"title":     "Ngawi Lari Santai",
+				"full_name": "Alice Johnson",
+				"type":      "Photos",
+			},
+		},
+		{
+			"buyer_id":       dummyBuyerUUID,
+			"seller_id":      sellerAccount.Record.UUID,
+			"product_id":     dummyProductID,
+			"price":          200000,
+			"invoice_number": "INV-003-002",
+			"metadata": map[string]any{
+				"title":     "Jakarta Fun Run",
+				"full_name": "Charlie Krik",
+				"type":      "Folder",
+			},
+		},
+		{
+			"buyer_id":       dummyBuyerUUID,
+			"seller_id":      sellerAccount.Record.UUID,
+			"product_id":     dummyProductID,
+			"price":          300000,
+			"invoice_number": "INV-003-003",
+			"metadata": map[string]any{
+				"title":     "Bali Sunset Photos",
+				"full_name": "Emily Carter",
+				"type":      "Folder",
+			},
+		},
+		{
+			"buyer_id":       dummyBuyerUUID,
+			"seller_id":      sellerAccount.Record.UUID,
+			"product_id":     dummyProductID,
+			"price":          312012,
+			"invoice_number": "INV-003-004",
+			"metadata": map[string]any{
+				"title":     "Surabaya Marathon",
+				"full_name": "David Lee",
+				"type":      "Photos",
+			},
+		},
+		{
+			"buyer_id":       dummyBuyerUUID,
+			"seller_id":      sellerAccount.Record.UUID,
+			"product_id":     dummyProductID,
+			"price":          150000,
+			"invoice_number": "INV-003-005",
+			"metadata": map[string]any{
+				"title":     "Yogyakarta Street Food",
+				"full_name": "Sophia Kim",
+				"type":      "Folder",
+			},
+		},
+	}
+
 	// Dummy disbursements for seller withdrawals
 	dummyDisbursements := []map[string]any{
 		{
 			"account_id":     sellerAccount.Record.UUID,
-			"amount":         500000,
+			"amount":         400000,
 			"bank_code":      "014", // BCA
 			"account_number": "1234567890",
 			"account_name":   "John Doe",
@@ -235,7 +225,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"account_id":     sellerAccount.Record.UUID,
-			"amount":         750000,
+			"amount":         350000,
 			"bank_code":      "008", // Mandiri
 			"account_number": "0987654321",
 			"account_name":   "John Doe",
@@ -243,7 +233,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		},
 		{
 			"account_id":     sellerAccount.Record.UUID,
-			"amount":         300000,
+			"amount":         250000,
 			"bank_code":      "009", // BNI
 			"account_number": "5555666677",
 			"account_name":   "John Doe",
@@ -263,8 +253,8 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 		// Calculate fees
 		feeCalc := domain.NewFeeCalculator(feeConfigs)
 
-		// PENDING Transactions
-		for _, txData := range dummyPendingTransactions {
+		// COMPLETED Transactions (paid, in pending_balance)
+		for _, txData := range dummyCompletedTransactions {
 			feeBreakdown := feeCalc.GetFeeBreakdown(int64(txData["price"].(int)), "QRIS", domain.CurrencyIDR)
 			productTx := domain.NewProductTransaction(
 				txData["buyer_id"].(string),
@@ -314,7 +304,8 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			c.logger.InfoContext(context.Background(), "Generated dummy transaction and ledger entries", "transaction_id", productTx.Record.UUID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
 		}
 
-		for _, txData := range dummyPaidTransactions {
+		// SETTLED Transactions (settled via CSV, in available_balance)
+		for _, txData := range dummySettledTransactions {
 			feeBreakdown := feeCalc.GetFeeBreakdown(int64(txData["price"].(int)), "QRIS", domain.CurrencyIDR)
 			productTx := domain.NewProductTransaction(
 				txData["buyer_id"].(string),
@@ -337,13 +328,26 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				continue
 			}
 
+			productTx.MarkCompleted()
 			productTx.MarkSettled()
 			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
 				c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
 				return err
 			}
 
-			// Seller Entries
+			// SETTLED transactions need BOTH payment entries AND settlement entries:
+			// 1. Payment entries (add to PENDING when user paid)
+			paymentEntries := domain.NewPaymentEntries(
+				productTx.UUID,
+				productTx.SellerAccountID,
+				productTx.Fee.SellerPrice,
+				platformAccount.Record.UUID,
+				productTx.Fee.PlatformFee,
+				dokuAccount.Record.UUID,
+				productTx.Fee.DokuFee,
+			)
+
+			// 2. Settlement entries (move from PENDING to AVAILABLE)
 			batchID := uuid.New().String()
 			sellerEntry := domain.NewSettlementEntriesForAccount(
 				batchID,
@@ -365,15 +369,17 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				feeBreakdown.DokuFee,
 			)
 
-			paidLedgerEntries := append(sellerEntry, platformEntry...)
-			paidLedgerEntries = append(paidLedgerEntries, dokuEntry)
+			// Combine all ledger entries: payment + settlement
+			settlementEntries := append(sellerEntry, platformEntry...)
+			settlementEntries = append(settlementEntries, dokuEntry)
+			allEntries := append(paymentEntries, settlementEntries...)
 
-			// Insert immutable ledger entries
-			if err := tx.LedgerEntry().SaveBatch(context.Background(), paidLedgerEntries); err != nil {
+			// Insert all ledger entries
+			if err := tx.LedgerEntry().SaveBatch(context.Background(), allEntries); err != nil {
 				return err
 			}
 
-			c.logger.InfoContext(context.Background(), "Generated dummy transaction and ledger entries", "transaction_id", productTx.Record.UUID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
+			c.logger.InfoContext(context.Background(), "Generated dummy settled transaction and ledger entries", "transaction_id", productTx.Record.UUID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
 		}
 
 		// Process disbursements (withdrawals)
