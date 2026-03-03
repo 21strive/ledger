@@ -242,6 +242,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				txData["buyer_id"].(string),
 				txData["seller_id"].(string),
 				txData["product_id"].(string),
+				"PHOTO", // Default product type for dummy data
 				txData["invoice_number"].(string),
 				feeBreakdown,
 				txData["metadata"].(map[string]any),
@@ -291,6 +292,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				txData["buyer_id"].(string),
 				txData["seller_id"].(string),
 				txData["product_id"].(string),
+				"PHOTO", // Default product type for dummy data
 				txData["invoice_number"].(string),
 				feeBreakdown,
 				txData["metadata"].(map[string]any),

@@ -44,13 +44,14 @@ const (
 // LedgerEntry is an immutable financial record.
 // Positive amount = credit to the account's bucket.
 // Negative amount = debit from the account's bucket.
-// Balances are never stored — always derived via SUM(amount) GROUP BY account_uuid, balance_bucket.
+// BalanceAfter = running balance for this account+bucket after applying this entry.
 type LedgerEntry struct {
 	*redifu.Record `json:",inline" bson:",inline" db:"-"`
 	JournalUUID    string // Double-entry grouping
 	AccountUUID    string
 	Amount         int64 // positive = credit, negative = debit
 	BalanceBucket  BalanceBucket
+	BalanceAfter   int64 // Running balance after this entry (for quick queries)
 	EntryType      EntryType
 	SourceType     SourceType
 	SourceID       string // product_transaction_uuid, settlement_batch_uuid, disbursement_id, etc.
@@ -92,6 +93,10 @@ type LedgerEntryRepository interface {
 
 	// GetByAccountID returns paginated entries for an account, newest first.
 	GetByAccountID(ctx context.Context, accountID string, limit, offset int) ([]*LedgerEntry, error)
+
+	// GetLastBalanceAfter returns the most recent balance_after for an account+bucket.
+	// Returns 0 if no entries exist yet.
+	GetLastBalanceAfter(ctx context.Context, accountID string, bucket BalanceBucket) (int64, error)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

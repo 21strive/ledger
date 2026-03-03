@@ -31,11 +31,13 @@ type FeeBreakdown struct {
 }
 
 // ProductTransaction represents a product sale between buyer and seller
+// Supports different product types: PHOTO, FOLDER, SUBSCRIPTION, etc.
 type ProductTransaction struct {
 	*redifu.Record  `json:",inline" bson:",inline" db:"-"`
 	BuyerAccountID  string
 	SellerAccountID string
-	ProductID       string
+	ProductID       string // Product identifier (references external product system)
+	ProductType     string // Type of product: PHOTO, FOLDER, SUBSCRIPTION, etc.
 	InvoiceNumber   string
 	Fee             FeeBreakdown
 	Status          TransactionStatus
@@ -73,9 +75,11 @@ func NewFeeBreakdown(sellerPrice, platformFee, dokuFee int64, currency Currency)
 }
 
 // NewProductTransaction creates a new product transaction in PENDING status
+// Supports multiple product types (PHOTO, FOLDER, SUBSCRIPTION, etc.)
 func NewProductTransaction(
 	buyerAccountID, sellerAccountID string,
 	productID string,
+	productType string,
 	invoiceNumber string,
 	fee FeeBreakdown,
 	metadata map[string]any,
@@ -84,6 +88,7 @@ func NewProductTransaction(
 		BuyerAccountID:  buyerAccountID,
 		SellerAccountID: sellerAccountID,
 		ProductID:       productID,
+		ProductType:     productType,
 		InvoiceNumber:   invoiceNumber,
 		Fee:             fee,
 		Status:          TransactionStatusPending,

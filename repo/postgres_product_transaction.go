@@ -22,7 +22,7 @@ func NewPostgresProductTransactionRepository(db DBTX) *PostgresProductTransactio
 
 func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id string) (*domain.ProductTransaction, error) {
 	query := `
-		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
@@ -34,7 +34,7 @@ func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id s
 
 func (r *PostgresProductTransactionRepository) GetByInvoiceNumber(ctx context.Context, invoiceNumber string) (*domain.ProductTransaction, error) {
 	query := `
-		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
@@ -47,7 +47,7 @@ func (r *PostgresProductTransactionRepository) GetByInvoiceNumber(ctx context.Co
 func (r *PostgresProductTransactionRepository) GetBySellerAccountID(ctx context.Context, sellerAccountID string, page, pageSize int) ([]*domain.ProductTransaction, error) {
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
@@ -62,7 +62,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountID(ctx context.
 func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.Context, buyerAccountID string, page, pageSize int) ([]*domain.ProductTransaction, error) {
 	offset := (page - 1) * pageSize
 	query := `
-		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
@@ -76,7 +76,7 @@ func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.C
 
 func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
-		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
@@ -89,7 +89,7 @@ func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx c
 
 func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
-		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
@@ -102,7 +102,7 @@ func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx contex
 
 func (r *PostgresProductTransactionRepository) GetAllBySellerID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
-		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
@@ -121,10 +121,10 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 
 	query := `
 		INSERT INTO product_transactions (
-			uuid, randid, buyer_account_id, seller_account_id, product_id, invoice_number,
+			uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 			seller_price, platform_fee, doku_fee, total_charged, currency,
 			status, created_at, updated_at, completed_at, settled_at, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
@@ -143,6 +143,7 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.BuyerAccountID,
 		tx.SellerAccountID,
 		tx.ProductID,
+		tx.ProductType,
 		tx.InvoiceNumber,
 		tx.Fee.SellerPrice,
 		tx.Fee.PlatformFee,
@@ -247,6 +248,7 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		BuyerAccountID  string
 		SellerAccountID string
 		ProductID       string
+		ProductType     string
 		InvoiceNumber   string
 		SellerPrice     int64
 		PlatformFee     int64
@@ -267,6 +269,7 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		&row.BuyerAccountID,
 		&row.SellerAccountID,
 		&row.ProductID,
+		&row.ProductType,
 		&row.InvoiceNumber,
 		&row.SellerPrice,
 		&row.PlatformFee,
@@ -305,6 +308,7 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		BuyerAccountID:  row.BuyerAccountID,
 		SellerAccountID: row.SellerAccountID,
 		ProductID:       row.ProductID,
+		ProductType:     row.ProductType,
 		InvoiceNumber:   row.InvoiceNumber,
 		Fee: domain.FeeBreakdown{
 			SellerPrice:  row.SellerPrice,

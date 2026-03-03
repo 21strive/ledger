@@ -14,6 +14,10 @@ CREATE TABLE ledger_accounts (
     -- e.g. seller_id for SELLER ledger_accounts, platform for PLATFORM ledger_accounts,
     -- payment gateway name for PAYMENT_GATEWAY_EXPENSE ledger_accounts, etc.
     currency VARCHAR(3) NOT NULL,
+    pending_balance BIGINT NOT NULL DEFAULT 0,
+    available_balance BIGINT NOT NULL DEFAULT 0,
+    total_withdrawal_amount BIGINT NOT NULL DEFAULT 0,
+    total_deposit_amount BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
@@ -61,10 +65,20 @@ CREATE TABLE ledger_entries (
         )
     ),
     source_id VARCHAR(255) NOT NULL,
+    balance_after BIGINT NOT NULL,
+    -- Running balance for this account+bucket after this entry
+    -- Calculated as: previous balance_after + amount
+    -- Enables fast balance queries and historical tracking
     metadata JSONB,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
+
+CREATE INDEX idx_ledger_entries_account_bucket_created ON ledger_entries(account_uuid, balance_bucket, created_at DESC);
+
+CREATE INDEX idx_ledger_entries_journal ON ledger_entries(journal_uuid);
+
+CREATE INDEX idx_ledger_entries_source ON ledger_entries(source_type, source_id);
 
 -- ProductTransaction: BUSINESS TRANSACTION RECORD
 -- Purpose: Records WHO bought WHAT from WHOM for HOW MUCH
@@ -90,9 +104,10 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     buyer_account_id VARCHAR(255) NOT NULL,
     seller_account_id VARCHAR(255) NOT NULL,
     product_id VARCHAR(255) NOT NULL,
-    -- product_type VARCHAR(50) NOT NULL CHECK (product_type IN ('PHOTO', 'FOLDER', 'SUBSCRIPTION 'OTHER')),
-    invoice_number VARCHAR(50) NOT NULL UNIQUE,
+    product_type VARCHAR(50) NOT NULL,
+    -- CHECK ( product_type IN ( 'PHOTO', 'FOLDER', 'SUBSCRIPTION')),
     -- Our internal invoice number
+    invoice_number VARCHAR(50) NOT NULL UNIQUE,
     -- Pricing breakdown (buyer pays ALL fees)
     seller_price BIGINT NOT NULL,
     -- What seller receives (100% of their price)
@@ -102,15 +117,15 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     -- Payment gateway fee
     total_charged BIGINT NOT NULL,
     -- seller_price + platform_fee + doku_fee
-    currency VARCHAR(3) NOT NULL CHECK (currency IN ('IDR', 'USD')),
+    currency VARCHAR(3) NOT NULL CHECK (currency IN (' IDR ', ' USD ')),
     -- Transaction status and lifecycle
     status VARCHAR(20) NOT NULL CHECK (
         status IN (
-            'PENDING',
-            'COMPLETED',
-            'SETTLED',
-            'FAILED',
-            'REFUNDED'
+            ' PENDING ',
+            ' COMPLETED ',
+            ' SETTLED ',
+            ' FAILED ',
+            ' REFUNDED '
         )
     ),
     created_at TIMESTAMP NOT NULL,
@@ -150,8 +165,7 @@ CREATE TABLE IF NOT EXISTS payment_requests (
     product_transaction_uuid VARCHAR(255) NOT NULL,
     -- DOKU payment gateway details
     request_id VARCHAR(100) NOT NULL UNIQUE,
-    -- DOKU's payment request ID
-    payment_code VARCHAR(100),
+    -- DOKU' s payment request ID payment_code VARCHAR(100),
     -- VA number, QRIS code, etc.
     payment_channel VARCHAR(50) NOT NULL,
     -- QRIS, VA_BCA, VA_BRI, etc.

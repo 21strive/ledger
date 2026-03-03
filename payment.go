@@ -25,6 +25,7 @@ type GeneratePaymentRequest struct {
 
 	// Product information
 	ProductID   string         `json:"product_id"`
+	ProductType string         `json:"product_type"` // PHOTO, FOLDER, SUBSCRIPTION, etc.
 	SellerPrice int64          `json:"seller_price"` // Price set by seller (100% goes to seller)
 	Currency    string         `json:"currency"`     // IDR or USD
 	Metadata    map[string]any `json:"metadata"`     // Product details (title, resolution, etc.)
@@ -111,6 +112,7 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 		req.BuyerAccountID,
 		sellerAcccount.UUID,
 		req.ProductID,
+		req.ProductType,
 		invoiceNumber,
 		feeBreakdown,
 		req.Metadata,

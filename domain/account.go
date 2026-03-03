@@ -27,11 +27,15 @@ const (
 )
 
 type Account struct {
-	*redifu.Record   `json:",inline" bson:",inline" db:"-"`
-	DokuSubAccountID string    `json:"doku_sub_account_id,omitempty"`
-	OwnerType        OwnerType `json:"owner_type"`
-	OwnerID          string    `json:"owner_id"`
-	Currency         Currency  `json:"currency"`
+	*redifu.Record        `json:",inline" bson:",inline" db:"-"`
+	DokuSubAccountID      string    `json:"doku_sub_account_id,omitempty"`
+	OwnerType             OwnerType `json:"owner_type"`
+	OwnerID               string    `json:"owner_id"`
+	Currency              Currency  `json:"currency"`
+	PendingBalance        int64     `json:"pending_balance"`         // Cached pending balance
+	AvailableBalance      int64     `json:"available_balance"`       // Cached available balance
+	TotalWithdrawalAmount int64     `json:"total_withdrawal_amount"` // Sum of all withdrawals
+	TotalDepositAmount    int64     `json:"total_deposit_amount"`    // Sum of all deposits
 }
 
 func NewAccount(ownerType OwnerType, dokuSubAccountID string, ownerID string, currency Currency) Account {
@@ -66,4 +70,9 @@ type AccountRepository interface {
 	GetPaymentGatewayAccount(ctx context.Context) (*Account, error)
 	Save(ctx context.Context, account *Account) error
 	Delete(ctx context.Context, id string) error
+
+	// Balance update methods
+	UpdateBalances(ctx context.Context, accountID string, pendingDelta, availableDelta int64) error
+	IncrementDeposit(ctx context.Context, accountID string, amount int64) error
+	IncrementWithdrawal(ctx context.Context, accountID string, amount int64) error
 }
