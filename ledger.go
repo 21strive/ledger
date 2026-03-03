@@ -1039,6 +1039,13 @@ type EarningsResponse struct {
 	HasMore             bool                         `json:"has_more"`              // True if more results available
 }
 
+// DisbursementsResponse contains paginated disbursement history
+type DisbursementsResponse struct {
+	Disbursements []*domain.Disbursement `json:"disbursements"`
+	NextCursor    string                 `json:"next_cursor,omitempty"` // RandId for next page (empty if no more)
+	HasMore       bool                   `json:"has_more"`              // True if more results available
+}
+
 // GetEarnings returns pending (COMPLETED) and settled (SETTLED) transactions for a seller
 // with cursor-based pagination using RandId (mimicking redifu's infinite scroll pattern).
 // Pass empty cursor string to get first page.
@@ -1095,6 +1102,56 @@ func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string, cursor 
 	if hasMore && len(transactions) > 0 {
 		// Next cursor is the RandId of the last item
 		resp.NextCursor = transactions[len(transactions)-1].Record.RandId
+	}
+
+	return resp, nil
+}
+
+// GetDisbursements returns disbursement history for a seller account
+// with cursor-based pagination using RandId (mimicking redifu's infinite scroll pattern).
+// Pass empty cursor string to get first page.
+// sortOrder: "ASC" or "DESC" for created_at ordering (defaults to DESC)
+func (c *LedgerClient) GetDisbursements(ctx context.Context, sellerID string, cursor string, pageSize int, sortOrder string) (*DisbursementsResponse, error) {
+	account, err := c.repoProvider.Account().GetBySellerID(ctx, sellerID)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account by seller ID", err)
+	}
+
+	// Default page size if not specified
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	// Default sort order
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "DESC"
+	}
+
+	// Fetch one extra to determine if there are more results
+	disbursements, err := c.repoProvider.Disbursement().GetByAccountIDWithCursor(ctx, account.Record.UUID, cursor, pageSize+1, sortOrder)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get disbursements", err)
+	}
+
+	resp := &DisbursementsResponse{
+		Disbursements: []*domain.Disbursement{},
+	}
+
+	// Check if there are more results
+	hasMore := len(disbursements) > pageSize
+	if hasMore {
+		// Remove the extra item used for hasMore check
+		disbursements = disbursements[:pageSize]
+	}
+
+	resp.Disbursements = disbursements
+	resp.HasMore = hasMore
+	if hasMore && len(disbursements) > 0 {
+		// Next cursor is the RandId of the last item
+		resp.NextCursor = disbursements[len(disbursements)-1].Record.RandId
 	}
 
 	return resp, nil

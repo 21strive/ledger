@@ -60,6 +60,12 @@ type Disbursement struct {
 type DisbursementRepository interface {
 	GetByID(ctx context.Context, id string) (*Disbursement, error)
 	GetByLedgerID(ctx context.Context, ledgerID string, page, pageSize int) ([]*Disbursement, error)
+
+	// GetByAccountIDWithCursor returns disbursements with cursor-based pagination using RandId
+	// Pass empty cursor string for first page
+	// sortOrder: "ASC" or "DESC" for created_at ordering (defaults to DESC)
+	GetByAccountIDWithCursor(ctx context.Context, accountID string, cursor string, pageSize int, sortOrder string) ([]*Disbursement, error)
+
 	GetPendingByLedgerID(ctx context.Context, ledgerID string) ([]*Disbursement, error)
 	Save(ctx context.Context, d *Disbursement) error
 	UpdateStatus(ctx context.Context, id string, status DisbursementStatus, processedAt *time.Time, failureReason string) error
