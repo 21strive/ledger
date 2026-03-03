@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"mime"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,13 +14,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+// normalizeSellerID replaces any special characters (non-alphanumeric) with underscores
+// to make sellerID safe for use in S3 keys and URLs
+func normalizeSellerID(sellerID string) string {
+	// Replace any character that's not a letter, number, or underscore with underscore
+	re := regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+	return re.ReplaceAllString(sellerID, "_")
+}
+
 func (c *LedgerClient) GetPhotoKTPPresignedURL(ctx context.Context, sellerID string, bucketName string, contentType string) (string, error) {
 	validatedExt, err := validateContentType(contentType)
 	if err != nil {
 		return "", ledgererr.ErrInvalidRequest.WithError(err)
 	}
 	// Normalize the sellerID to be URL-safe
-	normalizedSellerID := strings.ReplaceAll(sellerID, " ", "-")
+	normalizedSellerID := normalizeSellerID(sellerID)
 
 	key := fmt.Sprintf("verification/ktp/%s/ktp.%s", normalizedSellerID, validatedExt)
 
@@ -43,7 +52,7 @@ func (c *LedgerClient) GetPhotoKYCSelfiePresignedURL(ctx context.Context, seller
 		return "", ledgererr.ErrInvalidRequest.WithError(err)
 	}
 	// Normalize the sellerID to be URL-safe
-	normalizedSellerID := strings.ReplaceAll(sellerID, " ", "-")
+	normalizedSellerID := normalizeSellerID(sellerID)
 
 	key := fmt.Sprintf("verification/kyc/%s/kyc-selfie.%s", normalizedSellerID, validatedExt)
 
@@ -122,7 +131,7 @@ func (c *LedgerClient) SubmitVerification(ctx context.Context, bucketName string
 	}
 
 	// Normalize sellerID for S3 keys
-	normalizedSellerID := strings.ReplaceAll(req.SellerID, " ", "-")
+	normalizedSellerID := normalizeSellerID(req.SellerID)
 
 	// Construct S3 keys
 	ktpKey := fmt.Sprintf("verification/ktp/%s/ktp.%s", normalizedSellerID, req.KTPPhotoExt)
@@ -146,7 +155,6 @@ func (c *LedgerClient) SubmitVerification(ctx context.Context, bucketName string
 		)
 	}
 
-	// Construct full S3 URLs (or keys, depending on your application needs)
 	ktpPhotoURL := ktpKey
 	selfiePhotoURL := selfieKey
 
