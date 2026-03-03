@@ -1035,10 +1035,15 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 type EarningsResponse struct {
 	PendingTransactions []*domain.ProductTransaction `json:"pending_transactions"`
 	SettledTransactions []*domain.ProductTransaction `json:"settled_transactions"`
+	NextCursor          string                       `json:"next_cursor,omitempty"` // RandId for next page (empty if no more)
+	HasMore             bool                         `json:"has_more"`              // True if more results available
 }
 
-// GetEarnings returns pending (COMPLETED) and settled (SETTLED) transactions for a seller.
-func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string) (*EarningsResponse, error) {
+// GetEarnings returns pending (COMPLETED) and settled (SETTLED) transactions for a seller
+// with cursor-based pagination using RandId (mimicking redifu's infinite scroll pattern).
+// Pass empty cursor string to get first page.
+// sortOrder: "ASC" or "DESC" for created_at ordering (defaults to DESC)
+func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string, cursor string, pageSize int, sortOrder string) (*EarningsResponse, error) {
 	account, err := c.repoProvider.Account().GetBySellerID(ctx, sellerID)
 	if err != nil {
 		if ledgererr.IsAppError(err, repo.ErrNotFound) {
@@ -1047,8 +1052,18 @@ func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string) (*Earni
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account by seller ID", err)
 	}
 
-	// Get all transactions (using a large page size to get all)
-	transactions, err := c.repoProvider.ProductTransaction().GetBySellerAccountID(ctx, account.Record.UUID, 1, 10000)
+	// Default page size if not specified
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	// Default sort order
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "DESC"
+	}
+
+	// Fetch one extra to determine if there are more results
+	transactions, err := c.repoProvider.ProductTransaction().GetBySellerAccountIDWithCursor(ctx, account.Record.UUID, cursor, pageSize+1, sortOrder)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get transactions", err)
 	}
@@ -1058,6 +1073,14 @@ func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string) (*Earni
 		SettledTransactions: make([]*domain.ProductTransaction, 0),
 	}
 
+	// Check if there are more results
+	hasMore := len(transactions) > pageSize
+	if hasMore {
+		// Remove the extra item used for hasMore check
+		transactions = transactions[:pageSize]
+	}
+
+	// Separate by status
 	for _, tx := range transactions {
 		switch tx.Status {
 		case domain.TransactionStatusCompleted:
@@ -1065,6 +1088,13 @@ func (c *LedgerClient) GetEarnings(ctx context.Context, sellerID string) (*Earni
 		case domain.TransactionStatusSettled:
 			resp.SettledTransactions = append(resp.SettledTransactions, tx)
 		}
+	}
+
+	// Set pagination info
+	resp.HasMore = hasMore
+	if hasMore && len(transactions) > 0 {
+		// Next cursor is the RandId of the last item
+		resp.NextCursor = transactions[len(transactions)-1].Record.RandId
 	}
 
 	return resp, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -72,6 +73,66 @@ func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.C
 	`
 
 	return r.scanMany(ctx, query, buyerAccountID, pageSize, offset)
+}
+
+// GetBySellerAccountIDWithCursor returns transactions with cursor-based pagination using RandId.
+// This mimics redifu's infinite scrolling pattern where RandId is used as the cursor.
+// Since RandId is a random string, we use it to identify the starting position,
+// but actual sorting is done on created_at field.
+// sortOrder: "ASC" or "DESC" (defaults to DESC if invalid)
+func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ctx context.Context, sellerAccountID string, cursor string, pageSize int, sortOrder string) ([]*domain.ProductTransaction, error) {
+	var query string
+	var args []any
+
+	// Normalize sort order
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "DESC"
+	}
+
+	if cursor == "" {
+		// First page: no cursor, start from beginning
+		query = fmt.Sprintf(`
+			SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
+			       seller_price, platform_fee, doku_fee, total_charged, currency,
+			       status, created_at, updated_at, completed_at, settled_at, metadata
+			FROM product_transactions
+			WHERE seller_account_id = $1
+			ORDER BY created_at %s
+			LIMIT $2
+		`, sortOrder)
+		args = []any{sellerAccountID, pageSize}
+	} else {
+		// Subsequent pages: find the cursor item first, then get items after it
+		// Use a subquery to get the created_at of the cursor item
+		if sortOrder == "DESC" {
+			query = `
+				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
+				       seller_price, platform_fee, doku_fee, total_charged, currency,
+				       status, created_at, updated_at, completed_at, settled_at, metadata
+				FROM product_transactions
+				WHERE seller_account_id = $1 
+				  AND (created_at < (SELECT created_at FROM product_transactions WHERE randid = $2)
+				       OR (created_at = (SELECT created_at FROM product_transactions WHERE randid = $2) AND randid < $2))
+				ORDER BY created_at DESC, randid DESC
+				LIMIT $3
+			`
+		} else {
+			query = `
+				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
+				       seller_price, platform_fee, doku_fee, total_charged, currency,
+				       status, created_at, updated_at, completed_at, settled_at, metadata
+				FROM product_transactions
+				WHERE seller_account_id = $1 
+				  AND (created_at > (SELECT created_at FROM product_transactions WHERE randid = $2)
+				       OR (created_at = (SELECT created_at FROM product_transactions WHERE randid = $2) AND randid > $2))
+				ORDER BY created_at ASC, randid ASC
+				LIMIT $3
+			`
+		}
+		args = []any{sellerAccountID, cursor, pageSize}
+	}
+
+	return r.scanMany(ctx, query, args...)
 }
 
 func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {

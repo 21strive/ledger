@@ -55,6 +55,10 @@ type ProductTransactionRepository interface {
 	GetPendingBySellerAccountID(ctx context.Context, sellerAccountID string) ([]*ProductTransaction, error)
 	GetCompletedNotSettled(ctx context.Context, sellerAccountID string) ([]*ProductTransaction, error)
 	GetAllBySellerID(ctx context.Context, sellerAccountID string) ([]*ProductTransaction, error)
+	// GetBySellerAccountIDWithCursor returns transactions with cursor-based pagination using RandId
+	// cursor: RandId of last item from previous page (empty for first page)
+	// sortOrder: "ASC" or "DESC" for created_at ordering
+	GetBySellerAccountIDWithCursor(ctx context.Context, sellerAccountID string, cursor string, pageSize int, sortOrder string) ([]*ProductTransaction, error)
 	Save(ctx context.Context, tx *ProductTransaction) error
 	UpdateStatus(ctx context.Context, id string, status TransactionStatus, timestamp time.Time) error
 }

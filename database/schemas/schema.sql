@@ -142,6 +142,10 @@ CREATE INDEX idx_product_transactions_buyer ON product_transactions(buyer_accoun
 
 CREATE INDEX idx_product_transactions_seller ON product_transactions(seller_account_id, created_at DESC);
 
+-- Index for cursor-based pagination using RandId (infinite scroll pattern)
+-- Supports queries with created_at ordering and randid as cursor
+CREATE INDEX idx_product_transactions_seller_cursor ON product_transactions(seller_account_id, created_at DESC, randid DESC);
+
 CREATE INDEX idx_product_transactions_product ON product_transactions(product_id);
 
 CREATE INDEX idx_product_transactions_invoice ON product_transactions(invoice_number);
