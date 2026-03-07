@@ -25,7 +25,8 @@ func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id s
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-		       status, created_at, updated_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
 		FROM product_transactions
 		WHERE uuid = $1
 	`
@@ -37,7 +38,8 @@ func (r *PostgresProductTransactionRepository) GetByInvoiceNumber(ctx context.Co
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-		       status, created_at, updated_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
 		FROM product_transactions
 		WHERE invoice_number = $1
 	`
@@ -50,7 +52,8 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountID(ctx context.
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-		       status, created_at, updated_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
 		ORDER BY created_at DESC
@@ -65,7 +68,8 @@ func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.C
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-		       status, created_at, updated_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
 		FROM product_transactions
 		WHERE buyer_account_id = $1
 		ORDER BY created_at DESC
@@ -94,7 +98,8 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 		query = fmt.Sprintf(`
 			SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 			       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-			       status, created_at, updated_at, completed_at, settled_at, metadata
+			       status, created_at, updated_at, completed_at, settled_at,
+			       platform_fee_transferred, platform_fee_transferred_at, metadata
 			FROM product_transactions
 			WHERE seller_account_id = $1
 			ORDER BY created_at %s
@@ -108,7 +113,8 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 			query = `
 				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 				       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-				       status, created_at, updated_at, completed_at, settled_at, metadata
+				       status, created_at, updated_at, completed_at, settled_at,
+				       platform_fee_transferred, platform_fee_transferred_at, metadata
 				FROM product_transactions
 				WHERE seller_account_id = $1 
 				  AND (created_at < (SELECT created_at FROM product_transactions WHERE randid = $2)
@@ -120,7 +126,8 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 			query = `
 				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 				       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-				       status, created_at, updated_at, completed_at, settled_at, metadata
+				       status, created_at, updated_at, completed_at, settled_at,
+				       platform_fee_transferred, platform_fee_transferred_at, metadata
 				FROM product_transactions
 				WHERE seller_account_id = $1 
 				  AND (created_at > (SELECT created_at FROM product_transactions WHERE randid = $2)
@@ -139,7 +146,8 @@ func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx c
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-		       status, created_at, updated_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'PENDING'
 		ORDER BY created_at DESC
@@ -152,7 +160,8 @@ func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx contex
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-		       status, created_at, updated_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'COMPLETED'
 		ORDER BY created_at ASC
@@ -165,7 +174,8 @@ func (r *PostgresProductTransactionRepository) GetAllBySellerID(ctx context.Cont
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-		       status, created_at, updated_at, completed_at, settled_at, metadata
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
 		ORDER BY created_at DESC
@@ -181,24 +191,23 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 	}
 
 	// Convert *time.Time to sql.NullTime to properly handle NULL values
-	var completedAt, settledAt sql.NullTime
-	if tx.CompletedAt != nil {
-		completedAt = sql.NullTime{Time: *tx.CompletedAt, Valid: true}
-	}
-	if tx.SettledAt != nil {
-		settledAt = sql.NullTime{Time: *tx.SettledAt, Valid: true}
-	}
+	completedAt := toNullTime(tx.CompletedAt)
+	settledAt := toNullTime(tx.SettledAt)
+	platformFeeTransferredAt := toNullTime(tx.PlatformFeeTransferredAt)
 
 	query := `
 		INSERT INTO product_transactions (
 			uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 			seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
-			status, created_at, updated_at, completed_at, settled_at, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			status, created_at, updated_at, completed_at, settled_at,
+			platform_fee_transferred, platform_fee_transferred_at, metadata
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
 			settled_at = EXCLUDED.settled_at,
+			platform_fee_transferred = EXCLUDED.platform_fee_transferred,
+			platform_fee_transferred_at = EXCLUDED.platform_fee_transferred_at,
 			metadata = EXCLUDED.metadata
 	`
 
@@ -225,8 +234,10 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.Status,
 		tx.CreatedAt,
 		tx.UpdatedAt,
-		completedAt, // Use sql.NullTime instead of *time.Time
-		settledAt,   // Use sql.NullTime instead of *time.Time
+		completedAt,
+		settledAt,
+		tx.PlatformFeeTransferred,
+		platformFeeTransferredAt,
 		string(metadataJSON),
 	)
 	if err != nil {
@@ -315,26 +326,28 @@ func (r *PostgresProductTransactionRepository) scanMany(ctx context.Context, que
 // scanRow scans a single row into a ProductTransaction
 func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.ProductTransaction, error) {
 	var row struct {
-		UUID            string
-		RandId          string
-		BuyerAccountID  string
-		SellerAccountID string
-		ProductID       string
-		ProductType     string
-		InvoiceNumber   string
-		SellerPrice     int64
-		PlatformFee     int64
-		DokuFee         int64
-		TotalCharged    int64
-		SellerNetAmount int64
-		FeeModel        string
-		Currency        string
-		Status          string
-		CreatedAt       time.Time
-		UpdatedAt       time.Time
-		CompletedAt     sql.NullTime
-		SettledAt       sql.NullTime
-		Metadata        []byte
+		UUID                     string
+		RandId                   string
+		BuyerAccountID           string
+		SellerAccountID          string
+		ProductID                string
+		ProductType              string
+		InvoiceNumber            string
+		SellerPrice              int64
+		PlatformFee              int64
+		DokuFee                  int64
+		TotalCharged             int64
+		SellerNetAmount          int64
+		FeeModel                 string
+		Currency                 string
+		Status                   string
+		CreatedAt                time.Time
+		UpdatedAt                time.Time
+		CompletedAt              sql.NullTime
+		SettledAt                sql.NullTime
+		PlatformFeeTransferred   bool
+		PlatformFeeTransferredAt sql.NullTime
+		Metadata                 []byte
 	}
 
 	err := rows.Scan(
@@ -357,6 +370,8 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		&row.UpdatedAt,
 		&row.CompletedAt,
 		&row.SettledAt,
+		&row.PlatformFeeTransferred,
+		&row.PlatformFeeTransferredAt,
 		&row.Metadata,
 	)
 	if err != nil {
@@ -371,6 +386,11 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 	var settledAt *time.Time
 	if row.SettledAt.Valid {
 		settledAt = &row.SettledAt.Time
+	}
+
+	var platformFeeTransferredAt *time.Time
+	if row.PlatformFeeTransferredAt.Valid {
+		platformFeeTransferredAt = &row.PlatformFeeTransferredAt.Time
 	}
 
 	var metadata map[string]any
@@ -395,10 +415,12 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 			FeeModel:        domain.FeeModel(row.FeeModel),
 			Currency:        domain.Currency(row.Currency),
 		},
-		Status:      domain.TransactionStatus(row.Status),
-		Metadata:    metadata,
-		CompletedAt: completedAt,
-		SettledAt:   settledAt,
+		Status:                   domain.TransactionStatus(row.Status),
+		Metadata:                 metadata,
+		CompletedAt:              completedAt,
+		SettledAt:                settledAt,
+		PlatformFeeTransferred:   row.PlatformFeeTransferred,
+		PlatformFeeTransferredAt: platformFeeTransferredAt,
 	}
 	redifu.InitRecord(tx)
 	// Override auto-generated values with database values
@@ -407,4 +429,51 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 	tx.CreatedAt = row.CreatedAt
 	tx.UpdatedAt = row.UpdatedAt
 	return tx, nil
+}
+
+// MarkPlatformFeeTransferred marks a transaction as having its platform fee successfully transferred
+func (r *PostgresProductTransactionRepository) MarkPlatformFeeTransferred(ctx context.Context, id string) error {
+	now := time.Now()
+	query := `
+		UPDATE product_transactions 
+		SET platform_fee_transferred = true, 
+		    platform_fee_transferred_at = $1,
+		    updated_at = $1
+		WHERE uuid = $2
+	`
+
+	result, err := r.db.ExecContext(ctx, query, now, id)
+	if err != nil {
+		return ErrFailedInsertSQL.WithError(err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return ErrFailedQuerySQL.WithError(err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// GetSettledWithoutPlatformFeeTransfer returns SETTLED transactions that haven't had platform fees transferred yet
+// Used by background job to retry failed platform fee transfers
+func (r *PostgresProductTransactionRepository) GetSettledWithoutPlatformFeeTransfer(ctx context.Context, limit int) ([]*domain.ProductTransaction, error) {
+	query := `
+		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
+		       status, created_at, updated_at, completed_at, settled_at,
+		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		FROM product_transactions
+		WHERE status = 'SETTLED' 
+		  AND platform_fee_transferred = false 
+		  AND platform_fee > 0
+		ORDER BY settled_at ASC
+		LIMIT $1
+	`
+
+	return r.scanMany(ctx, query, limit)
 }

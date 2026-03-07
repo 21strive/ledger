@@ -14,7 +14,9 @@ type SettlementItem struct {
 	*redifu.Record         `json:",inline" bson:",inline" db:"-"`
 	SettlementBatchUUID    string
 	ProductTransactionUUID string            // Empty if unmatched
+	SellerAccountID        string            // Cached from ProductTransaction for efficient grouping
 	InvoiceNumber          string            // INVOICE NUMBER from CSV (matches our product_transactions.invoice_number)
+	SubAccount             string            // SUB ACCOUNT from CSV (DOKU sub-account ID, e.g., SAC-xxxx-xxxx)
 	TransactionAmount      int64             // AMOUNT from CSV
 	PayToMerchant          int64             // PAY TO MERCHANT from CSV
 	AllocatedFee           int64             // FEE from CSV
@@ -41,6 +43,7 @@ type SettlementItemRepository interface {
 func NewSettlementItem(
 	settlementBatchID string,
 	invoiceNumber string,
+	subAccount string,
 	amount int64,
 	payToMerchant int64,
 	fee int64,
@@ -58,10 +61,7 @@ func NewSettlementItem(
 		SettlementBatchUUID:    settlementBatchID,
 		ProductTransactionUUID: "", // Will be set when matched
 		InvoiceNumber:          invoiceNumber,
-		TransactionAmount:      amount,
-		PayToMerchant:          payToMerchant,
-		AllocatedFee:           fee,
-		IsMatched:              false,
+		SubAccount:             subAccount,
 		CSVRowNumber:           csvRowNumber,
 		RawCSVData:             rawCSVData,
 	}

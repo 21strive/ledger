@@ -36,10 +36,6 @@ func (p *RepositoryProvider) Journal() domain.JournalRepository {
 	return NewPostgresJournalRepository(p.db)
 }
 
-func (p *RepositoryProvider) ReconciliationLog() domain.ReconciliationLogRepository {
-	return NewPostgresReconciliationLogRepository(p.db)
-}
-
 func (p *RepositoryProvider) ProductTransaction() domain.ProductTransactionRepository {
 	return NewPostgresProductTransactionRepository(p.db)
 }

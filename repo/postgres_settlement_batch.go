@@ -21,7 +21,7 @@ func NewPostgresSettlementBatchRepository(db DBTX) *PostgresSettlementBatchRepos
 func (r *PostgresSettlementBatchRepository) GetByID(ctx context.Context, id string) (*domain.SettlementBatch, error) {
 	query := `
 		SELECT uuid, randid, account_uuid, report_file_name, settlement_date,
-		       gross_amount, net_amount, doku_fee, currency,
+		       batch_id, gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
 		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
@@ -43,7 +43,7 @@ func (r *PostgresSettlementBatchRepository) GetByLedgerID(ctx context.Context, l
 
 	query := `
 		SELECT uuid, randid, account_uuid, report_file_name, settlement_date,
-		       gross_amount, net_amount, doku_fee, currency,
+		       batch_id, gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
 		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
@@ -64,7 +64,7 @@ func (r *PostgresSettlementBatchRepository) GetByLedgerID(ctx context.Context, l
 func (r *PostgresSettlementBatchRepository) GetByLedgerIDAndDate(ctx context.Context, ledgerID string, settlementDate time.Time) (*domain.SettlementBatch, error) {
 	query := `
 		SELECT uuid, randid, account_uuid, report_file_name, settlement_date,
-		       gross_amount, net_amount, doku_fee, currency,
+		       batch_id, gross_amount, net_amount, doku_fee, currency,
 		       uploaded_by, uploaded_at, processed_at, processing_status,
 		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
 		FROM settlement_batches
@@ -84,12 +84,13 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 	query := `
 		INSERT INTO settlement_batches (
 			uuid, randid, account_uuid, report_file_name, settlement_date,
-			gross_amount, net_amount, doku_fee, currency,
+			batch_id, gross_amount, net_amount, doku_fee, currency,
 			uploaded_by, uploaded_at, processed_at, processing_status,
 			matched_count, unmatched_count, failure_reason, metadata,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (uuid) DO UPDATE SET
+			batch_id = EXCLUDED.batch_id,
 			gross_amount = EXCLUDED.gross_amount,
 			net_amount = EXCLUDED.net_amount,
 			doku_fee = EXCLUDED.doku_fee,
@@ -106,6 +107,7 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 		batch.UUID, batch.RandId, batch.LedgerUUID,
 		batch.ReportFileName,
 		batch.SettlementDate,
+		batch.BatchID,
 		batch.GrossAmount,
 		batch.NetAmount,
 		batch.DokuFee,
@@ -156,6 +158,7 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatch(row *sql.Row) (*
 	redifu.InitRecord(&batch)
 	var processedAt sql.NullTime
 	var failureReason sql.NullString
+	var batchID sql.NullString
 	var metadataJSON []byte
 
 	err := row.Scan(
@@ -164,6 +167,7 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatch(row *sql.Row) (*
 		&batch.LedgerUUID,
 		&batch.ReportFileName,
 		&batch.SettlementDate,
+		&batchID,
 		&batch.GrossAmount,
 		&batch.NetAmount,
 		&batch.DokuFee,
@@ -192,6 +196,9 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatch(row *sql.Row) (*
 	if failureReason.Valid {
 		batch.FailureReason = failureReason.String
 	}
+	if batchID.Valid {
+		batch.BatchID = batchID.String
+	}
 
 	batch.Metadata = make(map[string]any)
 	if len(metadataJSON) > 0 {
@@ -209,6 +216,7 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatches(rows *sql.Rows
 		redifu.InitRecord(&batch)
 		var processedAt sql.NullTime
 		var failureReason sql.NullString
+		var batchID sql.NullString
 		var metadataJSON []byte
 
 		err := rows.Scan(
@@ -217,6 +225,7 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatches(rows *sql.Rows
 			&batch.LedgerUUID,
 			&batch.ReportFileName,
 			&batch.SettlementDate,
+			&batchID,
 			&batch.GrossAmount,
 			&batch.NetAmount,
 			&batch.DokuFee,
@@ -241,6 +250,9 @@ func (r *PostgresSettlementBatchRepository) scanSettlementBatches(rows *sql.Rows
 		}
 		if failureReason.Valid {
 			batch.FailureReason = failureReason.String
+		}
+		if batchID.Valid {
+			batch.BatchID = batchID.String
 		}
 
 		batch.Metadata = make(map[string]any)

@@ -19,8 +19,8 @@ func NewPostgresSettlementItemRepository(db DBTX) *PostgresSettlementItemReposit
 
 func (r *PostgresSettlementItemRepository) GetByID(ctx context.Context, id string) (*domain.SettlementItem, error) {
 	query := `
-		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
-		       invoice_number, transaction_amount, pay_to_merchant,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid, seller_account_id,
+		       invoice_number, sub_account, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
 		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
@@ -33,8 +33,8 @@ func (r *PostgresSettlementItemRepository) GetByID(ctx context.Context, id strin
 
 func (r *PostgresSettlementItemRepository) GetBySettlementBatchID(ctx context.Context, batchID string) ([]*domain.SettlementItem, error) {
 	query := `
-		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
-		       invoice_number, transaction_amount, pay_to_merchant,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid, seller_account_id,
+		       invoice_number, sub_account, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
 		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
@@ -53,8 +53,8 @@ func (r *PostgresSettlementItemRepository) GetBySettlementBatchID(ctx context.Co
 
 func (r *PostgresSettlementItemRepository) GetByProductTransactionID(ctx context.Context, productTxID string) ([]*domain.SettlementItem, error) {
 	query := `
-		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
-		       invoice_number, transaction_amount, pay_to_merchant,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid, seller_account_id,
+		       invoice_number, sub_account, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
 		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
@@ -73,8 +73,8 @@ func (r *PostgresSettlementItemRepository) GetByProductTransactionID(ctx context
 
 func (r *PostgresSettlementItemRepository) GetUnmatchedByBatchID(ctx context.Context, batchID string) ([]*domain.SettlementItem, error) {
 	query := `
-		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid,
-		       invoice_number, transaction_amount, pay_to_merchant,
+		SELECT uuid, randid, settlement_batch_uuid, product_transaction_uuid, seller_account_id,
+		       invoice_number, sub_account, transaction_amount, pay_to_merchant,
 		       allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
 		       csv_row_number, raw_csv_data, created_at, updated_at
 		FROM settlement_items
@@ -99,13 +99,14 @@ func (r *PostgresSettlementItemRepository) Save(ctx context.Context, item *domai
 
 	query := `
 		INSERT INTO settlement_items (
-			uuid, randid, settlement_batch_uuid, product_transaction_uuid,
-			invoice_number, transaction_amount, pay_to_merchant,
+			uuid, randid, settlement_batch_uuid, product_transaction_uuid, seller_account_id,
+			invoice_number, sub_account, transaction_amount, pay_to_merchant,
 			allocated_fee, is_matched, expected_net_amount, amount_discrepancy,
 			csv_row_number, raw_csv_data, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (uuid) DO UPDATE SET
 			product_transaction_uuid = EXCLUDED.product_transaction_uuid,
+			seller_account_id = EXCLUDED.seller_account_id,
 			is_matched = EXCLUDED.is_matched,
 			expected_net_amount = EXCLUDED.expected_net_amount,
 			amount_discrepancy = EXCLUDED.amount_discrepancy,
@@ -117,12 +118,19 @@ func (r *PostgresSettlementItemRepository) Save(ctx context.Context, item *domai
 		productTxID = &item.ProductTransactionUUID
 	}
 
+	var sellerAccountID *string
+	if item.SellerAccountID != "" {
+		sellerAccountID = &item.SellerAccountID
+	}
+
 	_, err = r.db.ExecContext(ctx, query,
 		item.UUID,
 		item.RandId,
 		item.SettlementBatchUUID,
 		productTxID,
+		sellerAccountID,
 		item.InvoiceNumber,
+		item.SubAccount,
 		item.TransactionAmount,
 		item.PayToMerchant,
 		item.AllocatedFee,
@@ -154,7 +162,9 @@ func (r *PostgresSettlementItemRepository) scanSettlementItem(row *sql.Row) (*do
 	var item domain.SettlementItem
 	redifu.InitRecord(&item)
 	var productTxID sql.NullString
+	var sellerAccountID sql.NullString
 	var invoiceNumber sql.NullString
+	var subAccount sql.NullString
 	var rawCSVDataJSON []byte
 
 	err := row.Scan(
@@ -162,7 +172,9 @@ func (r *PostgresSettlementItemRepository) scanSettlementItem(row *sql.Row) (*do
 		&item.RandId,
 		&item.SettlementBatchUUID,
 		&productTxID,
+		&sellerAccountID,
 		&invoiceNumber,
+		&subAccount,
 		&item.TransactionAmount,
 		&item.PayToMerchant,
 		&item.AllocatedFee,
@@ -184,8 +196,14 @@ func (r *PostgresSettlementItemRepository) scanSettlementItem(row *sql.Row) (*do
 	if productTxID.Valid {
 		item.ProductTransactionUUID = productTxID.String
 	}
+	if sellerAccountID.Valid {
+		item.SellerAccountID = sellerAccountID.String
+	}
 	if invoiceNumber.Valid {
 		item.InvoiceNumber = invoiceNumber.String
+	}
+	if subAccount.Valid {
+		item.SubAccount = subAccount.String
 	}
 
 	item.RawCSVData = make(map[string]string)
@@ -203,7 +221,9 @@ func (r *PostgresSettlementItemRepository) scanSettlementItems(rows *sql.Rows) (
 		var item domain.SettlementItem
 		redifu.InitRecord(&item)
 		var productTxID sql.NullString
+		var sellerAccountID sql.NullString
 		var invoiceNumber sql.NullString
+		var subAccount sql.NullString
 		var rawCSVDataJSON []byte
 
 		err := rows.Scan(
@@ -211,7 +231,9 @@ func (r *PostgresSettlementItemRepository) scanSettlementItems(rows *sql.Rows) (
 			&item.RandId,
 			&item.SettlementBatchUUID,
 			&productTxID,
+			&sellerAccountID,
 			&invoiceNumber,
+			&subAccount,
 			&item.TransactionAmount,
 			&item.PayToMerchant,
 			&item.AllocatedFee,
@@ -230,8 +252,14 @@ func (r *PostgresSettlementItemRepository) scanSettlementItems(rows *sql.Rows) (
 		if productTxID.Valid {
 			item.ProductTransactionUUID = productTxID.String
 		}
+		if sellerAccountID.Valid {
+			item.SellerAccountID = sellerAccountID.String
+		}
 		if invoiceNumber.Valid {
 			item.InvoiceNumber = invoiceNumber.String
+		}
+		if subAccount.Valid {
+			item.SubAccount = subAccount.String
 		}
 
 		item.RawCSVData = make(map[string]string)

@@ -47,17 +47,19 @@ type FeeBreakdown struct {
 // ProductTransaction represents a product sale between buyer and seller
 // Supports different product types: PHOTO, FOLDER, SUBSCRIPTION, etc.
 type ProductTransaction struct {
-	*redifu.Record  `json:",inline" bson:",inline" db:"-"`
-	BuyerAccountID  string
-	SellerAccountID string
-	ProductID       string // Product identifier (references external product system)
-	ProductType     string // Type of product: PHOTO, FOLDER, SUBSCRIPTION, etc.
-	InvoiceNumber   string
-	Fee             FeeBreakdown
-	Status          TransactionStatus
-	Metadata        map[string]any // Caller-defined metadata (product details, buyer/seller info, etc.)
-	CompletedAt     *time.Time     // When user paid (DOKU webhook)
-	SettledAt       *time.Time     // When appeared in settlement CSV
+	*redifu.Record           `json:",inline" bson:",inline" db:"-"`
+	BuyerAccountID           string
+	SellerAccountID          string
+	ProductID                string // Product identifier (references external product system)
+	ProductType              string // Type of product: PHOTO, FOLDER, SUBSCRIPTION, etc.
+	InvoiceNumber            string
+	Fee                      FeeBreakdown
+	Status                   TransactionStatus
+	Metadata                 map[string]any // Caller-defined metadata (product details, buyer/seller info, etc.)
+	CompletedAt              *time.Time     // When user paid (DOKU webhook)
+	SettledAt                *time.Time     // When appeared in settlement CSV
+	PlatformFeeTransferred   bool           // Whether platform fee has been transferred to platform sub-account
+	PlatformFeeTransferredAt *time.Time     // When platform fee was successfully transferred via DOKU API
 }
 
 // ProductTransactionRepository defines data access for product transactions
@@ -75,6 +77,8 @@ type ProductTransactionRepository interface {
 	GetBySellerAccountIDWithCursor(ctx context.Context, sellerAccountID string, cursor string, pageSize int, sortOrder string) ([]*ProductTransaction, error)
 	Save(ctx context.Context, tx *ProductTransaction) error
 	UpdateStatus(ctx context.Context, id string, status TransactionStatus, timestamp time.Time) error
+	MarkPlatformFeeTransferred(ctx context.Context, id string) error
+	GetSettledWithoutPlatformFeeTransfer(ctx context.Context, limit int) ([]*ProductTransaction, error)
 }
 
 // NewFeeBreakdown creates a FeeBreakdown with specified fee model and validates amounts
@@ -254,4 +258,16 @@ func (pt *ProductTransaction) MarkRefunded() error {
 	}
 	pt.Status = TransactionStatusRefunded
 	return nil
+}
+
+// MarkPlatformFeeTransferred marks that platform fee has been transferred to platform sub-account
+func (pt *ProductTransaction) MarkPlatformFeeTransferred() {
+	now := time.Now()
+	pt.PlatformFeeTransferred = true
+	pt.PlatformFeeTransferredAt = &now
+}
+
+// NeedsPlatformFeeTransfer checks if this transaction is settled but platform fee not yet transferred
+func (pt *ProductTransaction) NeedsPlatformFeeTransfer() bool {
+	return pt.IsSettled() && pt.Fee.PlatformFee > 0 && !pt.PlatformFeeTransferred
 }

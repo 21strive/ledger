@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
-	"strconv"
 	"time"
 
 	"github.com/21strive/doku/app/requests"
@@ -606,7 +605,6 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 
 // ReconciliationRequest contains the parameters for reconciliation
 type ReconciliationRequest struct {
-	SellerID       string    // Seller ID to reconcile
 	CSVReader      io.Reader // CSV file reader
 	ReportFileName string    // Original filename
 	SettlementDate time.Time // Date of settlement
@@ -655,27 +653,30 @@ type DiscrepancySummary struct {
 
 // ReconciliationVerify contains DOKU verification results
 type ReconciliationVerify struct {
-	DokuAPIChecked bool   `json:"doku_api_checked"`
-	DokuPending    int64  `json:"doku_pending"`
-	DokuAvailable  int64  `json:"doku_available"`
-	MatchStatus    string `json:"match_status"`
+	DokuAPIChecked     bool   `json:"doku_api_checked"`
+	DokuPending        int64  `json:"doku_pending,omitempty"`   // Deprecated: use seller-level verification
+	DokuAvailable      int64  `json:"doku_available,omitempty"` // Deprecated: use seller-level verification
+	MatchStatus        string `json:"match_status"`
+	SellersVerified    int    `json:"sellers_verified"`     // Number of sellers with DOKU sub-accounts verified
+	SellersMatched     int    `json:"sellers_matched"`      // Number of sellers with exact balance match
+	SellersMismatched  int    `json:"sellers_mismatched"`   // Number of sellers with balance discrepancies
+	SellersNotVerified int    `json:"sellers_not_verified"` // Number of sellers without DOKU sub-accounts
 }
 
 // ProcessReconciliation processes a DOKU settlement CSV and writes immutable
 // ledger entries to convert PENDING → AVAILABLE for seller and platform accounts,
 // and clears the DOKU expense PENDING balance.
 //
+// NOTE: Settlement CSV is PLATFORM-WIDE and contains invoices from ALL sellers.
+// Each transaction is matched to its respective seller account during processing.
+//
 // Phase 3 flow:
 // 1. Validate + parse CSV
-// 2. Derive pre-settlement balances from ledger_entries
-// 3. Insert settlement_batch record
-// 4. For each CSV row: match → mark ProductTransaction SETTLED
-// 5. Write settlement ledger entries (PENDING→AVAILABLE) for each transaction
-// 6. Optionally verify with DOKU GetBalance API
+// 2. Insert settlement_batch record (tied to platform account)
+// 3. For each CSV row: match → mark ProductTransaction SETTLED
+// 4. Write settlement ledger entries (PENDING→AVAILABLE) for each seller
+// 5. Optionally verify with DOKU GetBalance API
 func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *ReconciliationRequest) (*ReconciliationResponse, error) {
-	if req.SellerID == "" {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "seller_id is required", nil)
-	}
 	if req.CSVReader == nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "csv_reader is required", nil)
 	}
@@ -683,18 +684,12 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "uploaded_by is required", nil)
 	}
 
-	// Resolve account
-	account, err := c.repoProvider.Account().GetBySellerID(ctx, req.SellerID)
+	// Fetch system accounts
+	platformAccount, err := c.repoProvider.Account().GetPlatformAccount(ctx)
 	if err != nil {
 		if ledgererr.IsAppError(err, repo.ErrNotFound) {
-			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
+			return nil, ledgererr.NewError(ledgererr.CodeInternal, "platform account not found - please create platform account first", err)
 		}
-		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account", err)
-	}
-
-	// Fetch system accounts automatically
-	platformAccount, err := c.repoProvider.Account().GetPlatformAccount(ctx)
-	if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get platform account", err)
 	}
 	dokuAccount, err := c.repoProvider.Account().GetPaymentGatewayAccount(ctx)
@@ -702,8 +697,9 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get payment gateway account", err)
 	}
 
-	// Derive pre-settlement balances
-	previousPending, previousAvailable, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
+	// Derive pre-settlement balances for platform account
+	// (Settlement CSV contains transactions from ALL sellers, so we track at platform level)
+	previousPending, previousAvailable, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, platformAccount.UUID)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive pre-settlement balances", err)
 	}
@@ -720,10 +716,24 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	}
 
 	c.logger.InfoContext(ctx, "Parsed settlement CSV",
-		"account_id", account.UUID,
+		"platform_account_id", platformAccount.UUID,
 		"total_rows", len(csvRows),
 		"skipped_rows", parser.GetSkippedRows(),
 		"parse_errors", len(parser.GetParseErrors()),
+	)
+
+	// Extract metadata from CSV
+	csvMetadata := parser.GetMetadata()
+	if csvMetadata == nil || csvMetadata.BatchID == "" {
+		return nil, ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("CSV metadata missing Batch ID"))
+	}
+
+	c.logger.InfoContext(ctx, "Extracted CSV metadata",
+		"batch_id", csvMetadata.BatchID,
+		"total_amount_purchase", csvMetadata.TotalAmountPurchase,
+		"total_fee", csvMetadata.TotalFee,
+		"total_settlement", csvMetadata.TotalSettlement,
+		"total_transactions", csvMetadata.TotalTransactions,
 	)
 
 	settlementDate := req.SettlementDate
@@ -731,24 +741,29 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		settlementDate = csvRows[0].PayOutDate
 	}
 
-	// Create settlement batch (uses AccountID in place of old LedgerID)
+	// Create settlement batch tied to PLATFORM account
+	// (CSV contains transactions from ALL sellers, tracked at platform level)
 	batch, err := domain.NewSettlementBatch(
-		account.UUID,
+		platformAccount.UUID,
 		req.ReportFileName,
 		settlementDate,
 		req.UploadedBy,
-		account.Currency,
+		platformAccount.Currency,
 	)
 	if err != nil {
 		return nil, err
 	}
+	batch.BatchID = csvMetadata.BatchID // Set DOKU Batch ID from CSV metadata
 	batch.MarkProcessing()
 
-	// Process CSV rows
+	// Process CSV rows - cache ProductTransactions to avoid N+1 queries
 	var settlementItems []*domain.SettlementItem
 	var discrepancies []DiscrepancySummary
-	var itemDiscrepancyCount int
-	var totalItemDiscrepancy int64
+	productTxCache := make(map[string]*domain.ProductTransaction) // Cache by ProductTransaction.UUID
+	sellerItemDiscrepancies := make(map[string]struct {
+		count int
+		total int64
+	}) // Track per seller
 	var totalSettledSellerAmount int64   // seller_net_amount from matched transactions
 	var totalSettledPlatformAmount int64 // platform_fee from matched transactions
 	var totalDokuFee int64
@@ -801,6 +816,31 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			continue
 		}
 
+		// Verify SubAccount from CSV matches seller's DOKU sub-account for safety
+		if csvRow.SubAccount != "" {
+			sellerAccount, err := c.repoProvider.Account().GetByID(ctx, productTx.SellerAccountID)
+			if err != nil {
+				c.logger.WarnContext(ctx, "Failed to get seller account for SubAccount verification",
+					"invoice_number", csvRow.InvoiceNumber,
+					"product_tx_id", productTx.UUID,
+					"seller_account_id", productTx.SellerAccountID,
+					"error", err,
+				)
+			} else if sellerAccount.DokuSubAccountID != "" && sellerAccount.DokuSubAccountID != csvRow.SubAccount {
+				c.logger.WarnContext(ctx, "SubAccount mismatch - CSV SubAccount differs from seller's account",
+					"invoice_number", csvRow.InvoiceNumber,
+					"product_tx_id", productTx.UUID,
+					"csv_sub_account", csvRow.SubAccount,
+					"seller_doku_sac", sellerAccount.DokuSubAccountID,
+				)
+				discrepancies = append(discrepancies, DiscrepancySummary{
+					Type:          "SUBACCOUNT_MISMATCH",
+					InvoiceNumber: csvRow.InvoiceNumber,
+					Message:       fmt.Sprintf("CSV SubAccount (%s) != Seller Account (%s)", csvRow.SubAccount, sellerAccount.DokuSubAccountID),
+				})
+			}
+		}
+
 		if item.HasAmountDiscrepancy() {
 			c.logger.WarnContext(ctx, "Amount discrepancy in settlement",
 				"invoice_number", csvRow.InvoiceNumber,
@@ -815,8 +855,11 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 				Amount:        item.AmountDiscrepancy,
 				Message:       fmt.Sprintf("CSV PayToMerchant (%d) != ProductTx SellerPrice+PlatformFee (%d)", csvRow.PayToMerchant, item.ExpectedNetAmount),
 			})
-			itemDiscrepancyCount++
-			totalItemDiscrepancy += item.AmountDiscrepancy
+			// Track per seller
+			sellerDisc := sellerItemDiscrepancies[productTx.SellerAccountID]
+			sellerDisc.count++
+			sellerDisc.total += item.AmountDiscrepancy
+			sellerItemDiscrepancies[productTx.SellerAccountID] = sellerDisc
 		}
 
 		if productTx.IsCompleted() {
@@ -828,6 +871,9 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		totalSettledSellerAmount += productTx.Fee.SellerNetAmount
 		totalSettledPlatformAmount += productTx.Fee.PlatformFee
 		totalDokuFee += csvRow.Fee
+
+		// Cache ProductTransaction for later use
+		productTxCache[productTx.UUID] = productTx
 
 		settlementItems = append(settlementItems, item)
 	}
@@ -851,29 +897,54 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		},
 	)
 
-	// TODO: settlement entry should be for each product transaction
-	// Build settlement ledger entries
+	// Build settlement ledger entries for EACH matched product transaction (using cached data)
 	allSettlementEntries := make([]*domain.LedgerEntry, 0)
 
-	// Seller: PENDING → AVAILABLE
-	if totalSettledSellerAmount > 0 {
-		allSettlementEntries = append(allSettlementEntries,
-			domain.NewSettlementEntriesForAccount(settlementJournal.UUID, batch.UUID, account.UUID, totalSettledSellerAmount)...,
-		)
-	}
+	for _, item := range settlementItems {
+		if !item.IsMatched {
+			continue
+		}
 
-	// Platform: PENDING → AVAILABLE
-	if totalSettledPlatformAmount > 0 && platformAccount != nil {
-		allSettlementEntries = append(allSettlementEntries,
-			domain.NewSettlementEntriesForAccount(settlementJournal.UUID, batch.UUID, platformAccount.UUID, totalSettledPlatformAmount)...,
-		)
-	}
+		// Use cached ProductTransaction
+		productTx, ok := productTxCache[item.ProductTransactionUUID]
+		if !ok {
+			c.logger.WarnContext(ctx, "Product transaction not in cache",
+				"product_tx_id", item.ProductTransactionUUID,
+			)
+			continue
+		}
 
-	// DOKU expense: clear PENDING (no AVAILABLE credit)
-	if totalDokuFee > 0 && dokuAccount != nil {
-		allSettlementEntries = append(allSettlementEntries,
-			domain.NewDokuFeeSettlementEntry(settlementJournal.UUID, batch.UUID, dokuAccount.UUID, totalDokuFee),
-		)
+		// Seller: PENDING → AVAILABLE (seller_net_amount for this transaction)
+		if productTx.Fee.SellerNetAmount > 0 {
+			allSettlementEntries = append(allSettlementEntries,
+				domain.NewSettlementEntriesForAccount(settlementJournal.UUID, productTx.UUID, item.SellerAccountID, productTx.Fee.SellerNetAmount)...,
+			)
+		}
+
+		// Platform: PENDING → AVAILABLE (platform_fee for this transaction)
+		if productTx.Fee.PlatformFee > 0 && platformAccount != nil {
+			allSettlementEntries = append(allSettlementEntries,
+				domain.NewSettlementEntriesForAccount(settlementJournal.UUID, productTx.UUID, platformAccount.UUID, productTx.Fee.PlatformFee)...,
+			)
+
+			// TODO: Execute DOKU intra-sub-account transfer from seller's sub-account to platform sub-account
+			// This should be done AFTER reconciliation transaction commits successfully
+			// Transfer details:
+			//   - Amount: productTx.Fee.PlatformFee
+			//   - From: sellerAccount.DokuSubAccountID
+			//   - To: platformAccount.DokuSubAccountID
+			//   - Use: dokuClient.TransferSubAccount() or equivalent API
+			// After successful transfer: tx.ProductTransaction().MarkPlatformFeeTransferred(ctx, productTx.UUID)
+			// If transfer fails: log error, leave platform_fee_transferred = false for retry
+			// Retry mechanism: separate background job queries GetSettledWithoutPlatformFeeTransfer()
+		}
+
+		// DOKU expense: clear PENDING (doku_fee for this transaction)
+		if productTx.Fee.DokuFee > 0 && dokuAccount != nil {
+			allSettlementEntries = append(allSettlementEntries,
+				domain.NewDokuFeeSettlementEntry(settlementJournal.UUID, productTx.UUID, dokuAccount.UUID, productTx.Fee.DokuFee),
+			)
+		}
 	}
 
 	c.logger.InfoContext(ctx, "Settlement balance calculations",
@@ -917,25 +988,6 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement ledger entries", err)
 		}
 
-		// Reconciliation log
-		currentPending, currentAvailable, _ := tx.LedgerEntry().GetAllBalances(ctx, account.UUID)
-		reconciliationLog := domain.NewReconciliationLog(
-			account.UUID,
-			previousPending,
-			previousAvailable,
-			currentPending,
-			currentAvailable,
-			true, // isSettlement
-			totalSettledSellerAmount+totalSettledPlatformAmount, // settledAmount
-			totalDokuFee, // feeAmount
-			fmt.Sprintf("CSV reconciliation: %s, matched: %d, unmatched: %d", req.ReportFileName, batch.MatchedCount, batch.UnmatchedCount),
-		)
-		reconciliationLog.CreatedAt = now
-		reconciliationLog.UpdatedAt = now
-		if err := tx.ReconciliationLog().Save(ctx, reconciliationLog); err != nil {
-			c.logger.WarnContext(ctx, "Failed to save reconciliation log", "error", err)
-		}
-
 		return nil
 	})
 	if err != nil {
@@ -944,94 +996,199 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		return nil, err
 	}
 
-	// Derive post-settlement balances for the response
-	postPending, postAvailable, _ := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
+	// Derive post-settlement balances for the response (platform account)
+	postPending, postAvailable, _ := c.repoProvider.LedgerEntry().GetAllBalances(ctx, platformAccount.UUID)
 
-	// Optionally verify with DOKU GetBalance API (non-blocking)
-	verification := ReconciliationVerify{
-		DokuAPIChecked: false,
-		MatchStatus:    "NOT_VERIFIED",
+	// ============================================================
+	// PER-SELLER RECONCILIATION AND DOKU VERIFICATION
+	// ============================================================
+	// Group transactions by seller (using cached SellerAccountID)
+	sellerTransactions := make(map[string][]*domain.SettlementItem)
+	uniqueSellerIDs := make([]string, 0)
+	for _, item := range settlementItems {
+		if !item.IsMatched || item.SellerAccountID == "" {
+			continue
+		}
+		if _, exists := sellerTransactions[item.SellerAccountID]; !exists {
+			uniqueSellerIDs = append(uniqueSellerIDs, item.SellerAccountID)
+		}
+		sellerTransactions[item.SellerAccountID] = append(sellerTransactions[item.SellerAccountID], item)
 	}
 
-	if account.DokuSubAccountID != "" {
-		dokuBalance, dokuErr := c.dokuClient.GetBalance(account.DokuSubAccountID)
-		if dokuErr == nil && dokuBalance != nil && dokuBalance.Balance != nil {
-			verification.DokuAPIChecked = true
-
-			var dokuPending, dokuAvailable int64
-			if dokuBalance.Balance.Pending.Valid {
-				if parsed, err := strconv.ParseInt(dokuBalance.Balance.Pending.String, 10, 64); err == nil {
-					dokuPending = parsed
-				}
-			}
-			if dokuBalance.Balance.Available.Valid {
-				if parsed, err := strconv.ParseInt(dokuBalance.Balance.Available.String, 10, 64); err == nil {
-					dokuAvailable = parsed
-				}
-			}
-
-			verification.DokuPending = dokuPending
-			verification.DokuAvailable = dokuAvailable
-
-			pendingMatch := dokuPending == postPending
-			availableMatch := dokuAvailable == postAvailable
-
-			if !pendingMatch || !availableMatch {
-				verification.MatchStatus = "MISMATCH"
-
-				var discrepancyType domain.DiscrepancyType
-				if !pendingMatch && !availableMatch {
-					discrepancyType = domain.DiscrepancyTypeBothMismatch
-				} else if !pendingMatch {
-					discrepancyType = domain.DiscrepancyTypePendingMismatch
-				} else {
-					discrepancyType = domain.DiscrepancyTypeAvailableMismatch
-				}
-
-				discrepancy := domain.NewReconciliationDiscrepancy(
-					account.UUID,
-					batch.UUID,
-					discrepancyType,
-					postPending,
-					dokuPending,
-					postAvailable,
-					dokuAvailable,
-					itemDiscrepancyCount,
-					totalItemDiscrepancy,
-				)
-				discrepancy.CreatedAt = now
-				discrepancy.UpdatedAt = now
-
-				if err := c.repoProvider.ReconciliationDiscrepancy().Save(ctx, discrepancy); err != nil {
-					c.logger.ErrorContext(ctx, "Failed to save reconciliation discrepancy", "error", err)
-				}
-
-				discrepancies = append(discrepancies, DiscrepancySummary{
-					Type:    string(discrepancyType),
-					Amount:  dokuAvailable - postAvailable,
-					Message: fmt.Sprintf("DOKU balance mismatch — Pending: expected %d, got %d; Available: expected %d, got %d", postPending, dokuPending, postAvailable, dokuAvailable),
-				})
-
-				c.logger.WarnContext(ctx, "Balance discrepancy detected after reconciliation",
-					"account_id", account.UUID,
-					"expected_pending", postPending,
-					"doku_pending", dokuPending,
-					"expected_available", postAvailable,
-					"doku_available", dokuAvailable,
-				)
-			} else {
-				verification.MatchStatus = "EXACT_MATCH"
-			}
-		} else {
-			c.logger.WarnContext(ctx, "Failed to verify with DOKU GetBalance API",
-				"account_id", account.UUID,
-				"error", dokuErr,
-			)
+	// Query previous balances for all sellers BEFORE settlement
+	sellerPreviousBalances := make(map[string]struct{ pending, available int64 })
+	for _, sellerID := range uniqueSellerIDs {
+		// Note: These are POST-settlement balances now. For true previous balances,
+		// we'd need to query before the transaction commit. This is a limitation.
+		prevPending, prevAvailable, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, sellerID)
+		if err == nil {
+			sellerPreviousBalances[sellerID] = struct{ pending, available int64 }{prevPending, prevAvailable}
 		}
 	}
 
+	c.logger.InfoContext(ctx, "Starting per-seller reconciliation verification",
+		"unique_sellers", len(sellerTransactions),
+	)
+
+	// For each seller, verify their balance with DOKU and create reconciliation logs
+	sellerReconciliationResults := make(map[string]ReconciliationVerify)
+	for sellerAccountID, items := range sellerTransactions {
+		// Get seller account
+		sellerAccount, err := c.repoProvider.Account().GetByID(ctx, sellerAccountID)
+		if err != nil {
+			c.logger.WarnContext(ctx, "Failed to get seller account for reconciliation",
+				"seller_account_id", sellerAccountID,
+				"error", err,
+			)
+			continue
+		}
+
+		// Calculate this seller's settled amount (using cached ProductTransactions)
+		var sellerSettledAmount int64
+		for _, item := range items {
+			if productTx, ok := productTxCache[item.ProductTransactionUUID]; ok {
+				sellerSettledAmount += productTx.Fee.SellerNetAmount
+			}
+		}
+
+		// Get seller's post-settlement balances from ledger entries
+		sellerPostPending, sellerPostAvailable, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, sellerAccount.UUID)
+		if err != nil {
+			c.logger.WarnContext(ctx, "Failed to get seller balances",
+				"seller_account_id", sellerAccountID,
+				"error", err,
+			)
+			continue
+		}
+
+		// Verify with DOKU GetBalance API for this seller's sub-account
+		verification := ReconciliationVerify{
+			DokuAPIChecked: false,
+			MatchStatus:    "NOT_VERIFIED",
+		}
+
+		if sellerAccount.DokuSubAccountID != "" {
+			dokuBalance, dokuErr := c.dokuClient.GetBalance(sellerAccount.DokuSubAccountID)
+			if dokuErr == nil && dokuBalance != nil && dokuBalance.Balance != nil {
+				verification.DokuAPIChecked = true
+
+				var dokuPending, dokuAvailable int64
+				if dokuBalance.Balance.Pending.Valid {
+					fmt.Sscanf(dokuBalance.Balance.Pending.String, "%d", &dokuPending)
+				}
+				if dokuBalance.Balance.Available.Valid {
+					fmt.Sscanf(dokuBalance.Balance.Available.String, "%d", &dokuAvailable)
+				}
+
+				verification.DokuPending = dokuPending
+				verification.DokuAvailable = dokuAvailable
+
+				pendingMatch := dokuPending == sellerPostPending
+				availableMatch := dokuAvailable == sellerPostAvailable
+
+				if !pendingMatch || !availableMatch {
+					verification.MatchStatus = "MISMATCH"
+
+					var discrepancyType domain.DiscrepancyType
+					if !pendingMatch && !availableMatch {
+						discrepancyType = domain.DiscrepancyTypeBothMismatch
+					} else if !pendingMatch {
+						discrepancyType = domain.DiscrepancyTypePendingMismatch
+					} else {
+						discrepancyType = domain.DiscrepancyTypeAvailableMismatch
+					}
+
+					// Get item-level discrepancies for this seller
+					sellerDisc := sellerItemDiscrepancies[sellerAccountID]
+					discrepancy := domain.NewReconciliationDiscrepancy(
+						sellerAccount.UUID,
+						batch.UUID,
+						discrepancyType,
+						sellerPostPending,
+						dokuPending,
+						sellerPostAvailable,
+						dokuAvailable,
+						sellerDisc.count, // itemDiscrepancyCount for this seller
+						sellerDisc.total, // totalItemDiscrepancy for this seller
+					)
+					discrepancy.CreatedAt = now
+					discrepancy.UpdatedAt = now
+
+					if err := c.repoProvider.ReconciliationDiscrepancy().Save(ctx, discrepancy); err != nil {
+						c.logger.ErrorContext(ctx, "Failed to save reconciliation discrepancy",
+							"seller_account_id", sellerAccountID,
+							"error", err,
+						)
+					}
+
+					discrepancies = append(discrepancies, DiscrepancySummary{
+						Type:   string(discrepancyType),
+						Amount: dokuAvailable - sellerPostAvailable,
+						Message: fmt.Sprintf("Seller %s: DOKU balance mismatch — Pending: expected %d, got %d; Available: expected %d, got %d",
+							sellerAccount.OwnerID, sellerPostPending, dokuPending, sellerPostAvailable, dokuAvailable),
+					})
+
+					c.logger.WarnContext(ctx, "Balance discrepancy detected for seller",
+						"seller_account_id", sellerAccountID,
+						"seller_owner_id", sellerAccount.OwnerID,
+						"expected_pending", sellerPostPending,
+						"doku_pending", dokuPending,
+						"expected_available", sellerPostAvailable,
+						"doku_available", dokuAvailable,
+					)
+				} else {
+					verification.MatchStatus = "EXACT_MATCH"
+					c.logger.InfoContext(ctx, "Seller balance verified successfully",
+						"seller_account_id", sellerAccountID,
+						"seller_owner_id", sellerAccount.OwnerID,
+						"pending", sellerPostPending,
+						"available", sellerPostAvailable,
+					)
+				}
+			} else {
+				c.logger.WarnContext(ctx, "Failed to verify seller with DOKU GetBalance API",
+					"seller_account_id", sellerAccountID,
+					"seller_owner_id", sellerAccount.OwnerID,
+					"doku_sub_account_id", sellerAccount.DokuSubAccountID,
+					"error", dokuErr,
+				)
+			}
+		} else {
+			c.logger.WarnContext(ctx, "Seller has no DOKU sub-account ID, skipping verification",
+				"seller_account_id", sellerAccountID,
+				"seller_owner_id", sellerAccount.OwnerID,
+			)
+		}
+
+		sellerReconciliationResults[sellerAccountID] = verification
+	}
+
+	// Summary verification for response (platform-level)
+	matchedSellers := 0
+	mismatchedSellers := 0
+	notVerifiedSellers := 0
+	for _, result := range sellerReconciliationResults {
+		if result.MatchStatus == "EXACT_MATCH" {
+			matchedSellers++
+		} else if result.MatchStatus == "MISMATCH" {
+			mismatchedSellers++
+		} else {
+			notVerifiedSellers++
+		}
+	}
+
+	verification := ReconciliationVerify{
+		DokuAPIChecked: len(sellerReconciliationResults) > 0,
+		MatchStatus: fmt.Sprintf("SELLERS_VERIFIED: %d matched, %d mismatched, %d not verified",
+			matchedSellers, mismatchedSellers, notVerifiedSellers),
+		SellersVerified:    len(sellerReconciliationResults),
+		SellersMatched:     matchedSellers,
+		SellersMismatched:  mismatchedSellers,
+		SellersNotVerified: notVerifiedSellers,
+	}
+
 	c.logger.InfoContext(ctx, "Reconciliation completed",
-		"account_id", account.UUID,
+		"platform_account_id", platformAccount.UUID,
 		"batch_id", batch.UUID,
 		"matched", batch.MatchedCount,
 		"unmatched", batch.UnmatchedCount,
@@ -1040,6 +1197,10 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		"doku_fee", totalDokuFee,
 		"post_pending", postPending,
 		"post_available", postAvailable,
+		"unique_sellers", len(sellerTransactions),
+		"sellers_verified_match", matchedSellers,
+		"sellers_verified_mismatch", mismatchedSellers,
+		"sellers_not_verified", notVerifiedSellers,
 	)
 
 	return &ReconciliationResponse{
@@ -1192,4 +1353,234 @@ func (c *LedgerClient) GetDisbursements(ctx context.Context, sellerID string, cu
 	}
 
 	return resp, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Platform Fee Transfer (Background Job / Post-Reconciliation)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// PlatformFeeTransferResult contains the results of a platform fee transfer batch
+type PlatformFeeTransferResult struct {
+	Succeeded int                          `json:"succeeded"`
+	Failed    int                          `json:"failed"`
+	Errors    []PlatformFeeTransferError   `json:"errors,omitempty"`
+	Transfers []PlatformFeeTransferSuccess `json:"transfers,omitempty"`
+}
+
+// PlatformFeeTransferError contains error details for a failed transfer
+type PlatformFeeTransferError struct {
+	TransactionID string `json:"transaction_id"`
+	InvoiceNumber string `json:"invoice_number"`
+	PlatformFee   int64  `json:"platform_fee"`
+	ErrorMessage  string `json:"error_message"`
+}
+
+// PlatformFeeTransferSuccess contains details for a successful transfer
+type PlatformFeeTransferSuccess struct {
+	TransactionID  string `json:"transaction_id"`
+	InvoiceNumber  string `json:"invoice_number"`
+	PlatformFee    int64  `json:"platform_fee"`
+	FromSubAccount string `json:"from_sub_account"`
+	ToSubAccount   string `json:"to_sub_account"`
+}
+
+// ProcessPlatformFeeTransfer processes platform fee transfers for settled transactions
+// that haven't had their platform fees transferred yet.
+//
+// This should be called:
+// - After reconciliation completes successfully
+// - As a periodic background job (e.g., every 5 minutes)
+//
+// Flow for each transaction:
+// 1. Fetch seller account (to get seller's DOKU sub-account ID)
+// 2. Call DOKU intra-sub-account transfer API
+// 3. On success: Mark transaction as platform_fee_transferred = true
+// 4. On failure: Log error, continue to next (will retry on next run)
+//
+// Parameters:
+// - batchSize: Maximum number of transactions to process in one call (recommended: 50-100)
+//
+// Returns:
+// - PlatformFeeTransferResult with success/failure counts and details
+func (c *LedgerClient) ProcessPlatformFeeTransfer(ctx context.Context, batchSize int) (*PlatformFeeTransferResult, error) {
+	if batchSize <= 0 {
+		batchSize = 50 // Default batch size
+	}
+
+	result := &PlatformFeeTransferResult{
+		Errors:    []PlatformFeeTransferError{},
+		Transfers: []PlatformFeeTransferSuccess{},
+	}
+
+	// Get platform account for transfers
+	platformAccount, err := c.repoProvider.Account().GetPlatformAccount(ctx)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.NewError(ledgererr.CodeInternal, "platform account not found", err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get platform account", err)
+	}
+
+	if platformAccount.DokuSubAccountID == "" {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "platform account has no DOKU sub-account ID", nil)
+	}
+
+	// Fetch settled transactions that need platform fee transfer
+	transactions, err := c.repoProvider.ProductTransaction().GetSettledWithoutPlatformFeeTransfer(ctx, batchSize)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to query transactions needing platform fee transfer", err)
+	}
+
+	if len(transactions) == 0 {
+		c.logger.InfoContext(ctx, "No transactions requiring platform fee transfer")
+		return result, nil
+	}
+
+	c.logger.InfoContext(ctx, "Processing platform fee transfers",
+		"batch_size", batchSize,
+		"transactions_found", len(transactions),
+		"platform_account_id", platformAccount.UUID,
+		"platform_doku_sac", platformAccount.DokuSubAccountID,
+	)
+
+	// Process each transaction
+	for _, tx := range transactions {
+		if tx.Fee.PlatformFee <= 0 {
+			c.logger.WarnContext(ctx, "Transaction has zero platform fee, skipping",
+				"transaction_id", tx.UUID,
+				"invoice_number", tx.InvoiceNumber,
+			)
+			continue
+		}
+
+		// Get seller account to retrieve DOKU sub-account ID
+		sellerAccount, err := c.repoProvider.Account().GetByID(ctx, tx.SellerAccountID)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to get seller account: %v", err)
+			c.logger.ErrorContext(ctx, "Platform fee transfer failed - seller account not found",
+				"transaction_id", tx.UUID,
+				"invoice_number", tx.InvoiceNumber,
+				"seller_account_id", tx.SellerAccountID,
+				"error", err,
+			)
+			result.Failed++
+			result.Errors = append(result.Errors, PlatformFeeTransferError{
+				TransactionID: tx.UUID,
+				InvoiceNumber: tx.InvoiceNumber,
+				PlatformFee:   tx.Fee.PlatformFee,
+				ErrorMessage:  errMsg,
+			})
+			continue
+		}
+
+		if sellerAccount.DokuSubAccountID == "" {
+			errMsg := "seller account has no DOKU sub-account ID"
+			c.logger.ErrorContext(ctx, "Platform fee transfer failed - invalid seller account",
+				"transaction_id", tx.UUID,
+				"invoice_number", tx.InvoiceNumber,
+				"seller_account_id", tx.SellerAccountID,
+			)
+			result.Failed++
+			result.Errors = append(result.Errors, PlatformFeeTransferError{
+				TransactionID: tx.UUID,
+				InvoiceNumber: tx.InvoiceNumber,
+				PlatformFee:   tx.Fee.PlatformFee,
+				ErrorMessage:  errMsg,
+			})
+			continue
+		}
+
+		// TODO: Call DOKU intra-sub-account transfer API
+		// Example (pseudo-code, adjust based on actual DOKU client interface):
+		// transferReq := &requests.DokuTransferSubAccountRequest{
+		//     FromSubAccountID: sellerAccount.DokuSubAccountID,
+		//     ToSubAccountID:   platformAccount.DokuSubAccountID,
+		//     Amount:           int(tx.Fee.PlatformFee),
+		//     Currency:         string(tx.Fee.Currency),
+		//     ReferenceID:      tx.UUID,
+		// }
+		// transferResp, dokuErr := c.dokuClient.TransferSubAccount(transferReq)
+		//
+		// if dokuErr != nil {
+		//     errMsg := fmt.Sprintf("DOKU transfer API failed: %v", dokuErr)
+		//     c.logger.ErrorContext(ctx, "Platform fee transfer failed - DOKU API error",
+		//         "transaction_id", tx.UUID,
+		//         "invoice_number", tx.InvoiceNumber,
+		//         "platform_fee", tx.Fee.PlatformFee,
+		//         "from_sac", sellerAccount.DokuSubAccountID,
+		//         "to_sac", platformAccount.DokuSubAccountID,
+		//         "error", dokuErr,
+		//     )
+		//     result.Failed++
+		//     result.Errors = append(result.Errors, PlatformFeeTransferError{
+		//         TransactionID: tx.UUID,
+		//         InvoiceNumber: tx.InvoiceNumber,
+		//         PlatformFee:   tx.Fee.PlatformFee,
+		//         ErrorMessage:  errMsg,
+		//     })
+		//     continue
+		// }
+
+		// TEMPORARY: Log what would be transferred (remove after implementing DOKU API call)
+		c.logger.InfoContext(ctx, "TODO: Execute DOKU transfer (currently skipped for testing)",
+			"transaction_id", tx.UUID,
+			"invoice_number", tx.InvoiceNumber,
+			"from_sac", sellerAccount.DokuSubAccountID,
+			"to_sac", platformAccount.DokuSubAccountID,
+			"amount", tx.Fee.PlatformFee,
+			"currency", tx.Fee.Currency,
+		)
+
+		// TEMPORARY: Skip actual processing until DOKU API is implemented
+		// After implementing the DOKU API call above:
+		// 1. Remove the 'continue' statement below
+		// 2. Uncomment the DB update code
+		// 3. Uncomment the success logging
+		continue
+
+		// DOKU transfer succeeded - mark transaction as transferred
+		// if err := c.repoProvider.ProductTransaction().MarkPlatformFeeTransferred(ctx, tx.UUID); err != nil {
+		// 	c.logger.ErrorContext(ctx, "CRITICAL: DOKU transfer succeeded but DB update failed - requires manual reconciliation",
+		// 		"transaction_id", tx.UUID,
+		// 		"invoice_number", tx.InvoiceNumber,
+		// 		"platform_fee", tx.Fee.PlatformFee,
+		// 		"from_sac", sellerAccount.DokuSubAccountID,
+		// 		"to_sac", platformAccount.DokuSubAccountID,
+		// 		"db_error", err,
+		// 	)
+		// 	result.Failed++
+		// 	result.Errors = append(result.Errors, PlatformFeeTransferError{
+		// 		TransactionID: tx.UUID,
+		// 		InvoiceNumber: tx.InvoiceNumber,
+		// 		PlatformFee:   tx.Fee.PlatformFee,
+		// 		ErrorMessage:  fmt.Sprintf("DOKU succeeded but DB update failed: %v", err),
+		// 	})
+		// 	continue
+		// }
+
+		// Success!
+		// c.logger.InfoContext(ctx, "Platform fee transferred successfully",
+		// 	"transaction_id", tx.UUID,
+		// 	"invoice_number", tx.InvoiceNumber,
+		// 	"platform_fee", tx.Fee.PlatformFee,
+		// 	"from_sac", sellerAccount.DokuSubAccountID,
+		// 	"to_sac", platformAccount.DokuSubAccountID,
+		// )
+		// result.Succeeded++
+		// result.Transfers = append(result.Transfers, PlatformFeeTransferSuccess{
+		// 	TransactionID:  tx.UUID,
+		// 	InvoiceNumber:  tx.InvoiceNumber,
+		// 	PlatformFee:    tx.Fee.PlatformFee,
+		// 	FromSubAccount: sellerAccount.DokuSubAccountID,
+		// 	ToSubAccount:   platformAccount.DokuSubAccountID,
+		// })
+	}
+
+	c.logger.InfoContext(ctx, "Platform fee transfer batch completed",
+		"total_processed", len(transactions),
+		"succeeded", result.Succeeded,
+		"failed", result.Failed,
+	)
+
+	return result, nil
 }

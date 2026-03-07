@@ -10,7 +10,6 @@ type Tx interface {
 	Account() domain.AccountRepository
 	LedgerEntry() domain.LedgerEntryRepository
 	Journal() domain.JournalRepository
-	ReconciliationLog() domain.ReconciliationLogRepository
 	ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository
 	ProductTransaction() domain.ProductTransactionRepository
 	PaymentRequest() domain.PaymentRequestRepository
@@ -34,10 +33,6 @@ func (p *postgresTx) LedgerEntry() domain.LedgerEntryRepository {
 
 func (p *postgresTx) Journal() domain.JournalRepository {
 	return NewPostgresJournalRepository(p.tx)
-}
-
-func (p *postgresTx) ReconciliationLog() domain.ReconciliationLogRepository {
-	return NewPostgresReconciliationLogRepository(p.tx)
 }
 
 func (p *postgresTx) ProductTransaction() domain.ProductTransactionRepository {

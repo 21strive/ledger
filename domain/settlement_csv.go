@@ -12,7 +12,7 @@ import (
 )
 
 // DokuSettlementCSVRow represents a single row from DOKU settlement CSV
-// CSV Format: No,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER NAME,REPORT CODE,AMOUNT,RECON CODE,FEE,DISCOUNT,PAY TO MERCHANT,PAY OUT DATE,TRANSACTION TYPE,PROMO CODE
+// CSV Format: NO,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER NAME,REPORT CODE,AMOUNT,RECON CODE,FEE,DISCOUNT,PAY TO MERCHANT,PAY OUT DATE,TRANSACTION TYPE,PROMO CODE,SUB ACCOUNT
 type DokuSettlementCSVRow struct {
 	RowNumber          int
 	No                 int
@@ -30,12 +30,27 @@ type DokuSettlementCSVRow struct {
 	PayOutDate         time.Time
 	TransactionType    string
 	PromoCode          string
+	SubAccount         string            // DOKU sub-account ID (SAC-xxxx-xxxx)
 	RawData            map[string]string // Original CSV row data
+}
+
+// DokuSettlementCSVMetadata contains extracted metadata from CSV header rows
+type DokuSettlementCSVMetadata struct {
+	TotalAmountPurchase int64  // Row 1: Total Amount Purchase
+	TotalFee            int64  // Row 2: Total Fee
+	TotalPurchase       int    // Row 3: Total Purchase (transaction count)
+	TotalAmountRefund   int64  // Row 4: Total Amount Refund
+	TotalRefund         int    // Row 5: Total Refund (refund count)
+	TotalSettlement     int64  // Row 6: Total Settlement Amount
+	TotalDiscount       int64  // Row 7: Total Discount
+	TotalTransactions   int    // Row 8: Total Transactions
+	BatchID             string // Row 9: Batch ID (DOKU batch identifier)
 }
 
 // DokuSettlementCSVParser handles parsing DOKU settlement CSV files
 type DokuSettlementCSVParser struct {
 	rows          []*DokuSettlementCSVRow
+	metadata      *DokuSettlementCSVMetadata
 	parseErrors   []error
 	skippedRows   int
 	dateFormat    string
@@ -54,6 +69,7 @@ func NewDokuSettlementCSVParser(dateFormat string, amountDivisor int64) *DokuSet
 	}
 	return &DokuSettlementCSVParser{
 		rows:          make([]*DokuSettlementCSVRow, 0),
+		metadata:      &DokuSettlementCSVMetadata{},
 		parseErrors:   make([]error, 0),
 		dateFormat:    dateFormat,
 		amountDivisor: amountDivisor,
@@ -77,16 +93,43 @@ const (
 	colPayOutDate         = 12
 	colTransactionType    = 13
 	colPromoCode          = 14
+	colSubAccount         = 15
 	minColumnCount        = 12 // Minimum required columns
 )
 
 // Parse reads and parses a DOKU settlement CSV from a reader
+// The CSV format includes:
+// - Lines 1-9: Metadata (Total Amount Purchase, Total Fee, etc.)
+// - Line 10: Blank line
+// - Line 11: Column headers (NO,MERCHANT NAME,...)
+// - Line 12+: Data rows
 func (p *DokuSettlementCSVParser) Parse(reader io.Reader) error {
 	csvReader := csv.NewReader(reader)
 	csvReader.TrimLeadingSpace = true
 	csvReader.FieldsPerRecord = -1 // Allow variable number of fields
 
-	// Read header row
+	// Read and parse metadata header rows (first 9 rows)
+	metadataRows := make([][]string, 9)
+	for i := 0; i < 9; i++ {
+		row, err := csvReader.Read()
+		if err != nil {
+			return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to read metadata row %d: %w", i+1, err))
+		}
+		metadataRows[i] = row
+	}
+
+	// Extract metadata from rows
+	if err := p.parseMetadata(metadataRows); err != nil {
+		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to parse metadata: %w", err))
+	}
+
+	// Skip blank line (row 10)
+	_, err := csvReader.Read()
+	if err != nil {
+		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to skip blank row: %w", err))
+	}
+
+	// Read column header row (row 11)
 	header, err := csvReader.Read()
 	if err != nil {
 		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to read CSV header: %w", err))
@@ -203,6 +246,10 @@ func (p *DokuSettlementCSVParser) parseRow(record []string, rowNumber int, heade
 	if len(record) > colPromoCode {
 		promoCode = strings.TrimSpace(record[colPromoCode])
 	}
+	subAccount := ""
+	if len(record) > colSubAccount {
+		subAccount = strings.TrimSpace(record[colSubAccount])
+	}
 
 	return &DokuSettlementCSVRow{
 		RowNumber:          rowNumber,
@@ -221,6 +268,7 @@ func (p *DokuSettlementCSVParser) parseRow(record []string, rowNumber int, heade
 		PayOutDate:         payoutDate,
 		TransactionType:    transactionType,
 		PromoCode:          promoCode,
+		SubAccount:         subAccount,
 		RawData:            rawData,
 	}, nil
 }
@@ -268,6 +316,109 @@ func (p *DokuSettlementCSVParser) tryParseDateAlternatives(s string) (time.Time,
 	return time.Time{}, fmt.Errorf("could not parse date: %s", s)
 }
 
+// parseMetadata extracts metadata from the first 9 rows of the CSV
+// Format: "Label_,Value"
+// Row 1: Total Amount Purchase_,504440
+// Row 2: Total Fee_,4995
+// Row 3: Total Purchase_,1
+// Row 4: Total Amount Refund_,0
+// Row 5: Total Refund_,0
+// Row 6: Total Settlement Amount_,499445
+// Row 7: Total Discount_,0
+// Row 8: Total Transactions_,1
+// Row 9: Batch ID_,B-BSN-0203-1761932477260-SBS-8298-20251109155312120-20260305210108875
+func (p *DokuSettlementCSVParser) parseMetadata(rows [][]string) error {
+	if len(rows) != 9 {
+		return fmt.Errorf("expected 9 metadata rows, got %d", len(rows))
+	}
+
+	// Helper to extract value from "Label_,Value" format
+	extractValue := func(row []string) string {
+		if len(row) >= 2 {
+			return strings.TrimSpace(row[1])
+		}
+		return ""
+	}
+
+	// Parse each metadata row
+	var err error
+
+	// Row 1: Total Amount Purchase
+	if val := extractValue(rows[0]); val != "" {
+		p.metadata.TotalAmountPurchase, err = p.parseAmount(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Amount Purchase: %w", err)
+		}
+	}
+
+	// Row 2: Total Fee
+	if val := extractValue(rows[1]); val != "" {
+		p.metadata.TotalFee, err = p.parseAmount(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Fee: %w", err)
+		}
+	}
+
+	// Row 3: Total Purchase
+	if val := extractValue(rows[2]); val != "" {
+		count, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Purchase: %w", err)
+		}
+		p.metadata.TotalPurchase = count
+	}
+
+	// Row 4: Total Amount Refund
+	if val := extractValue(rows[3]); val != "" {
+		p.metadata.TotalAmountRefund, err = p.parseAmount(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Amount Refund: %w", err)
+		}
+	}
+
+	// Row 5: Total Refund
+	if val := extractValue(rows[4]); val != "" {
+		count, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Refund: %w", err)
+		}
+		p.metadata.TotalRefund = count
+	}
+
+	// Row 6: Total Settlement Amount
+	if val := extractValue(rows[5]); val != "" {
+		p.metadata.TotalSettlement, err = p.parseAmount(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Settlement Amount: %w", err)
+		}
+	}
+
+	// Row 7: Total Discount
+	if val := extractValue(rows[6]); val != "" {
+		p.metadata.TotalDiscount, err = p.parseAmount(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Discount: %w", err)
+		}
+	}
+
+	// Row 8: Total Transactions
+	if val := extractValue(rows[7]); val != "" {
+		count, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid Total Transactions: %w", err)
+		}
+		p.metadata.TotalTransactions = count
+	}
+
+	// Row 9: Batch ID (most important - DOKU's unique batch identifier)
+	p.metadata.BatchID = extractValue(rows[8])
+	if p.metadata.BatchID == "" {
+		return fmt.Errorf("Batch ID is required but not found in metadata")
+	}
+
+	return nil
+}
+
 // GetRows returns all successfully parsed rows
 func (p *DokuSettlementCSVParser) GetRows() []*DokuSettlementCSVRow {
 	return p.rows
@@ -276,6 +427,11 @@ func (p *DokuSettlementCSVParser) GetRows() []*DokuSettlementCSVRow {
 // GetParseErrors returns all parsing errors
 func (p *DokuSettlementCSVParser) GetParseErrors() []error {
 	return p.parseErrors
+}
+
+// GetMetadata returns the parsed CSV metadata (totals and batch ID)
+func (p *DokuSettlementCSVParser) GetMetadata() *DokuSettlementCSVMetadata {
+	return p.metadata
 }
 
 // GetSkippedRows returns the count of skipped rows
@@ -308,6 +464,7 @@ func (row *DokuSettlementCSVRow) ToSettlementItem(settlementBatchID string) (*Se
 	return NewSettlementItem(
 		settlementBatchID,
 		row.InvoiceNumber,
+		row.SubAccount,
 		row.Amount,
 		row.PayToMerchant,
 		row.Fee,

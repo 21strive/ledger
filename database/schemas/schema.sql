@@ -180,6 +180,10 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     -- When user paid (DOKU webhook)
     settled_at TIMESTAMP,
     -- When appeared in settlement CSV
+    platform_fee_transferred BOOLEAN NOT NULL DEFAULT false,
+    -- Whether platform fee has been transferred to platform sub-account
+    platform_fee_transferred_at TIMESTAMP,
+    -- When platform fee was successfully transferred via DOKU API
     -- Product details (what was purchased)
     metadata JSONB -- Buyer name, product title, resolution, license type, etc.
 );
@@ -197,6 +201,12 @@ CREATE INDEX idx_product_transactions_status ON product_transactions(status);
 CREATE INDEX idx_product_transactions_fee_model ON product_transactions(fee_model);
 
 CREATE INDEX idx_product_transactions_status_settled ON product_transactions(status, settled_at);
+
+-- Index for platform fee transfer retry job (GetSettledWithoutPlatformFeeTransfer)
+CREATE INDEX idx_product_transactions_pending_transfer ON product_transactions(status, platform_fee_transferred, settled_at)
+WHERE
+    status = 'SETTLED'
+    AND platform_fee_transferred = false;
 
 -- payment_requests: DOKU PAYMENT GATEWAY INTEGRATION
 -- Purpose: Tracks DOKU payment lifecycle for each transaction
@@ -381,6 +391,7 @@ CREATE TABLE IF NOT EXISTS settlement_batches (
     account_uuid VARCHAR(255) NOT NULL,
     report_file_name VARCHAR(255) NOT NULL,
     settlement_date DATE NOT NULL,
+    batch_id VARCHAR(255),
     gross_amount BIGINT NOT NULL DEFAULT 0,
     net_amount BIGINT NOT NULL DEFAULT 0,
     doku_fee BIGINT NOT NULL DEFAULT 0,
@@ -413,7 +424,9 @@ CREATE TABLE IF NOT EXISTS settlement_items (
     randid VARCHAR(255) NOT NULL UNIQUE,
     settlement_batch_uuid VARCHAR(255) NOT NULL,
     product_transaction_uuid VARCHAR(255),
+    seller_account_id VARCHAR(255),
     invoice_number VARCHAR(100),
+    sub_account VARCHAR(100),
     transaction_amount BIGINT NOT NULL,
     pay_to_merchant BIGINT NOT NULL,
     allocated_fee BIGINT NOT NULL,
@@ -431,6 +444,8 @@ CREATE TABLE IF NOT EXISTS settlement_items (
 CREATE INDEX idx_settlement_items_batch_id ON settlement_items(settlement_batch_uuid);
 
 CREATE INDEX idx_settlement_items_product_tx_id ON settlement_items(product_transaction_uuid);
+
+CREATE INDEX idx_settlement_items_seller_account ON settlement_items(seller_account_id);
 
 CREATE INDEX idx_settlement_items_invoice ON settlement_items(invoice_number);
 
@@ -465,7 +480,7 @@ CREATE TABLE IF NOT EXISTS reconciliation_discrepancies (
     updated_at TIMESTAMP NOT NULL,
     FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid),
     FOREIGN KEY (settlement_batch_uuid) REFERENCES settlement_batches(uuid),
-    UNIQUE (settlement_batch_uuid) -- One discrepancy per batch
+    UNIQUE (account_uuid, settlement_batch_uuid) -- One discrepancy per seller per batch
 );
 
 CREATE INDEX idx_reconciliation_discrepancies_account_id ON reconciliation_discrepancies(account_uuid);
@@ -473,28 +488,6 @@ CREATE INDEX idx_reconciliation_discrepancies_account_id ON reconciliation_discr
 CREATE INDEX idx_reconciliation_discrepancies_detected ON reconciliation_discrepancies(detected_at DESC);
 
 CREATE INDEX idx_reconciliation_discrepancies_batch ON reconciliation_discrepancies(settlement_batch_uuid);
-
--- Reconciliation logs to track all reconciliation attempts and outcomes
-CREATE TABLE IF NOT EXISTS reconciliation_logs (
-    uuid VARCHAR(255) PRIMARY KEY,
-    randid VARCHAR(255) NOT NULL UNIQUE,
-    account_uuid VARCHAR(255) NOT NULL,
-    previous_pending BIGINT NOT NULL,
-    previous_available BIGINT NOT NULL,
-    current_pending BIGINT NOT NULL,
-    current_available BIGINT NOT NULL,
-    pending_diff BIGINT NOT NULL,
-    available_diff BIGINT NOT NULL,
-    is_settlement BOOLEAN DEFAULT FALSE,
-    settled_amount BIGINT DEFAULT 0,
-    fee_amount BIGINT DEFAULT 0,
-    notes TEXT,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid)
-);
-
-CREATE INDEX idx_reconciliation_logs_account_created ON reconciliation_logs(account_uuid, created_at DESC);
 
 -- Ledger verifications for KYC (Know Your Customer)
 -- Purpose: Track seller identity verification using Indonesian KTP (ID card)

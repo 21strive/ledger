@@ -26,9 +26,10 @@ type SettlementBatch struct {
 	LedgerUUID       string
 	ReportFileName   string
 	SettlementDate   time.Time
-	GrossAmount      int64 // Total amount before DOKU fees
-	NetAmount        int64 // Amount after DOKU fees (PAY TO MERCHANT total)
-	DokuFee          int64 // Total DOKU fees from all transactions
+	BatchID          string // DOKU Batch ID from CSV metadata (e.g., B-BSN-0203-1761932477260-SBS-8298-20251109155312120-20260305210108875)
+	GrossAmount      int64  // Total amount before DOKU fees
+	NetAmount        int64  // Amount after DOKU fees (PAY TO MERCHANT total)
+	DokuFee          int64  // Total DOKU fees from all transactions
 	Currency         Currency
 	UploadedBy       string
 	UploadedAt       time.Time
