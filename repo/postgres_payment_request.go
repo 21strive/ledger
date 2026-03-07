@@ -97,7 +97,7 @@ func (r *PostgresPaymentRequestRepository) Save(ctx context.Context, pr *domain.
 		toNullString(pr.FailureReason),
 		pr.CreatedAt,
 		pr.UpdatedAt,
-		pr.CompletedAt,
+		toNullTime(pr.CompletedAt),
 		pr.ExpiresAt,
 	)
 	if err != nil {
@@ -127,7 +127,7 @@ func (r *PostgresPaymentRequestRepository) Update(ctx context.Context, pr *domai
 		pr.Status,
 		toNullString(pr.FailureReason),
 		pr.UpdatedAt,
-		pr.CompletedAt,
+		toNullTime(pr.CompletedAt),
 		pr.UUID,
 	)
 	if err != nil {
@@ -251,12 +251,4 @@ func (r *PostgresPaymentRequestRepository) scanRow(rows *sql.Rows) (*domain.Paym
 	pr.CreatedAt = row.CreatedAt
 	pr.UpdatedAt = row.UpdatedAt
 	return pr, nil
-}
-
-// toNullString converts a string to sql.NullString
-func toNullString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: s, Valid: true}
 }

@@ -112,7 +112,7 @@ func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *dom
 		batch.Currency,
 		batch.UploadedBy,
 		batch.UploadedAt,
-		batch.ProcessedAt,
+		toNullTime(batch.ProcessedAt),
 		batch.ProcessingStatus,
 		batch.MatchedCount,
 		batch.UnmatchedCount,
@@ -135,7 +135,7 @@ func (r *PostgresSettlementBatchRepository) UpdateStatus(ctx context.Context, id
 		WHERE uuid = $1
 	`
 
-	result, err := r.db.ExecContext(ctx, query, id, status, processedAt, failureReason)
+	result, err := r.db.ExecContext(ctx, query, id, status, toNullTime(processedAt), failureReason)
 	if err != nil {
 		return ErrFailedUpdateSQL.WithError(err)
 	}

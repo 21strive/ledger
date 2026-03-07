@@ -320,10 +320,3 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 
 	return disbursements, nil
 }
-
-func toNullTime(t *time.Time) sql.NullTime {
-	if t == nil {
-		return sql.NullTime{Valid: false}
-	}
-	return sql.NullTime{Time: *t, Valid: true}
-}

@@ -180,6 +180,15 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		return ErrFailedInsertSQL.WithError(err)
 	}
 
+	// Convert *time.Time to sql.NullTime to properly handle NULL values
+	var completedAt, settledAt sql.NullTime
+	if tx.CompletedAt != nil {
+		completedAt = sql.NullTime{Time: *tx.CompletedAt, Valid: true}
+	}
+	if tx.SettledAt != nil {
+		settledAt = sql.NullTime{Time: *tx.SettledAt, Valid: true}
+	}
+
 	query := `
 		INSERT INTO product_transactions (
 			uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
@@ -216,8 +225,8 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.Status,
 		tx.CreatedAt,
 		tx.UpdatedAt,
-		tx.CompletedAt,
-		tx.SettledAt,
+		completedAt, // Use sql.NullTime instead of *time.Time
+		settledAt,   // Use sql.NullTime instead of *time.Time
 		string(metadataJSON),
 	)
 	if err != nil {
