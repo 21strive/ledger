@@ -189,6 +189,13 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		settledAt = sql.NullTime{Time: *tx.SettledAt, Valid: true}
 	}
 
+	slog.InfoContext(ctx, "DEBUG: SQL NULL conversion",
+		"completed_at_valid", completedAt.Valid,
+		"completed_at_time", completedAt.Time,
+		"settled_at_valid", settledAt.Valid,
+		"settled_at_time", settledAt.Time,
+	)
+
 	query := `
 		INSERT INTO product_transactions (
 			uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
