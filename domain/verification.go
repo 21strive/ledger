@@ -99,6 +99,10 @@ func NewVerification(
 		Metadata:       make(map[string]any),
 	}
 	redifu.InitRecord(v)
+
+	// CRITICAL FIX: redifu.InitRecord initializes pointer fields to zero time instead of nil
+	v.ApprovedAt = nil
+
 	return v, nil
 }
 

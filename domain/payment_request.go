@@ -65,6 +65,10 @@ func NewPaymentRequest(
 		ExpiresAt:              expiresAt,
 	}
 	redifu.InitRecord(pr)
+
+	// CRITICAL FIX: redifu.InitRecord initializes pointer fields to zero time instead of nil
+	pr.CompletedAt = nil
+
 	return pr
 }
 

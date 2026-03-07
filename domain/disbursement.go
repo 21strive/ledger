@@ -96,6 +96,10 @@ func NewDisbursement(
 		Description: description,
 	}
 	redifu.InitRecord(d)
+
+	// CRITICAL FIX: redifu.InitRecord initializes pointer fields to zero time instead of nil
+	d.ProcessedAt = nil
+
 	return d, nil
 }
 
@@ -129,6 +133,10 @@ func NewDisbursementWithID(
 		Description: description,
 	}
 	redifu.InitRecord(d)
+
+	// CRITICAL FIX: redifu.InitRecord initializes pointer fields to zero time instead of nil
+	d.ProcessedAt = nil
+
 	d.UUID = id
 	return d, nil
 }

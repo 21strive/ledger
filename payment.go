@@ -129,12 +129,6 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 		req.Metadata,
 	)
 
-	// DEBUG: Check if timestamps are nil immediately after creation
-	c.logger.InfoContext(ctx, "DEBUG: ProductTransaction created",
-		"completed_at_is_nil", productTx.CompletedAt == nil,
-		"settled_at_is_nil", productTx.SettledAt == nil,
-	)
-
 	// Call DOKU API to create payment
 	dokuResp, dokuErr := c.dokuClient.AcceptPayment(&dokuRequests.DokuCreatePaymentRequest{
 		Amount:         feeBreakdown.TotalCharged,
@@ -194,14 +188,6 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 
 	// Save both ProductTransaction and PaymentRequest in a transaction
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
-		// DEBUG: Check timestamps right before save
-		c.logger.InfoContext(ctx, "DEBUG: Before Save",
-			"completed_at_is_nil", productTx.CompletedAt == nil,
-			"settled_at_is_nil", productTx.SettledAt == nil,
-			"completed_at_value", productTx.CompletedAt,
-			"settled_at_value", productTx.SettledAt,
-		)
-
 		// Save ProductTransaction
 		if err := tx.ProductTransaction().Save(ctx, productTx); err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save product transaction", err)

@@ -87,5 +87,9 @@ func NewReconciliationDiscrepancy(
 		DetectedAt:           time.Now(),
 	}
 	redifu.InitRecord(discrepancy)
+
+	// CRITICAL FIX: redifu.InitRecord initializes pointer fields to zero time instead of nil
+	discrepancy.ResolvedAt = nil
+
 	return discrepancy
 }

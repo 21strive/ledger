@@ -136,6 +136,11 @@ func NewProductTransaction(
 
 	redifu.InitRecord(pt)
 
+	// CRITICAL FIX: redifu.InitRecord initializes pointer fields to zero time instead of nil
+	// Explicitly set timestamp fields to nil to prevent "0001-01-01" in database
+	pt.CompletedAt = nil
+	pt.SettledAt = nil
+
 	return pt
 }
 

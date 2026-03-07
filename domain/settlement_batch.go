@@ -83,6 +83,10 @@ func NewSettlementBatch(
 		Metadata:         make(map[string]any),
 	}
 	redifu.InitRecord(sb)
+
+	// CRITICAL FIX: redifu.InitRecord initializes pointer fields to zero time instead of nil
+	sb.ProcessedAt = nil
+
 	return sb, nil
 }
 
