@@ -31,11 +31,49 @@ CREATE UNIQUE INDEX idx_accounts_unique_payment_gateway ON ledger_accounts(owner
 WHERE
     owner_type = 'PAYMENT_GATEWAY';
 
+-- Journals: Represents atomic accounting events
+-- Each journal groups related ledger_entries into a single business event
+-- Examples: payment success, settlement batch, disbursement, reconciliation
+CREATE TABLE journals (
+    uuid VARCHAR(255) PRIMARY KEY,
+    randid VARCHAR(255) NOT NULL UNIQUE,
+    -- Type of financial event
+    event_type VARCHAR(50) NOT NULL CHECK (
+        event_type IN (
+            'PAYMENT_SUCCESS',
+            'SETTLEMENT',
+            'DISBURSEMENT',
+            'RECONCILIATION',
+            'MANUAL_ADJUSTMENT'
+        )
+    ),
+    -- What business entity triggered this journal
+    source_type VARCHAR(50) NOT NULL CHECK (
+        source_type IN (
+            'PRODUCT_TRANSACTION',
+            'SETTLEMENT_BATCH',
+            'DISBURSEMENT',
+            'MANUAL_ADJUSTMENT'
+        )
+    ),
+    source_id VARCHAR(255) NOT NULL,
+    -- Additional context about the event
+    metadata JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_journals_source ON journals(source_type, source_id);
+
+CREATE INDEX idx_journals_event_type ON journals(event_type);
+
+CREATE INDEX idx_journals_created ON journals(created_at DESC);
+
 CREATE TABLE ledger_entries (
     uuid VARCHAR(255) PRIMARY KEY,
     randid VARCHAR(255) NOT NULL UNIQUE,
-    -- Double-entry grouping
-    journal_uuid VARCHAR(255) NOT NULL,
+    -- Double-entry grouping - links to atomic accounting event
+    journal_uuid VARCHAR(255) NOT NULL REFERENCES journals(uuid),
     -- Account affected
     account_uuid VARCHAR(255) NOT NULL REFERENCES ledger_accounts(uuid),
     -- Money movement
@@ -51,6 +89,8 @@ CREATE TABLE ledger_entries (
             'PLATFORM_COMMISSION',
             'PROCESSOR_FEE',
             'DISBURSEMENT',
+            'SETTLEMENT_CLEAR',
+            'SETTLEMENT_NET',
             'SETTLEMENT',
             'RECONCILIATION'
         )
@@ -141,10 +181,6 @@ CREATE TABLE IF NOT EXISTS product_transactions (
 CREATE INDEX idx_product_transactions_buyer ON product_transactions(buyer_account_id, created_at DESC);
 
 CREATE INDEX idx_product_transactions_seller ON product_transactions(seller_account_id, created_at DESC);
-
--- Index for cursor-based pagination using RandId (infinite scroll pattern)
--- Supports queries with created_at ordering and randid as cursor
-CREATE INDEX idx_product_transactions_seller_cursor ON product_transactions(seller_account_id, created_at DESC, randid DESC);
 
 CREATE INDEX idx_product_transactions_product ON product_transactions(product_id);
 

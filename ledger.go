@@ -543,11 +543,28 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		_ = disbursement.MarkProcessing(dokuResp.Payout.InvoiceNumber)
 	}
 
-	// Debit entry: -amount AVAILABLE
-	debitEntry := domain.NewDisbursementEntry(disbursementID, account.UUID, req.Amount)
+	// Create journal for DISBURSEMENT event
+	disbursementJournal := domain.NewJournal(
+		domain.EventTypeDisbursement,
+		domain.SourceTypeDisbursement,
+		disbursementID,
+		map[string]any{
+			"amount":       req.Amount,
+			"bank_code":    req.BankCode,
+			"doku_status":  dokuStatus,
+			"doku_invoice": dokuResp.Payout.InvoiceNumber,
+		},
+	)
 
-	// Persist disbursement record + ledger entry atomically
+	// Debit entry: -amount AVAILABLE
+	debitEntry := domain.NewDisbursementEntry(disbursementJournal.UUID, disbursementID, account.UUID, req.Amount)
+
+	// Persist disbursement record + journal + ledger entry atomically
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		// Save journal first
+		if err := tx.Journal().Save(ctx, disbursementJournal); err != nil {
+			return err
+		}
 		if err := tx.Disbursement().Save(ctx, disbursement); err != nil {
 			return err
 		}
@@ -819,6 +836,21 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 
 	now := time.Now()
 
+	// Create journal for SETTLEMENT event
+	settlementJournal := domain.NewJournal(
+		domain.EventTypeSettlement,
+		domain.SourceTypeSettlementBatch,
+		batch.UUID,
+		map[string]any{
+			"report_file_name":      req.ReportFileName,
+			"matched_count":         batch.MatchedCount,
+			"unmatched_count":       batch.UnmatchedCount,
+			"total_seller_amount":   totalSettledSellerAmount,
+			"total_platform_amount": totalSettledPlatformAmount,
+			"total_doku_fee":        totalDokuFee,
+		},
+	)
+
 	// TODO: settlement entry should be for each product transaction
 	// Build settlement ledger entries
 	allSettlementEntries := make([]*domain.LedgerEntry, 0)
@@ -826,21 +858,21 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	// Seller: PENDING → AVAILABLE
 	if totalSettledSellerAmount > 0 {
 		allSettlementEntries = append(allSettlementEntries,
-			domain.NewSettlementEntriesForAccount(batch.UUID, account.UUID, totalSettledSellerAmount)...,
+			domain.NewSettlementEntriesForAccount(settlementJournal.UUID, batch.UUID, account.UUID, totalSettledSellerAmount)...,
 		)
 	}
 
 	// Platform: PENDING → AVAILABLE
 	if totalSettledPlatformAmount > 0 && platformAccount != nil {
 		allSettlementEntries = append(allSettlementEntries,
-			domain.NewSettlementEntriesForAccount(batch.UUID, platformAccount.UUID, totalSettledPlatformAmount)...,
+			domain.NewSettlementEntriesForAccount(settlementJournal.UUID, batch.UUID, platformAccount.UUID, totalSettledPlatformAmount)...,
 		)
 	}
 
 	// DOKU expense: clear PENDING (no AVAILABLE credit)
 	if totalDokuFee > 0 && dokuAccount != nil {
 		allSettlementEntries = append(allSettlementEntries,
-			domain.NewDokuFeeSettlementEntry(batch.UUID, dokuAccount.UUID, totalDokuFee),
+			domain.NewDokuFeeSettlementEntry(settlementJournal.UUID, batch.UUID, dokuAccount.UUID, totalDokuFee),
 		)
 	}
 
@@ -855,6 +887,11 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 
 	// Persist everything atomically
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		// Save settlement journal first
+		if err := tx.Journal().Save(ctx, settlementJournal); err != nil {
+			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement journal", err)
+		}
+
 		if err := tx.SettlementBatch().Save(ctx, batch); err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement batch", err)
 		}

@@ -280,7 +280,21 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				continue
 			}
 
+			// Create journal for payment success
+			journal := domain.NewJournal(
+				domain.EventTypePaymentSuccess,
+				domain.SourceTypeProductTransaction,
+				productTx.UUID,
+				map[string]any{
+					"invoice_number": invoiceNum,
+					"seller_price":   productTx.Fee.SellerPrice,
+					"platform_fee":   productTx.Fee.PlatformFee,
+					"doku_fee":       productTx.Fee.DokuFee,
+				},
+			)
+
 			ledgerEntries := domain.NewPaymentEntries(
+				journal.UUID,
 				productTx.UUID,
 				productTx.SellerAccountID,
 				productTx.Fee.SellerPrice,
@@ -291,6 +305,13 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			)
 
 			productTx.MarkCompleted()
+
+			// Save journal first
+			if err := tx.Journal().Save(context.Background(), journal); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to save journal", "error", err)
+				return err
+			}
+
 			if err := tx.ProductTransaction().Save(context.Background(), productTx); err != nil {
 				c.logger.ErrorContext(context.Background(), "Failed to save product transaction", "error", err)
 				return err
@@ -339,8 +360,21 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			}
 
 			// SETTLED transactions need BOTH payment entries AND settlement entries:
-			// 1. Payment entries (add to PENDING when user paid)
+			// 1. Create payment journal and entries (add to PENDING when user paid)
+			paymentJournal := domain.NewJournal(
+				domain.EventTypePaymentSuccess,
+				domain.SourceTypeProductTransaction,
+				productTx.UUID,
+				map[string]any{
+					"invoice_number": invoiceNum,
+					"seller_price":   productTx.Fee.SellerPrice,
+					"platform_fee":   productTx.Fee.PlatformFee,
+					"doku_fee":       productTx.Fee.DokuFee,
+				},
+			)
+
 			paymentEntries := domain.NewPaymentEntries(
+				paymentJournal.UUID,
 				productTx.UUID,
 				productTx.SellerAccountID,
 				productTx.Fee.SellerPrice,
@@ -350,9 +384,19 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				productTx.Fee.DokuFee,
 			)
 
-			// 2. Settlement entries (move from PENDING to AVAILABLE)
+			// 2. Create settlement journal and entries (move from PENDING to AVAILABLE)
 			batchID := uuid.New().String()
+			settlementJournal := domain.NewJournal(
+				domain.EventTypeSettlement,
+				domain.SourceTypeSettlementBatch,
+				batchID,
+				map[string]any{
+					"invoice_number": invoiceNum,
+				},
+			)
+
 			sellerEntry := domain.NewSettlementEntriesForAccount(
+				settlementJournal.UUID,
 				batchID,
 				sellerAccount.Record.UUID,
 				feeBreakdown.SellerPrice,
@@ -360,6 +404,7 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 
 			// Platform Fee Entry
 			platformEntry := domain.NewSettlementEntriesForAccount(
+				settlementJournal.UUID,
 				batchID,
 				platformAccount.Record.UUID,
 				feeBreakdown.PlatformFee,
@@ -367,10 +412,21 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 
 			// DOKU Fee Entry
 			dokuEntry := domain.NewDokuFeeSettlementEntry(
+				settlementJournal.UUID,
 				batchID,
 				dokuAccount.Record.UUID,
 				feeBreakdown.DokuFee,
 			)
+
+			// Save journals first
+			if err := tx.Journal().Save(context.Background(), paymentJournal); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to save payment journal", "error", err)
+				return err
+			}
+			if err := tx.Journal().Save(context.Background(), settlementJournal); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to save settlement journal", "error", err)
+				return err
+			}
 
 			// Combine all ledger entries: payment + settlement
 			settlementEntries := append(sellerEntry, platformEntry...)
@@ -427,6 +483,24 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				return err
 			}
 
+			// Create journal for disbursement
+			disbursementJournal := domain.NewJournal(
+				domain.EventTypeDisbursement,
+				domain.SourceTypeDisbursement,
+				referenceID, // Use reference_id as source_id for idempotency
+				map[string]any{
+					"amount":      amount,
+					"bank_code":   bankAccount.BankCode,
+					"description": description,
+				},
+			)
+
+			// Save journal first
+			if err := tx.Journal().Save(context.Background(), disbursementJournal); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to save disbursement journal", "error", err)
+				return err
+			}
+
 			// Save disbursement
 			if err := tx.Disbursement().Save(context.Background(), disbursement); err != nil {
 				c.logger.ErrorContext(context.Background(), "Failed to save disbursement", "error", err)
@@ -436,7 +510,8 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			// Create ledger entry for withdrawal (debits available balance)
 			// Use reference ID as source_id for idempotency checking
 			withdrawalEntry := domain.NewDisbursementEntry(
-				referenceID, // Use reference_id instead of disbursement UUID
+				disbursementJournal.UUID,
+				referenceID, // Use reference_id as source_id
 				accountID,
 				amount,
 			)

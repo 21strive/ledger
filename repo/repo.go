@@ -32,6 +32,10 @@ func (p *RepositoryProvider) LedgerEntry() domain.LedgerEntryRepository {
 	return NewPostgresLedgerEntryRepository(p.db)
 }
 
+func (p *RepositoryProvider) Journal() domain.JournalRepository {
+	return NewPostgresJournalRepository(p.db)
+}
+
 func (p *RepositoryProvider) ReconciliationLog() domain.ReconciliationLogRepository {
 	return NewPostgresReconciliationLogRepository(p.db)
 }

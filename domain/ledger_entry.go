@@ -4,8 +4,6 @@ import (
 	"github.com/21strive/redifu"
 
 	"context"
-
-	"github.com/google/uuid"
 )
 
 // BalanceBucket represents which balance pool an entry affects.
@@ -27,7 +25,9 @@ const (
 	EntryTypePlatformCommission EntryType = "PLATFORM_COMMISSION"
 	EntryTypeProcessorFee       EntryType = "PROCESSOR_FEE"
 	EntryTypeDisbursement       EntryType = "DISBURSEMENT"
-	EntryTypeSettlement         EntryType = "SETTLEMENT"
+	EntryTypeSettlementClear    EntryType = "SETTLEMENT_CLEAR" // Clear pending balance
+	EntryTypeSettlementNet      EntryType = "SETTLEMENT_NET"   // Add net to available balance
+	EntryTypeSettlement         EntryType = "SETTLEMENT"       // Generic settlement
 	EntryTypeReconciliation     EntryType = "RECONCILIATION"
 )
 
@@ -112,7 +112,9 @@ type LedgerEntryRepository interface {
 //	doku account     +dokuFee       PENDING  PAYMENT
 //
 // productTransactionID is used as the reference_id for all three entries.
+// journalUUID groups these entries as part of a single PAYMENT_SUCCESS event.
 func NewPaymentEntries(
+	journalUUID string,
 	productTransactionID string,
 	sellerAccountID string,
 	sellerAmount int64,
@@ -121,10 +123,8 @@ func NewPaymentEntries(
 	dokuAccountID string,
 	dokuFee int64,
 ) []*LedgerEntry {
-	journalID := uuid.New().String()
-
 	sellerEntry := &LedgerEntry{
-		JournalUUID:   journalID,
+		JournalUUID:   journalUUID,
 		AccountUUID:   sellerAccountID,
 		Amount:        sellerAmount,
 		BalanceBucket: BalanceBucketPending,
@@ -135,7 +135,7 @@ func NewPaymentEntries(
 	redifu.InitRecord(sellerEntry)
 
 	platformEntry := &LedgerEntry{
-		JournalUUID:   journalID,
+		JournalUUID:   journalUUID,
 		AccountUUID:   platformAccountID,
 		Amount:        platformFee,
 		BalanceBucket: BalanceBucketPending,
@@ -146,7 +146,7 @@ func NewPaymentEntries(
 	redifu.InitRecord(platformEntry)
 
 	dokuEntry := &LedgerEntry{
-		JournalUUID:   journalID,
+		JournalUUID:   journalUUID,
 		AccountUUID:   dokuAccountID,
 		Amount:        dokuFee,
 		BalanceBucket: BalanceBucketPending,
@@ -166,31 +166,32 @@ func NewPaymentEntries(
 //	account +amount  AVAILABLE  SETTLEMENT   (credit available)
 //
 // settlementBatchID is used as the reference_id.
+// journalUUID groups these entries as part of a single SETTLEMENT event.
 func NewSettlementEntriesForAccount(
+	journalUUID string,
 	settlementBatchID string,
 	accountID string,
 	amount int64,
 ) []*LedgerEntry {
-	journalID := uuid.New().String()
 	// TODO: VALIDATE ALL THE LEDGER ENTRY
 
 	pendingEntry := &LedgerEntry{
-		JournalUUID:   journalID,
+		JournalUUID:   journalUUID,
 		AccountUUID:   accountID,
 		Amount:        -amount,
 		BalanceBucket: BalanceBucketPending,
-		EntryType:     EntryTypeSettlement,
+		EntryType:     EntryTypeSettlementClear,
 		SourceType:    SourceTypeSettlementBatch,
 		SourceID:      settlementBatchID,
 	}
 	redifu.InitRecord(pendingEntry)
 
 	availableEntry := &LedgerEntry{
-		JournalUUID:   journalID,
+		JournalUUID:   journalUUID,
 		AccountUUID:   accountID,
 		Amount:        amount,
 		BalanceBucket: BalanceBucketAvailable,
-		EntryType:     EntryTypeSettlement,
+		EntryType:     EntryTypeSettlementNet,
 		SourceType:    SourceTypeSettlementBatch,
 		SourceID:      settlementBatchID,
 	}
@@ -205,13 +206,15 @@ func NewSettlementEntriesForAccount(
 //	doku account  -dokuFee  PENDING  SETTLEMENT_FEE_CLEAR
 //
 // There is intentionally no AVAILABLE credit — DOKU keeps the fee.
+// journalUUID groups this entry with other settlement entries.
 func NewDokuFeeSettlementEntry(
+	journalUUID string,
 	settlementBatchID string,
 	dokuAccountID string,
 	dokuFee int64,
 ) *LedgerEntry {
 	entry := &LedgerEntry{
-		JournalUUID:   uuid.New().String(),
+		JournalUUID:   journalUUID,
 		AccountUUID:   dokuAccountID,
 		Amount:        -dokuFee,
 		BalanceBucket: BalanceBucketPending,
@@ -227,13 +230,16 @@ func NewDokuFeeSettlementEntry(
 // (Optional Phase — Seller Withdrawal).
 //
 //	seller account  -amount  AVAILABLE  DISBURSEMENT
+//
+// journalUUID groups this entry as part of a DISBURSEMENT event.
 func NewDisbursementEntry(
+	journalUUID string,
 	disbursementID string,
 	accountID string,
 	amount int64,
 ) *LedgerEntry {
 	entry := &LedgerEntry{
-		JournalUUID:   uuid.New().String(),
+		JournalUUID:   journalUUID,
 		AccountUUID:   accountID,
 		Amount:        -amount,
 		BalanceBucket: BalanceBucketAvailable,

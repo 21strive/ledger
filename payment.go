@@ -281,8 +281,22 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to get payment gateway account", err)
 	}
 
-	// 5. Generate ledger entries (PENDING credit to seller, platform, and doku)
+	// 5. Create journal for PAYMENT_SUCCESS event
+	journal := domain.NewJournal(
+		domain.EventTypePaymentSuccess,
+		domain.SourceTypeProductTransaction,
+		productTx.UUID,
+		map[string]any{
+			"invoice_number": invoiceNumber,
+			"seller_price":   productTx.Fee.SellerPrice,
+			"platform_fee":   productTx.Fee.PlatformFee,
+			"doku_fee":       productTx.Fee.DokuFee,
+		},
+	)
+
+	// 6. Generate ledger entries (PENDING credit to seller, platform, and doku)
 	ledgerEntries := domain.NewPaymentEntries(
+		journal.UUID,
 		productTx.UUID,
 		productTx.SellerAccountID,
 		productTx.Fee.SellerPrice,
@@ -292,8 +306,13 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 		productTx.Fee.DokuFee,
 	)
 
-	// 6. Persist everything in single transaction
+	// 7. Persist everything in single transaction
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		// Save journal first
+		if err := tx.Journal().Save(ctx, journal); err != nil {
+			return err
+		}
+
 		// Update PaymentRequest to COMPLETED
 		if err := paymentReq.MarkCompleted(); err != nil {
 			return err
