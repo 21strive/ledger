@@ -26,13 +26,14 @@ type GeneratePaymentRequest struct {
 	// Product information
 	ProductID   string         `json:"product_id"`
 	ProductType string         `json:"product_type"` // PHOTO, FOLDER, SUBSCRIPTION, etc.
-	SellerPrice int64          `json:"seller_price"` // Price set by seller (100% goes to seller)
+	SellerPrice int64          `json:"seller_price"` // Price set by seller
 	Currency    string         `json:"currency"`     // IDR or USD
 	Metadata    map[string]any `json:"metadata"`     // Product details (title, resolution, etc.)
 
 	// Payment configuration
-	PaymentChannel string `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
-	ExpiresIn      int64  `json:"expires_in"`      // Payment expiration in minutes (default: 60 minutes, max: 999999)
+	PaymentChannel string   `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
+	ExpiresIn      int64    `json:"expires_in"`      // Payment expiration in minutes (default: 60 minutes, max: 999999)
+	FeeModel       FeeModel `json:"fee_model"`       // Who pays gateway fee (defaults to GATEWAY_ON_CUSTOMER)
 }
 
 // GeneratePaymentResponse contains the result of payment generation
@@ -44,11 +45,13 @@ type GeneratePaymentResponse struct {
 	ExpiresAt     int64  `json:"expires_at"`             // Unix timestamp
 
 	// Fee breakdown for transparency
-	SellerPrice  int64  `json:"seller_price"`
-	PlatformFee  int64  `json:"platform_fee"`
-	DokuFee      int64  `json:"doku_fee"`
-	TotalCharged int64  `json:"total_charged"`
-	Currency     string `json:"currency"`
+	SellerPrice     int64  `json:"seller_price"`
+	SellerNetAmount int64  `json:"seller_net_amount"` // What seller actually receives
+	PlatformFee     int64  `json:"platform_fee"`
+	DokuFee         int64  `json:"doku_fee"`
+	TotalCharged    int64  `json:"total_charged"`
+	FeeModel        string `json:"fee_model"`
+	Currency        string `json:"currency"`
 }
 
 // GeneratePayment creates a new payment for a product purchase
@@ -84,14 +87,22 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 		)
 	}
 
+	// Default to GATEWAY_ON_CUSTOMER if not specified (backward compatibility)
+	feeModel := req.FeeModel
+	if feeModel == "" {
+		feeModel = domain.FeeModelGatewayOnCustomer
+	}
+
 	currency := domain.Currency(req.Currency)
-	feeBreakdown := feeCalc.GetFeeBreakdown(req.SellerPrice, req.PaymentChannel, currency)
+	feeBreakdown := feeCalc.GetFeeBreakdownWithModel(req.SellerPrice, req.PaymentChannel, currency, feeModel)
 
 	c.logger.InfoContext(ctx, "Calculated fee breakdown",
 		"seller_price", feeBreakdown.SellerPrice,
 		"platform_fee", feeBreakdown.PlatformFee,
 		"doku_fee", feeBreakdown.DokuFee,
 		"total_charged", feeBreakdown.TotalCharged,
+		"seller_net_amount", feeBreakdown.SellerNetAmount,
+		"fee_model", feeBreakdown.FeeModel,
 		"currency", feeBreakdown.Currency,
 	)
 
@@ -207,17 +218,45 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	)
 
 	return &GeneratePaymentResponse{
-		TransactionID: productTx.UUID,
-		InvoiceNumber: invoiceNumber,
-		PaymentURL:    paymentURL,
-		PaymentCode:   paymentCode,
-		ExpiresAt:     expiresAt.Unix(),
-		SellerPrice:   feeBreakdown.SellerPrice,
-		PlatformFee:   feeBreakdown.PlatformFee,
-		DokuFee:       feeBreakdown.DokuFee,
-		TotalCharged:  feeBreakdown.TotalCharged,
-		Currency:      string(currency),
+		TransactionID:   productTx.UUID,
+		InvoiceNumber:   invoiceNumber,
+		PaymentURL:      paymentURL,
+		PaymentCode:     paymentCode,
+		ExpiresAt:       expiresAt.Unix(),
+		SellerPrice:     feeBreakdown.SellerPrice,
+		SellerNetAmount: feeBreakdown.SellerNetAmount,
+		PlatformFee:     feeBreakdown.PlatformFee,
+		DokuFee:         feeBreakdown.DokuFee,
+		TotalCharged:    feeBreakdown.TotalCharged,
+		FeeModel:        string(feeBreakdown.FeeModel),
+		Currency:        string(currency),
 	}, nil
+}
+
+// GeneratePaymentGatewayOnSeller creates a payment where seller absorbs the gateway fee
+// Customer pays: seller_price + platform_fee (gateway fee NOT included)
+// Seller receives: seller_price - gateway_fee (seller absorbs the gateway cost)
+//
+// Example: seller_price=10,000, platform=1,000, gateway=247
+// → Customer pays: 11,000 (no gateway fee)
+// → Seller receives: 9,753 (absorbed 247 gateway fee)
+func (c *LedgerClient) GeneratePaymentGatewayOnSeller(ctx context.Context, req *GeneratePaymentRequest) (*GeneratePaymentResponse, error) {
+	// Force fee model to GATEWAY_ON_SELLER
+	req.FeeModel = FeeModelGatewayOnSeller
+	return c.GeneratePayment(ctx, req)
+}
+
+// GeneratePaymentGatewayOnCustomer creates a payment where customer pays all fees (default behavior)
+// Customer pays: seller_price + platform_fee + gateway_fee (all fees included)
+// Seller receives: seller_price (100% of their listed price)
+//
+// Example: seller_price=10,000, platform=1,000, gateway=247
+// → Customer pays: 11,247 (includes all fees)
+// → Seller receives: 10,000 (100% of price)
+func (c *LedgerClient) GeneratePaymentGatewayOnCustomer(ctx context.Context, req *GeneratePaymentRequest) (*GeneratePaymentResponse, error) {
+	// Force fee model to GATEWAY_ON_CUSTOMER
+	req.FeeModel = FeeModelGatewayOnCustomer
+	return c.GeneratePayment(ctx, req)
 }
 
 type NotifyPaymentSuccessRequest struct {
@@ -287,10 +326,12 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 		domain.SourceTypeProductTransaction,
 		productTx.UUID,
 		map[string]any{
-			"invoice_number": invoiceNumber,
-			"seller_price":   productTx.Fee.SellerPrice,
-			"platform_fee":   productTx.Fee.PlatformFee,
-			"doku_fee":       productTx.Fee.DokuFee,
+			"invoice_number":    invoiceNumber,
+			"seller_price":      productTx.Fee.SellerPrice,
+			"seller_net_amount": productTx.Fee.SellerNetAmount,
+			"platform_fee":      productTx.Fee.PlatformFee,
+			"doku_fee":          productTx.Fee.DokuFee,
+			"fee_model":         productTx.Fee.FeeModel,
 		},
 	)
 
@@ -299,7 +340,7 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 		journal.UUID,
 		productTx.UUID,
 		productTx.SellerAccountID,
-		productTx.Fee.SellerPrice,
+		productTx.Fee.SellerNetAmount, // Use net amount (accounts for fee model)
 		platformAccount.UUID,
 		productTx.Fee.PlatformFee,
 		dokuAccount.UUID,
@@ -349,14 +390,21 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 
 // CalculateFees returns the fee breakdown without creating a transaction
 // Useful for showing the buyer the total cost before purchase
+// Defaults to GATEWAY_ON_CUSTOMER model for backward compatibility
 func (c *LedgerClient) CalculateFees(ctx context.Context, sellerPrice int64, paymentChannel string, currency string) (*domain.FeeBreakdown, error) {
+	return c.CalculateFeesWithModel(ctx, sellerPrice, paymentChannel, currency, domain.FeeModelGatewayOnCustomer)
+}
+
+// CalculateFeesWithModel returns the fee breakdown with specified fee model
+// Useful for showing the buyer the total cost before purchase
+func (c *LedgerClient) CalculateFeesWithModel(ctx context.Context, sellerPrice int64, paymentChannel string, currency string, feeModel domain.FeeModel) (*domain.FeeBreakdown, error) {
 	feeConfigs, err := c.repoProvider.FeeConfig().GetAllActive(ctx)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to load fee configurations", err)
 	}
 
 	feeCalc := domain.NewFeeCalculator(feeConfigs)
-	breakdown := feeCalc.GetFeeBreakdown(sellerPrice, paymentChannel, domain.Currency(currency))
+	breakdown := feeCalc.GetFeeBreakdownWithModel(sellerPrice, paymentChannel, domain.Currency(currency), feeModel)
 
 	return &breakdown, nil
 }

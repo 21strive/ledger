@@ -20,14 +20,28 @@ const (
 	TransactionStatusRefunded  TransactionStatus = "REFUNDED"
 )
 
+// FeeModel specifies who pays the payment gateway fee
+type FeeModel string
+
+const (
+	// FeeModelGatewayOnCustomer - Customer pays: seller_price + platform_fee + gateway_fee
+	// Seller receives: seller_price (100%)
+	FeeModelGatewayOnCustomer FeeModel = "GATEWAY_ON_CUSTOMER"
+
+	// FeeModelGatewayOnSeller - Customer pays: seller_price + platform_fee
+	// Seller receives: seller_price - gateway_fee (absorbs gateway cost)
+	FeeModelGatewayOnSeller FeeModel = "GATEWAY_ON_SELLER"
+)
+
 // FeeBreakdown represents the pricing breakdown for a transaction
-// Buyer pays ALL fees (seller receives 100% of their price)
 type FeeBreakdown struct {
-	SellerPrice  int64    // What seller receives (100% of their price)
-	PlatformFee  int64    // Platform markup
-	DokuFee      int64    // Payment gateway fee
-	TotalCharged int64    // seller_price + platform_fee + doku_fee
-	Currency     Currency // IDR or USD
+	SellerPrice     int64    // Seller's listed price
+	PlatformFee     int64    // Platform markup
+	DokuFee         int64    // Payment gateway fee
+	TotalCharged    int64    // What customer pays (varies by fee model)
+	SellerNetAmount int64    // What seller actually receives (varies by fee model)
+	FeeModel        FeeModel // Who pays the gateway fee
+	Currency        Currency // IDR or USD
 }
 
 // ProductTransaction represents a product sale between buyer and seller
@@ -63,18 +77,39 @@ type ProductTransactionRepository interface {
 	UpdateStatus(ctx context.Context, id string, status TransactionStatus, timestamp time.Time) error
 }
 
-// NewFeeBreakdown creates a FeeBreakdown and validates amounts
-func NewFeeBreakdown(sellerPrice, platformFee, dokuFee int64, currency Currency) (*FeeBreakdown, error) {
+// NewFeeBreakdown creates a FeeBreakdown with specified fee model and validates amounts
+func NewFeeBreakdown(sellerPrice, platformFee, dokuFee int64, currency Currency, feeModel FeeModel) (*FeeBreakdown, error) {
 	if sellerPrice < 0 || platformFee < 0 || dokuFee < 0 {
 		return nil, ledgererr.ErrInvalidFeeBreakdown
 	}
 
+	var totalCharged, sellerNetAmount int64
+
+	switch feeModel {
+	case FeeModelGatewayOnCustomer:
+		// Customer pays everything: seller_price + platform_fee + gateway_fee
+		totalCharged = sellerPrice + platformFee + dokuFee
+		sellerNetAmount = sellerPrice // Seller gets 100% of their price
+
+	case FeeModelGatewayOnSeller:
+		// Customer pays: seller_price + platform_fee (no gateway fee)
+		totalCharged = sellerPrice + platformFee
+		sellerNetAmount = sellerPrice - dokuFee // Seller absorbs gateway fee
+
+	default:
+		// Default to customer pays all (backward compatibility)
+		totalCharged = sellerPrice + platformFee + dokuFee
+		sellerNetAmount = sellerPrice
+	}
+
 	return &FeeBreakdown{
-		SellerPrice:  sellerPrice,
-		PlatformFee:  platformFee,
-		DokuFee:      dokuFee,
-		TotalCharged: sellerPrice + platformFee + dokuFee,
-		Currency:     currency,
+		SellerPrice:     sellerPrice,
+		PlatformFee:     platformFee,
+		DokuFee:         dokuFee,
+		TotalCharged:    totalCharged,
+		SellerNetAmount: sellerNetAmount,
+		FeeModel:        feeModel,
+		Currency:        currency,
 	}, nil
 }
 
@@ -104,10 +139,10 @@ func NewProductTransaction(
 	return pt
 }
 
-// GetSellerPayout returns the amount seller receives (100% of their price)
+// GetSellerPayout returns the amount seller actually receives (net after fees)
 func (pt *ProductTransaction) GetSellerPayout() Money {
 	return Money{
-		Amount:   pt.Fee.SellerPrice,
+		Amount:   pt.Fee.SellerNetAmount,
 		Currency: pt.Fee.Currency,
 	}
 }

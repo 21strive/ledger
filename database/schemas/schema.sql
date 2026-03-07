@@ -148,15 +148,21 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     -- CHECK ( product_type IN ( 'PHOTO', 'FOLDER', 'SUBSCRIPTION')),
     -- Our internal invoice number
     invoice_number VARCHAR(50) NOT NULL UNIQUE,
-    -- Pricing breakdown (buyer pays ALL fees)
+    -- Pricing breakdown
     seller_price BIGINT NOT NULL,
-    -- What seller receives (100% of their price)
+    -- Seller's listed price
     platform_fee BIGINT NOT NULL,
     -- Platform markup
     doku_fee BIGINT NOT NULL,
     -- Payment gateway fee
     total_charged BIGINT NOT NULL,
-    -- seller_price + platform_fee + doku_fee
+    -- What customer pays (varies by fee model)
+    seller_net_amount BIGINT NOT NULL,
+    -- What seller actually receives (varies by fee model)
+    fee_model VARCHAR(50) DEFAULT 'GATEWAY_ON_CUSTOMER' NOT NULL CHECK (
+        fee_model IN ('GATEWAY_ON_CUSTOMER', 'GATEWAY_ON_SELLER')
+    ),
+    -- Who pays the gateway fee
     currency VARCHAR(3) NOT NULL CHECK (currency IN ('IDR', 'USD')),
     -- Transaction status and lifecycle
     status VARCHAR(20) NOT NULL CHECK (
@@ -187,6 +193,8 @@ CREATE INDEX idx_product_transactions_product ON product_transactions(product_id
 CREATE INDEX idx_product_transactions_invoice ON product_transactions(invoice_number);
 
 CREATE INDEX idx_product_transactions_status ON product_transactions(status);
+
+CREATE INDEX idx_product_transactions_fee_model ON product_transactions(fee_model);
 
 CREATE INDEX idx_product_transactions_status_settled ON product_transactions(status, settled_at);
 

@@ -273,15 +273,90 @@ func TestFeeCalculator_GetFeeBreakdown(t *testing.T) {
 		// base_amount = 11000, total = 11247, doku_fee = 247
 		assert.Equal(t, int64(247), breakdown.DokuFee)
 		assert.Equal(t, int64(11247), breakdown.TotalCharged)
+		assert.Equal(t, int64(10000), breakdown.SellerNetAmount) // Seller gets 100% (default GATEWAY_ON_CUSTOMER)
+		assert.Equal(t, domain.FeeModelGatewayOnCustomer, breakdown.FeeModel)
 		assert.Equal(t, domain.CurrencyIDR, breakdown.Currency)
 	})
 
 	t.Run("fee breakdown validates correctly", func(t *testing.T) {
 		breakdown := calc.GetFeeBreakdown(10000, "QRIS", domain.CurrencyIDR)
 
-		// TotalCharged should equal SellerPrice + PlatformFee + DokuFee
+		// TotalCharged should equal SellerPrice + PlatformFee + DokuFee for GATEWAY_ON_CUSTOMER
 		expectedTotal := breakdown.SellerPrice + breakdown.PlatformFee + breakdown.DokuFee
 		assert.Equal(t, expectedTotal, breakdown.TotalCharged)
+
+		// SellerNetAmount should equal SellerPrice for GATEWAY_ON_CUSTOMER
+		assert.Equal(t, breakdown.SellerPrice, breakdown.SellerNetAmount)
+	})
+}
+
+func TestFeeCalculator_GetFeeBreakdownWithModel(t *testing.T) {
+	configs := []*domain.FeeConfig{
+		{
+			ConfigType:     domain.FeeConfigTypePlatform,
+			PaymentChannel: "PLATFORM",
+			FeeType:        domain.FeeTypeFixed,
+			FixedAmount:    1000,
+			IsActive:       true,
+		},
+		{
+			ConfigType:     domain.FeeConfigTypeDoku,
+			PaymentChannel: "QRIS",
+			FeeType:        domain.FeeTypePercentage,
+			Percentage:     2.2,
+			IsActive:       true,
+		},
+	}
+
+	calc := domain.NewFeeCalculator(configs)
+
+	t.Run("GATEWAY_ON_CUSTOMER model - customer pays all fees", func(t *testing.T) {
+		breakdown := calc.GetFeeBreakdownWithModel(10000, "QRIS", domain.CurrencyIDR, domain.FeeModelGatewayOnCustomer)
+
+		assert.Equal(t, int64(10000), breakdown.SellerPrice)
+		assert.Equal(t, int64(1000), breakdown.PlatformFee)
+		assert.Equal(t, int64(247), breakdown.DokuFee)
+		assert.Equal(t, int64(11247), breakdown.TotalCharged)    // Customer pays: 10000 + 1000 + 247
+		assert.Equal(t, int64(10000), breakdown.SellerNetAmount) // Seller gets 100% of price
+		assert.Equal(t, domain.FeeModelGatewayOnCustomer, breakdown.FeeModel)
+		assert.Equal(t, domain.CurrencyIDR, breakdown.Currency)
+	})
+
+	t.Run("GATEWAY_ON_SELLER model - seller absorbs gateway fee", func(t *testing.T) {
+		breakdown := calc.GetFeeBreakdownWithModel(10000, "QRIS", domain.CurrencyIDR, domain.FeeModelGatewayOnSeller)
+
+		assert.Equal(t, int64(10000), breakdown.SellerPrice)
+		assert.Equal(t, int64(1000), breakdown.PlatformFee)
+		assert.Equal(t, int64(247), breakdown.DokuFee)
+		assert.Equal(t, int64(11000), breakdown.TotalCharged)   // Customer pays: 10000 + 1000 (no gateway fee)
+		assert.Equal(t, int64(9753), breakdown.SellerNetAmount) // Seller gets: 10000 - 247 (absorbs fee)
+		assert.Equal(t, domain.FeeModelGatewayOnSeller, breakdown.FeeModel)
+		assert.Equal(t, domain.CurrencyIDR, breakdown.Currency)
+	})
+
+	t.Run("validates seller net amount calculation", func(t *testing.T) {
+		breakdownCustomer := calc.GetFeeBreakdownWithModel(10000, "QRIS", domain.CurrencyIDR, domain.FeeModelGatewayOnCustomer)
+		breakdownSeller := calc.GetFeeBreakdownWithModel(10000, "QRIS", domain.CurrencyIDR, domain.FeeModelGatewayOnSeller)
+
+		// GATEWAY_ON_CUSTOMER: SellerNetAmount = SellerPrice
+		assert.Equal(t, breakdownCustomer.SellerPrice, breakdownCustomer.SellerNetAmount)
+
+		// GATEWAY_ON_SELLER: SellerNetAmount = SellerPrice - DokuFee
+		expectedNet := breakdownSeller.SellerPrice - breakdownSeller.DokuFee
+		assert.Equal(t, expectedNet, breakdownSeller.SellerNetAmount)
+	})
+
+	t.Run("validates total charged calculation", func(t *testing.T) {
+		breakdownCustomer := calc.GetFeeBreakdownWithModel(10000, "QRIS", domain.CurrencyIDR, domain.FeeModelGatewayOnCustomer)
+		breakdownSeller := calc.GetFeeBreakdownWithModel(10000, "QRIS", domain.CurrencyIDR, domain.FeeModelGatewayOnSeller)
+
+		// GATEWAY_ON_CUSTOMER: TotalCharged = SellerPrice + PlatformFee + DokuFee
+		expectedCustomer := breakdownCustomer.SellerPrice + breakdownCustomer.PlatformFee + breakdownCustomer.DokuFee
+		assert.Equal(t, expectedCustomer, breakdownCustomer.TotalCharged)
+
+		// GATEWAY_ON_SELLER: TotalCharged = SellerPrice + PlatformFee (no DokuFee)
+		expectedSeller := breakdownSeller.SellerPrice + breakdownSeller.PlatformFee
+		assert.Equal(t, expectedSeller, breakdownSeller.TotalCharged)
 	})
 }
 

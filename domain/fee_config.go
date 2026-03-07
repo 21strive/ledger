@@ -133,15 +133,42 @@ func (fc *FeeCalculator) CalculateTotalFees(sellerPrice int64, paymentChannel st
 }
 
 // GetFeeBreakdown returns a complete fee breakdown for a transaction
+// Defaults to FeeModelGatewayOnCustomer for backward compatibility
 func (fc *FeeCalculator) GetFeeBreakdown(sellerPrice int64, paymentChannel string, currency Currency) FeeBreakdown {
-	platformFee, dokuFee, totalCharged := fc.CalculateTotalFees(sellerPrice, paymentChannel)
+	return fc.GetFeeBreakdownWithModel(sellerPrice, paymentChannel, currency, FeeModelGatewayOnCustomer)
+}
+
+// GetFeeBreakdownWithModel returns a complete fee breakdown with specified fee model
+func (fc *FeeCalculator) GetFeeBreakdownWithModel(sellerPrice int64, paymentChannel string, currency Currency, feeModel FeeModel) FeeBreakdown {
+	platformFee, dokuFee, _ := fc.CalculateTotalFees(sellerPrice, paymentChannel)
+
+	var totalCharged, sellerNetAmount int64
+
+	switch feeModel {
+	case FeeModelGatewayOnCustomer:
+		// Customer pays everything: seller_price + platform_fee + gateway_fee
+		totalCharged = sellerPrice + platformFee + dokuFee
+		sellerNetAmount = sellerPrice // Seller gets 100% of their price
+
+	case FeeModelGatewayOnSeller:
+		// Customer pays: seller_price + platform_fee (no gateway fee)
+		totalCharged = sellerPrice + platformFee
+		sellerNetAmount = sellerPrice - dokuFee // Seller absorbs gateway fee
+
+	default:
+		// Default to customer pays all (backward compatibility)
+		totalCharged = sellerPrice + platformFee + dokuFee
+		sellerNetAmount = sellerPrice
+	}
 
 	return FeeBreakdown{
-		SellerPrice:  sellerPrice,
-		PlatformFee:  platformFee,
-		DokuFee:      dokuFee,
-		TotalCharged: totalCharged,
-		Currency:     currency,
+		SellerPrice:     sellerPrice,
+		PlatformFee:     platformFee,
+		DokuFee:         dokuFee,
+		TotalCharged:    totalCharged,
+		SellerNetAmount: sellerNetAmount,
+		FeeModel:        feeModel,
+		Currency:        currency,
 	}
 }
 

@@ -70,8 +70,10 @@ func NewSettlementItem(
 }
 
 // MatchToTransaction links this item to a product transaction and reconciles amounts
-// It compares the CSV's PayToMerchant with the ProductTransaction's (SellerPrice + PlatformFee)
-// Returns the expected net amount (SellerPrice + PlatformFee) for balance calculations
+// It compares the CSV's PayToMerchant with the ProductTransaction's (SellerNetAmount + PlatformFee)
+// This accounts for both fee models:
+// - GATEWAY_ON_CUSTOMER: SellerNetAmount = SellerPrice (PayToMerchant = SellerPrice + PlatformFee)
+// - GATEWAY_ON_SELLER: SellerNetAmount = SellerPrice - DokuFee (PayToMerchant = SellerPrice - DokuFee + PlatformFee)
 func (si *SettlementItem) MatchToTransaction(productTx *ProductTransaction) error {
 	if productTx == nil {
 		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "product_transaction is required", nil)
@@ -83,8 +85,9 @@ func (si *SettlementItem) MatchToTransaction(productTx *ProductTransaction) erro
 	si.ProductTransactionUUID = productTx.Record.UUID
 	si.IsMatched = true
 
-	// Reconcile amounts: CSV PayToMerchant should equal ProductTransaction's (SellerPrice + PlatformFee)
-	si.ExpectedNetAmount = productTx.Fee.SellerPrice + productTx.Fee.PlatformFee
+	// Reconcile amounts: CSV PayToMerchant should equal ProductTransaction's (SellerNetAmount + PlatformFee)
+	// This works for both fee models since SellerNetAmount already accounts for who pays the gateway fee
+	si.ExpectedNetAmount = productTx.Fee.SellerNetAmount + productTx.Fee.PlatformFee
 	si.AmountDiscrepancy = si.PayToMerchant - si.ExpectedNetAmount
 
 	return nil

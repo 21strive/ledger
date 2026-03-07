@@ -24,7 +24,7 @@ func NewPostgresProductTransactionRepository(db DBTX) *PostgresProductTransactio
 func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id string) (*domain.ProductTransaction, error) {
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE uuid = $1
@@ -36,7 +36,7 @@ func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id s
 func (r *PostgresProductTransactionRepository) GetByInvoiceNumber(ctx context.Context, invoiceNumber string) (*domain.ProductTransaction, error) {
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE invoice_number = $1
@@ -49,7 +49,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountID(ctx context.
 	offset := (page - 1) * pageSize
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
@@ -64,7 +64,7 @@ func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.C
 	offset := (page - 1) * pageSize
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE buyer_account_id = $1
@@ -93,7 +93,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 		// First page: no cursor, start from beginning
 		query = fmt.Sprintf(`
 			SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-			       seller_price, platform_fee, doku_fee, total_charged, currency,
+			       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 			       status, created_at, updated_at, completed_at, settled_at, metadata
 			FROM product_transactions
 			WHERE seller_account_id = $1
@@ -107,7 +107,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 		if sortOrder == "DESC" {
 			query = `
 				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-				       seller_price, platform_fee, doku_fee, total_charged, currency,
+				       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 				       status, created_at, updated_at, completed_at, settled_at, metadata
 				FROM product_transactions
 				WHERE seller_account_id = $1 
@@ -119,7 +119,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 		} else {
 			query = `
 				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-				       seller_price, platform_fee, doku_fee, total_charged, currency,
+				       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 				       status, created_at, updated_at, completed_at, settled_at, metadata
 				FROM product_transactions
 				WHERE seller_account_id = $1 
@@ -138,7 +138,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'PENDING'
@@ -151,7 +151,7 @@ func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx c
 func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'COMPLETED'
@@ -164,7 +164,7 @@ func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx contex
 func (r *PostgresProductTransactionRepository) GetAllBySellerID(ctx context.Context, sellerAccountID string) ([]*domain.ProductTransaction, error) {
 	query := `
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-		       seller_price, platform_fee, doku_fee, total_charged, currency,
+		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
@@ -183,9 +183,9 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 	query := `
 		INSERT INTO product_transactions (
 			uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
-			seller_price, platform_fee, doku_fee, total_charged, currency,
+			seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 			status, created_at, updated_at, completed_at, settled_at, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
@@ -210,6 +210,8 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		tx.Fee.PlatformFee,
 		tx.Fee.DokuFee,
 		tx.Fee.TotalCharged,
+		tx.Fee.SellerNetAmount,
+		tx.Fee.FeeModel,
 		tx.Fee.Currency,
 		tx.Status,
 		tx.CreatedAt,
@@ -315,6 +317,8 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		PlatformFee     int64
 		DokuFee         int64
 		TotalCharged    int64
+		SellerNetAmount int64
+		FeeModel        string
 		Currency        string
 		Status          string
 		CreatedAt       time.Time
@@ -336,6 +340,8 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		&row.PlatformFee,
 		&row.DokuFee,
 		&row.TotalCharged,
+		&row.SellerNetAmount,
+		&row.FeeModel,
 		&row.Currency,
 		&row.Status,
 		&row.CreatedAt,
@@ -372,11 +378,13 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		ProductType:     row.ProductType,
 		InvoiceNumber:   row.InvoiceNumber,
 		Fee: domain.FeeBreakdown{
-			SellerPrice:  row.SellerPrice,
-			PlatformFee:  row.PlatformFee,
-			DokuFee:      row.DokuFee,
-			TotalCharged: row.TotalCharged,
-			Currency:     domain.Currency(row.Currency),
+			SellerPrice:     row.SellerPrice,
+			PlatformFee:     row.PlatformFee,
+			DokuFee:         row.DokuFee,
+			TotalCharged:    row.TotalCharged,
+			SellerNetAmount: row.SellerNetAmount,
+			FeeModel:        domain.FeeModel(row.FeeModel),
+			Currency:        domain.Currency(row.Currency),
 		},
 		Status:      domain.TransactionStatus(row.Status),
 		Metadata:    metadata,

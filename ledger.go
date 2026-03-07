@@ -749,7 +749,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	var discrepancies []DiscrepancySummary
 	var itemDiscrepancyCount int
 	var totalItemDiscrepancy int64
-	var totalSettledSellerAmount int64   // seller_price from matched transactions
+	var totalSettledSellerAmount int64   // seller_net_amount from matched transactions
 	var totalSettledPlatformAmount int64 // platform_fee from matched transactions
 	var totalDokuFee int64
 
@@ -825,7 +825,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 
 		batch.IncrementMatched()
 		batch.AddToTotals(csvRow.Amount, csvRow.Fee)
-		totalSettledSellerAmount += productTx.Fee.SellerPrice
+		totalSettledSellerAmount += productTx.Fee.SellerNetAmount
 		totalSettledPlatformAmount += productTx.Fee.PlatformFee
 		totalDokuFee += csvRow.Fee
 
