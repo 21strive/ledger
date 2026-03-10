@@ -756,6 +756,10 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	batch.BatchID = csvMetadata.BatchID // Set DOKU Batch ID from CSV metadata
 	batch.MarkProcessing()
 
+	c.logger.InfoContext(ctx, "Created settlement batch",
+		"batch", batch,
+	)
+
 	// Process CSV rows - cache ProductTransactions to avoid N+1 queries
 	var settlementItems []*domain.SettlementItem
 	var discrepancies []DiscrepancySummary
@@ -965,6 +969,8 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		}
 	}
 
+	c.logger.DebugContext(ctx, "Built settlement ledger entries", "entries", allSettlementEntries)
+
 	c.logger.InfoContext(ctx, "Settlement balance calculations",
 		"previous_pending", previousPending,
 		"previous_available", previousAvailable,
@@ -977,6 +983,10 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 	// Persist everything atomically
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
 		// Save settlement journal first
+		c.logger.InfoContext(ctx, "Saving settlement journal and batch",
+			"journal", settlementJournal,
+			"batch", batch,
+		)
 		if err := tx.Journal().Save(ctx, settlementJournal); err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement journal", err)
 		}
@@ -985,6 +995,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement batch", err)
 		}
 
+		c.logger.InfoContext(ctx, "Saving settlement items", "items", settlementItems)
 		if err := tx.SettlementItem().SaveBatch(ctx, settlementItems); err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement items", err)
 		}
@@ -1001,6 +1012,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			}
 		}
 
+		c.logger.InfoContext(ctx, "Saving settlement ledger entries", "entries", allSettlementEntries)
 		// Write all settlement ledger entries (immutable, insert-only)
 		if err := tx.LedgerEntry().SaveBatch(ctx, allSettlementEntries); err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement ledger entries", err)
@@ -1009,8 +1021,8 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		return nil
 	})
 	if err != nil {
-		batch.MarkFailed(err.Error())
-		c.repoProvider.SettlementBatch().Save(ctx, batch)
+		// Transaction failed and rolled back completely (including batch record)
+		// Return error to allow retry without UNIQUE constraint violation
 		return nil, err
 	}
 
