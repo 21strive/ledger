@@ -805,6 +805,24 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query product transaction", err)
 		}
 
+		// Skip if transaction is already settled (duplicate CSV entry or re-upload)
+		if productTx.IsSettled() {
+			c.logger.InfoContext(ctx, "Skipping already settled transaction",
+				"invoice_number", csvRow.InvoiceNumber,
+				"product_tx_id", productTx.UUID,
+				"settled_at", productTx.SettledAt,
+			)
+			batch.IncrementUnmatched()
+			discrepancies = append(discrepancies, DiscrepancySummary{
+				Type:          "ALREADY_SETTLED",
+				InvoiceNumber: csvRow.InvoiceNumber,
+				Amount:        csvRow.Amount,
+				Message:       fmt.Sprintf("Transaction already settled (settled_at: %v)", productTx.SettledAt),
+			})
+			settlementItems = append(settlementItems, item)
+			continue
+		}
+
 		if err := item.MatchToTransaction(productTx); err != nil {
 			c.logger.WarnContext(ctx, "Failed to match settlement item",
 				"invoice_number", csvRow.InvoiceNumber,
