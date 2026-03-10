@@ -165,11 +165,11 @@ func NewPaymentEntries(
 //	account -amount  PENDING    SETTLEMENT   (debit pending)
 //	account +amount  AVAILABLE  SETTLEMENT   (credit available)
 //
-// settlementBatchID is used as the reference_id.
+// productTransactionID is used as the source_id to link back to the business transaction.
 // journalUUID groups these entries as part of a single SETTLEMENT event.
 func NewSettlementEntriesForAccount(
 	journalUUID string,
-	settlementBatchID string,
+	productTransactionID string,
 	accountID string,
 	amount int64,
 ) []*LedgerEntry {
@@ -181,8 +181,8 @@ func NewSettlementEntriesForAccount(
 		Amount:        -amount,
 		BalanceBucket: BalanceBucketPending,
 		EntryType:     EntryTypeSettlementClear,
-		SourceType:    SourceTypeSettlementBatch,
-		SourceID:      settlementBatchID,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
 	}
 	redifu.InitRecord(pendingEntry)
 
@@ -192,8 +192,8 @@ func NewSettlementEntriesForAccount(
 		Amount:        amount,
 		BalanceBucket: BalanceBucketAvailable,
 		EntryType:     EntryTypeSettlementNet,
-		SourceType:    SourceTypeSettlementBatch,
-		SourceID:      settlementBatchID,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
 	}
 	redifu.InitRecord(availableEntry)
 
@@ -209,7 +209,7 @@ func NewSettlementEntriesForAccount(
 // journalUUID groups this entry with other settlement entries.
 func NewDokuFeeSettlementEntry(
 	journalUUID string,
-	settlementBatchID string,
+	productTransactionID string,
 	dokuAccountID string,
 	dokuFee int64,
 ) *LedgerEntry {
@@ -219,8 +219,8 @@ func NewDokuFeeSettlementEntry(
 		Amount:        -dokuFee,
 		BalanceBucket: BalanceBucketPending,
 		EntryType:     EntryTypeSettlement,
-		SourceType:    SourceTypeSettlementBatch,
-		SourceID:      settlementBatchID,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
 	}
 	redifu.InitRecord(entry)
 	return entry

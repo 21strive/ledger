@@ -414,8 +414,6 @@ CREATE TABLE IF NOT EXISTS settlement_batches (
 
 CREATE INDEX idx_settlement_batches_account_id ON settlement_batches(account_uuid);
 
-CREATE INDEX idx_settlement_batches_date ON settlement_batches(account_uuid, settlement_date DESC);
-
 CREATE INDEX idx_settlement_batches_status ON settlement_batches(processing_status);
 
 -- Settlement item linking (individual CSV rows matched to transactions)

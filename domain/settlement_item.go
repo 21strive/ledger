@@ -83,6 +83,7 @@ func (si *SettlementItem) MatchToTransaction(productTx *ProductTransaction) erro
 	}
 
 	si.ProductTransactionUUID = productTx.Record.UUID
+	si.SellerAccountID = productTx.SellerAccountID // Cache for efficient grouping
 	si.IsMatched = true
 
 	// Reconcile amounts: CSV PayToMerchant should equal ProductTransaction's (SellerNetAmount + PlatformFee)
