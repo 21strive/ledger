@@ -92,30 +92,11 @@ func (r *PostgresLedgerEntryRepository) Save(ctx context.Context, entry *domain.
 		}
 	}
 
-	// Update deposit/withdrawal totals
-	if entry.Amount > 0 {
-		query := `
-			UPDATE ledger_accounts
-			SET total_deposit_amount = total_deposit_amount + $1,
-				updated_at = NOW()
-			WHERE uuid = $2
-		`
-		_, err := r.db.ExecContext(ctx, query, entry.Amount, entry.AccountUUID)
-		if err != nil {
-			return ErrFailedUpdateSQL.WithError(err)
-		}
-	} else if entry.Amount < 0 {
-		query := `
-			UPDATE ledger_accounts
-			SET total_withdrawal_amount = total_withdrawal_amount + $1,
-				updated_at = NOW()
-			WHERE uuid = $2
-		`
-		_, err := r.db.ExecContext(ctx, query, -entry.Amount, entry.AccountUUID)
-		if err != nil {
-			return ErrFailedUpdateSQL.WithError(err)
-		}
-	}
+	// NOTE: total_deposit_amount and total_withdrawal_amount are NOT updated here
+	// They should only be updated when:
+	// - Product transaction is marked SETTLED (in ProcessReconciliation)
+	// - Disbursement is marked COMPLETED (in ProcessDisbursement)
+	// This ensures these totals reflect actual settled money, not intermediate ledger movements
 
 	return nil
 }
@@ -187,11 +168,9 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 	// After successfully inserting all entries, update account balances
 	// Aggregate deltas per account+bucket
 	accountBalanceUpdates := make(map[string]struct {
-		accountID        string
-		pendingDelta     int64
-		availableDelta   int64
-		depositAmount    int64
-		withdrawalAmount int64
+		accountID      string
+		pendingDelta   int64
+		availableDelta int64
 	})
 
 	for _, entry := range entries {
@@ -204,13 +183,6 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 			update.pendingDelta += entry.Amount
 		} else if entry.BalanceBucket == domain.BalanceBucketAvailable {
 			update.availableDelta += entry.Amount
-		}
-
-		// Track deposits and withdrawals
-		if entry.Amount > 0 {
-			update.depositAmount += entry.Amount
-		} else if entry.Amount < 0 {
-			update.withdrawalAmount += -entry.Amount // Store as positive
 		}
 
 		accountBalanceUpdates[key] = update
@@ -232,35 +204,13 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 				return ErrFailedUpdateSQL.WithError(err)
 			}
 		}
-
-		// Update deposit total
-		if update.depositAmount > 0 {
-			query := `
-				UPDATE ledger_accounts
-				SET total_deposit_amount = total_deposit_amount + $1,
-					updated_at = NOW()
-				WHERE uuid = $2
-			`
-			_, err := r.db.ExecContext(ctx, query, update.depositAmount, update.accountID)
-			if err != nil {
-				return ErrFailedUpdateSQL.WithError(err)
-			}
-		}
-
-		// Update withdrawal total
-		if update.withdrawalAmount > 0 {
-			query := `
-				UPDATE ledger_accounts
-				SET total_withdrawal_amount = total_withdrawal_amount + $1,
-					updated_at = NOW()
-				WHERE uuid = $2
-			`
-			_, err := r.db.ExecContext(ctx, query, update.withdrawalAmount, update.accountID)
-			if err != nil {
-				return ErrFailedUpdateSQL.WithError(err)
-			}
-		}
 	}
+
+	// NOTE: total_deposit_amount and total_withdrawal_amount are NOT updated here
+	// They should only be updated when:
+	// - Product transaction is marked SETTLED (in ProcessReconciliation)
+	// - Disbursement is marked COMPLETED (in ProcessDisbursement)
+	// This ensures these totals reflect actual settled money, not intermediate ledger movements
 
 	return nil
 }

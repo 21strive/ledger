@@ -438,6 +438,12 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 				return err
 			}
 
+			// Increment seller's total_deposit_amount since transaction is SETTLED
+			if err := tx.Account().IncrementDeposit(context.Background(), productTx.SellerAccountID, productTx.Fee.SellerNetAmount); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to increment seller deposit amount", "error", err)
+				return err
+			}
+
 			c.logger.InfoContext(context.Background(), "Generated dummy settled transaction and ledger entries", "transaction_id", productTx.Record.UUID, "seller_amount", productTx.Fee.SellerPrice, "platform_fee", productTx.Fee.PlatformFee, "doku_fee", productTx.Fee.DokuFee)
 		}
 
@@ -519,6 +525,12 @@ func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) 
 			// Save ledger entry (this will automatically update account balances)
 			if err := tx.LedgerEntry().Save(context.Background(), withdrawalEntry); err != nil {
 				c.logger.ErrorContext(context.Background(), "Failed to save withdrawal entry", "error", err)
+				return err
+			}
+
+			// Increment total_withdrawal_amount since disbursement is COMPLETED
+			if err := tx.Account().IncrementWithdrawal(context.Background(), accountID, amount); err != nil {
+				c.logger.ErrorContext(context.Background(), "Failed to increment withdrawal amount", "error", err)
 				return err
 			}
 

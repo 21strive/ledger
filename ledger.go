@@ -570,6 +570,19 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		if err := tx.LedgerEntry().Save(ctx, debitEntry); err != nil {
 			return err
 		}
+
+		// If disbursement is COMPLETED, increment total_withdrawal_amount
+		if disbursement.IsCompleted() {
+			if err := tx.Account().IncrementWithdrawal(ctx, account.UUID, req.Amount); err != nil {
+				c.logger.WarnContext(ctx, "Failed to increment withdrawal amount",
+					"account_id", account.UUID,
+					"amount", req.Amount,
+					"error", err,
+				)
+				return err
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -1020,7 +1033,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save settlement items", err)
 		}
 
-		// Update matched product transactions to SETTLED
+		// Update matched product transactions to SETTLED and increment seller's total_deposit_amount
 		for _, item := range settlementItems {
 			if item.IsMatched {
 				if err := tx.ProductTransaction().UpdateStatus(ctx, item.ProductTransactionUUID, domain.TransactionStatusSettled, now); err != nil {
@@ -1028,6 +1041,18 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 						"product_tx_id", item.ProductTransactionUUID,
 						"error", err,
 					)
+				}
+
+				// Increment seller's total_deposit_amount with the amount that actually settled
+				productTx, ok := productTxCache[item.ProductTransactionUUID]
+				if ok && productTx.Fee.SellerNetAmount > 0 {
+					if err := tx.Account().IncrementDeposit(ctx, item.SellerAccountID, productTx.Fee.SellerNetAmount); err != nil {
+						c.logger.WarnContext(ctx, "Failed to increment seller deposit amount",
+							"seller_account_id", item.SellerAccountID,
+							"amount", productTx.Fee.SellerNetAmount,
+							"error", err,
+						)
+					}
 				}
 			}
 		}
