@@ -153,7 +153,7 @@ func (fc *FeeCalculator) GetFeeBreakdownWithModel(sellerPrice int64, paymentChan
 	case FeeModelGatewayOnSeller:
 		// Customer pays: seller_price + platform_fee (no gateway fee)
 		totalCharged = sellerPrice + platformFee
-		sellerNetAmount = sellerPrice - dokuFee // Seller absorbs gateway fee
+		sellerNetAmount = totalCharged - dokuFee // Total paid to merchant after DOKU fee (seller + platform combined)
 
 	default:
 		// Default to customer pays all (backward compatibility)

@@ -70,10 +70,11 @@ func NewSettlementItem(
 }
 
 // MatchToTransaction links this item to a product transaction and reconciles amounts
-// It compares the CSV's PayToMerchant with the ProductTransaction's (SellerNetAmount + PlatformFee)
-// This accounts for both fee models:
-// - GATEWAY_ON_CUSTOMER: SellerNetAmount = SellerPrice (PayToMerchant = SellerPrice + PlatformFee)
-// - GATEWAY_ON_SELLER: SellerNetAmount = SellerPrice - DokuFee (PayToMerchant = SellerPrice - DokuFee + PlatformFee)
+// It compares the CSV's PayToMerchant with the expected amount based on fee model:
+//   - GATEWAY_ON_CUSTOMER: SellerNetAmount = SellerPrice (full price to seller)
+//     PayToMerchant = SellerPrice + PlatformFee (DOKU fee already deducted from total)
+//   - GATEWAY_ON_SELLER: SellerNetAmount = TotalCharged - DokuFee (combined seller+platform after DOKU fee)
+//     PayToMerchant = SellerNetAmount (matches directly)
 func (si *SettlementItem) MatchToTransaction(productTx *ProductTransaction) error {
 	if productTx == nil {
 		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "product_transaction is required", nil)
@@ -86,9 +87,19 @@ func (si *SettlementItem) MatchToTransaction(productTx *ProductTransaction) erro
 	si.SellerAccountID = productTx.SellerAccountID // Cache for efficient grouping
 	si.IsMatched = true
 
-	// Reconcile amounts: CSV PayToMerchant should equal ProductTransaction's (SellerNetAmount + PlatformFee)
-	// This works for both fee models since SellerNetAmount already accounts for who pays the gateway fee
-	si.ExpectedNetAmount = productTx.Fee.SellerNetAmount + productTx.Fee.PlatformFee
+	// Calculate expected amount based on fee model
+	switch productTx.Fee.FeeModel {
+	case FeeModelGatewayOnCustomer:
+		// Customer pays DOKU fee, so PayToMerchant = SellerNetAmount + PlatformFee
+		si.ExpectedNetAmount = productTx.Fee.SellerNetAmount + productTx.Fee.PlatformFee
+	case FeeModelGatewayOnSeller:
+		// Seller pays DOKU fee, SellerNetAmount already includes both seller and platform portions
+		si.ExpectedNetAmount = productTx.Fee.SellerNetAmount
+	default:
+		// Default to customer pays all (backward compatibility)
+		si.ExpectedNetAmount = productTx.Fee.SellerNetAmount + productTx.Fee.PlatformFee
+	}
+
 	si.AmountDiscrepancy = si.PayToMerchant - si.ExpectedNetAmount
 
 	return nil

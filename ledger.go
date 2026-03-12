@@ -890,7 +890,15 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 
 		batch.IncrementMatched()
 		batch.AddToTotals(csvRow.Amount, csvRow.Fee)
-		totalSettledSellerAmount += productTx.Fee.SellerNetAmount
+
+		// Calculate actual amounts that go to seller and platform
+		// For GATEWAY_ON_CUSTOMER: SellerNetAmount = full seller price, PlatformFee = platform portion
+		// For GATEWAY_ON_SELLER: SellerNetAmount = combined (seller+platform), need to subtract PlatformFee for seller's actual amount
+		if productTx.Fee.FeeModel == domain.FeeModelGatewayOnSeller {
+			totalSettledSellerAmount += productTx.Fee.SellerNetAmount - productTx.Fee.PlatformFee
+		} else {
+			totalSettledSellerAmount += productTx.Fee.SellerNetAmount
+		}
 		totalSettledPlatformAmount += productTx.Fee.PlatformFee
 		totalDokuFee += csvRow.Fee
 
