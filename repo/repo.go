@@ -16,54 +16,71 @@ type DBTX interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-type RepositoryProvider struct {
+// RepositoryProvider is an interface that provides access to all repositories.
+// This allows for dependency injection of fake/mock implementations in tests.
+type RepositoryProvider interface {
+	Account() domain.AccountRepository
+	LedgerEntry() domain.LedgerEntryRepository
+	Journal() domain.JournalRepository
+	ProductTransaction() domain.ProductTransactionRepository
+	PaymentRequest() domain.PaymentRequestRepository
+	FeeConfig() domain.FeeConfigRepository
+	Disbursement() domain.DisbursementRepository
+	SettlementBatch() domain.SettlementBatchRepository
+	SettlementItem() domain.SettlementItemRepository
+	ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository
+	Verification() domain.VerificationRepository
+}
+
+// PostgresRepositoryProvider implements RepositoryProvider interface with PostgreSQL.
+type PostgresRepositoryProvider struct {
 	db *sql.DB
 }
 
-func NewRepositoryProvider(db *sql.DB) *RepositoryProvider {
-	return &RepositoryProvider{db: db}
+func NewRepositoryProvider(db *sql.DB) RepositoryProvider {
+	return &PostgresRepositoryProvider{db: db}
 }
 
-func (p *RepositoryProvider) Account() domain.AccountRepository {
+func (p *PostgresRepositoryProvider) Account() domain.AccountRepository {
 	return NewPostgresAccountRepository(p.db)
 }
 
-func (p *RepositoryProvider) LedgerEntry() domain.LedgerEntryRepository {
+func (p *PostgresRepositoryProvider) LedgerEntry() domain.LedgerEntryRepository {
 	return NewPostgresLedgerEntryRepository(p.db)
 }
 
-func (p *RepositoryProvider) Journal() domain.JournalRepository {
+func (p *PostgresRepositoryProvider) Journal() domain.JournalRepository {
 	return NewPostgresJournalRepository(p.db)
 }
 
-func (p *RepositoryProvider) ProductTransaction() domain.ProductTransactionRepository {
+func (p *PostgresRepositoryProvider) ProductTransaction() domain.ProductTransactionRepository {
 	return NewPostgresProductTransactionRepository(p.db)
 }
 
-func (p *RepositoryProvider) PaymentRequest() domain.PaymentRequestRepository {
+func (p *PostgresRepositoryProvider) PaymentRequest() domain.PaymentRequestRepository {
 	return NewPostgresPaymentRequestRepository(p.db)
 }
 
-func (p *RepositoryProvider) FeeConfig() domain.FeeConfigRepository {
+func (p *PostgresRepositoryProvider) FeeConfig() domain.FeeConfigRepository {
 	return NewPostgresFeeConfigRepository(p.db)
 }
 
-func (p *RepositoryProvider) Disbursement() domain.DisbursementRepository {
+func (p *PostgresRepositoryProvider) Disbursement() domain.DisbursementRepository {
 	return NewPostgresDisbursementRepository(p.db)
 }
 
-func (p *RepositoryProvider) SettlementBatch() domain.SettlementBatchRepository {
+func (p *PostgresRepositoryProvider) SettlementBatch() domain.SettlementBatchRepository {
 	return NewPostgresSettlementBatchRepository(p.db)
 }
 
-func (p *RepositoryProvider) SettlementItem() domain.SettlementItemRepository {
+func (p *PostgresRepositoryProvider) SettlementItem() domain.SettlementItemRepository {
 	return NewPostgresSettlementItemRepository(p.db)
 }
 
-func (p *RepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
+func (p *PostgresRepositoryProvider) ReconciliationDiscrepancy() domain.ReconciliationDiscrepancyRepository {
 	return NewPostgresReconciliationDiscrepancyRepository(p.db)
 }
 
-func (p *RepositoryProvider) Verification() domain.VerificationRepository {
+func (p *PostgresRepositoryProvider) Verification() domain.VerificationRepository {
 	return NewPostgresVerificationRepository(p.db)
 }

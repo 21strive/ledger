@@ -62,8 +62,12 @@ func NewSettlementItem(
 		ProductTransactionUUID: "", // Will be set when matched
 		InvoiceNumber:          invoiceNumber,
 		SubAccount:             subAccount,
+		TransactionAmount:      amount,
+		PayToMerchant:          payToMerchant,
+		AllocatedFee:           fee,
 		CSVRowNumber:           csvRowNumber,
 		RawCSVData:             rawCSVData,
+		IsMatched:              false,
 	}
 	redifu.InitRecord(si)
 	return si, nil

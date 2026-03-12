@@ -40,7 +40,7 @@ func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logge
 		txProvider:   txProvider,
 		logger:       logger,
 		dokuClient:   dokuClient,
-		repoProvider: *repoProvider,
+		repoProvider: repoProvider,
 		s3:           s3.NewFromConfig(awsConfig),
 	}
 }
@@ -1117,7 +1117,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			MatchStatus:    "NOT_VERIFIED",
 		}
 
-		if sellerAccount.DokuSubAccountID != "" {
+		if sellerAccount.DokuSubAccountID != "" && c.dokuClient != nil {
 			dokuBalance, dokuErr := c.dokuClient.GetBalance(sellerAccount.DokuSubAccountID)
 			if dokuErr == nil && dokuBalance != nil && dokuBalance.Balance != nil {
 				verification.DokuAPIChecked = true
