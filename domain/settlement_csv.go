@@ -97,6 +97,43 @@ const (
 	minColumnCount        = 12 // Minimum required columns
 )
 
+// Expected header column names (case-insensitive matching)
+var expectedHeaderColumns = []string{
+	"NO",
+	"MERCHANT NAME",
+	"PAYMENT CHANNEL NAME",
+	"TRANSACTION DATE",
+	"INVOICE NUMBER",
+}
+
+// isHeaderRow checks if the given row is a valid header row
+// by checking if it contains expected column names
+func isHeaderRow(row []string) bool {
+	if len(row) < minColumnCount {
+		return false
+	}
+
+	// Check if the row contains key header column names
+	// We check the first few columns for expected names
+	matchCount := 0
+	for i, expected := range expectedHeaderColumns {
+		if i >= len(row) {
+			break
+		}
+
+		actual := strings.TrimSpace(strings.ToUpper(row[i]))
+		expectedUpper := strings.ToUpper(expected)
+
+		// Exact match or contains the expected text
+		if actual == expectedUpper || strings.Contains(actual, expectedUpper) {
+			matchCount++
+		}
+	}
+
+	// Require at least 3 out of 5 key columns to match
+	return matchCount >= 3
+}
+
 // Parse reads and parses a DOKU settlement CSV from a reader
 // The CSV format includes:
 // - Lines 1-9: Metadata (Total Amount Purchase, Total Fee, etc.)
@@ -123,19 +160,34 @@ func (p *DokuSettlementCSVParser) Parse(reader io.Reader) error {
 		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to parse metadata: %w", err))
 	}
 
-	// Skip blank line (row 10)
-	_, err := csvReader.Read()
+	// Read next row - could be blank line or header
+	nextRow, err := csvReader.Read()
 	if err != nil {
-		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to skip blank row: %w", err))
+		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to read row after metadata: %w", err))
 	}
 
-	// Read column header row (row 11)
-	header, err := csvReader.Read()
-	if err != nil {
-		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to read CSV header: %w", err))
+	var header []string
+
+	// Check if this row is the header
+	if isHeaderRow(nextRow) {
+		// It's the header itself (no blank line in this CSV)
+		header = nextRow
+	} else {
+		// It might be a blank line or invalid row, read the next row
+		header, err = csvReader.Read()
+		if err != nil {
+			return ledgererr.ErrInvalidSettlementCSVFormat.WithError(fmt.Errorf("failed to read CSV header: %w", err))
+		}
+
+		// Validate the header we just read
+		if !isHeaderRow(header) {
+			return ledgererr.ErrInvalidSettlementCSVFormat.WithError(
+				fmt.Errorf("expected header row with columns like NO, MERCHANT NAME, INVOICE NUMBER, but got: %v", header),
+			)
+		}
 	}
 
-	// Validate header
+	// Validate header has minimum columns
 	if len(header) < minColumnCount {
 		return ledgererr.ErrInvalidSettlementCSVFormat.WithError(
 			fmt.Errorf("CSV has %d columns, expected at least %d", len(header), minColumnCount),

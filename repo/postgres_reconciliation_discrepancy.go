@@ -32,7 +32,7 @@ func (r *PostgresReconciliationDiscrepancyRepository) Save(ctx context.Context, 
 			status, detected_at, resolved_at, resolution_notes,
 			created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-		ON CONFLICT (settlement_batch_uuid) DO UPDATE SET
+		ON CONFLICT (account_uuid, settlement_batch_uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			resolved_at = EXCLUDED.resolved_at,
 			resolution_notes = EXCLUDED.resolution_notes,
