@@ -849,7 +849,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 					"error", err,
 				)
 			} else if sellerAccount.DokuSubAccountID != "" && sellerAccount.DokuSubAccountID != csvRow.SubAccount {
-				c.logger.WarnContext(ctx, "SubAccount mismatch - CSV SubAccount differs from seller's account",
+				c.logger.WarnContext(ctx, "SubAccount mismatch - CSV SubAccount differs from seller's account, transaction will not be settled",
 					"invoice_number", csvRow.InvoiceNumber,
 					"product_tx_id", productTx.UUID,
 					"csv_sub_account", csvRow.SubAccount,
@@ -858,13 +858,18 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 				discrepancies = append(discrepancies, DiscrepancySummary{
 					Type:          "SUBACCOUNT_MISMATCH",
 					InvoiceNumber: csvRow.InvoiceNumber,
-					Message:       fmt.Sprintf("CSV SubAccount (%s) != Seller Account (%s)", csvRow.SubAccount, sellerAccount.DokuSubAccountID),
+					Message:       fmt.Sprintf("CSV SubAccount (%s) != Seller Account (%s) - Transaction NOT settled", csvRow.SubAccount, sellerAccount.DokuSubAccountID),
 				})
+				// Mark as unmatched and skip settlement for this transaction
+				item.IsMatched = false
+				batch.IncrementUnmatched()
+				settlementItems = append(settlementItems, item)
+				continue
 			}
 		}
 
 		if item.HasAmountDiscrepancy() {
-			c.logger.WarnContext(ctx, "Amount discrepancy in settlement",
+			c.logger.WarnContext(ctx, "Amount discrepancy in settlement - transaction will not be settled",
 				"invoice_number", csvRow.InvoiceNumber,
 				"product_tx_id", productTx.UUID,
 				"csv_pay_to_merchant", csvRow.PayToMerchant,
@@ -875,15 +880,22 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 				Type:          "AMOUNT_MISMATCH",
 				InvoiceNumber: csvRow.InvoiceNumber,
 				Amount:        item.AmountDiscrepancy,
-				Message:       fmt.Sprintf("CSV PayToMerchant (%d) != ProductTx SellerPrice+PlatformFee (%d)", csvRow.PayToMerchant, item.ExpectedNetAmount),
+				Message:       fmt.Sprintf("CSV PayToMerchant (%d) != ProductTx Expected (%d) - Transaction NOT settled", csvRow.PayToMerchant, item.ExpectedNetAmount),
 			})
 			// Track per seller
 			sellerDisc := sellerItemDiscrepancies[productTx.SellerAccountID]
 			sellerDisc.count++
 			sellerDisc.total += item.AmountDiscrepancy
 			sellerItemDiscrepancies[productTx.SellerAccountID] = sellerDisc
+
+			// Mark as unmatched and skip settlement for this transaction
+			item.IsMatched = false
+			batch.IncrementUnmatched()
+			settlementItems = append(settlementItems, item)
+			continue
 		}
 
+		// Only process matching transactions from here onwards
 		if productTx.IsCompleted() {
 			productTx.MarkSettled()
 		}
