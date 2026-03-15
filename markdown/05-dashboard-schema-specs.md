@@ -38,6 +38,10 @@ Tracks the execution state of each micro-batch job.
 ```sql
 analytics_microbatch_log {
   uuid              VARCHAR(255) PRIMARY KEY
+  randid            VARCHAR(255)
+  created_at        TIMESTAMP
+  updated_at        TIMESTAMP
+
   job_name          VARCHAR(50)    -- e.g., 'fact_revenue_timeseries_loader'
   batch_start       TIMESTAMP      -- When this job execution started
   batch_end         TIMESTAMP      -- The data cutoff timestamp (high watermark)
@@ -79,6 +83,10 @@ Definitions of the shared dimension tables used across all metric facts.
 ```sql
 dim_date {
   uuid              VARCHAR(255) PRIMARY KEY
+  randid            VARCHAR(255)
+  created_at        TIMESTAMP
+  updated_at        TIMESTAMP
+
   date_key          INT            -- YYYYMMDD
   date              DATE, ...
 }
@@ -95,6 +103,10 @@ Tracks changes in account ownership type, email, or currency over time.
 ```sql
 dim_account {
   uuid                    VARCHAR(255) PRIMARY KEY
+  randid                  VARCHAR(255)
+  created_at              TIMESTAMP
+  updated_at              TIMESTAMP
+
   account_id              UUID           -- FK to ledger_accounts.id
   owner_type              VARCHAR(50)    -- SELLER | BUYER | PLATFORM
   email                   VARCHAR(255)
@@ -112,8 +124,8 @@ dim_account {
 
 ```sql
 -- Insert new record on change detection
-INSERT INTO dim_account (...)
-SELECT gen_random_uuid(), id, owner_type, ...
+INSERT INTO dim_account (uuid, randid, created_at, updated_at, ...)
+SELECT gen_random_uuid(), gen_random_uuid(), NOW(), NOW(), id, owner_type, ...
 FROM ledger_accounts la
 WHERE la.updated_at > :last_watermark
 ```
@@ -129,6 +141,10 @@ Captures historical bank accounts used for withdrawals.
 ```sql
 dim_bank_account {
   uuid              VARCHAR(255) PRIMARY KEY
+  randid            VARCHAR(255)
+  created_at        TIMESTAMP
+  updated_at        TIMESTAMP
+
   account_uuid      VARCHAR(255)   -- FK to dim_account.uuid
   bank_code         VARCHAR(50)
   account_number    VARCHAR(50)
@@ -154,6 +170,10 @@ dim_bank_account {
 ```sql
 dim_transaction_type {
   uuid                     VARCHAR(255) PRIMARY KEY
+  randid                   VARCHAR(255)
+  created_at               TIMESTAMP
+  updated_at               TIMESTAMP
+
   transaction_type_key     INT
   source_type              VARCHAR(50)   -- PAYMENT | DISBURSEMENT
   payment_channel          VARCHAR(50)   -- QRIS | VA
@@ -168,6 +188,10 @@ dim_transaction_type {
 ```sql
 dim_ledger_bucket {
   uuid          VARCHAR(255) PRIMARY KEY
+  randid        VARCHAR(255)
+  created_at    TIMESTAMP
+  updated_at    TIMESTAMP
+
   bucket_key    VARCHAR(50)    -- PENDING | AVAILABLE
 }
 ```
@@ -179,6 +203,10 @@ dim_ledger_bucket {
 ```sql
 dim_ledger_entry_type {
   uuid              VARCHAR(255) PRIMARY KEY
+  randid            VARCHAR(255)
+  created_at        TIMESTAMP
+  updated_at        TIMESTAMP
+
   entry_type_key    VARCHAR(50)    -- CREDIT | DEBIT
 }
 ```
@@ -190,6 +218,10 @@ dim_ledger_entry_type {
 ```sql
 dim_subscription {
   uuid                  VARCHAR(255) PRIMARY KEY
+  randid                VARCHAR(255)
+  created_at            TIMESTAMP
+  updated_at            TIMESTAMP
+
   subscription_status   VARCHAR(50)
 }
 ```
@@ -201,8 +233,13 @@ dim_subscription {
 ```sql
 dim_bank {
   uuid        VARCHAR(255) PRIMARY KEY
+  randid      VARCHAR(255)
+  created_at  TIMESTAMP
+  updated_at  TIMESTAMP
+
   bank_code   VARCHAR(10) UNIQUE   -- 014 (BCA)
   bank_name   VARCHAR(255)
+  swift_code  VARCHAR(20)
 }
 ```
 
@@ -213,6 +250,10 @@ dim_bank {
 ```sql
 dim_payment_channel {
   uuid                  VARCHAR(255) PRIMARY KEY
+  randid                VARCHAR(255)
+  created_at            TIMESTAMP
+  updated_at            TIMESTAMP
+
   payment_channel_key   VARCHAR(50)
   is_virtual_account    BOOLEAN
   settlement_days       INT
@@ -226,6 +267,10 @@ dim_payment_channel {
 ```sql
 dim_account_status {
   uuid          VARCHAR(255) PRIMARY KEY
+  randid        VARCHAR(255)
+  created_at    TIMESTAMP
+  updated_at    TIMESTAMP
+
   status_key    VARCHAR(50)    -- ACTIVE | SUSPENDED
 }
 ```
@@ -237,6 +282,10 @@ dim_account_status {
 ```sql
 dim_transaction_status {
   uuid          VARCHAR(255) PRIMARY KEY
+  randid        VARCHAR(255)
+  created_at    TIMESTAMP
+  updated_at    TIMESTAMP
+
   status_key    VARCHAR(50)    -- PENDING | COMPLETED | SETTLED
   is_terminal   BOOLEAN
 }
@@ -249,6 +298,10 @@ dim_transaction_status {
 ```sql
 dim_product_type {
   uuid                VARCHAR(255) PRIMARY KEY
+  randid              VARCHAR(255)
+  created_at          TIMESTAMP
+  updated_at          TIMESTAMP
+
   product_type_key    VARCHAR(50)    -- PHOTO | FOLDER | SUBSCRIPTION
 }
 ```
@@ -260,6 +313,10 @@ dim_product_type {
 ```sql
 dim_account_owner_type {
   uuid              VARCHAR(255) PRIMARY KEY
+  randid            VARCHAR(255)
+  created_at        TIMESTAMP
+  updated_at        TIMESTAMP
+
   owner_type_key    VARCHAR(50)    -- SELLER | BUYER | PLATFORM
 }
 ```
@@ -277,6 +334,8 @@ dim_account_owner_type {
 fact_revenue_timeseries {
   uuid                        VARCHAR(255) PRIMARY KEY
   randid                      VARCHAR(255)
+  created_at                  TIMESTAMP
+  updated_at                  TIMESTAMP
 
   -- Time grain
   date_key                    INT           -- YYYYMMDD of interval start (e.g. 20260313)
@@ -293,8 +352,6 @@ fact_revenue_timeseries {
   -- Count metrics
   transaction_count           INT           -- COUNT COMPLETED transactions in interval
   settlement_transaction_count INT          -- COUNT SETTLED transactions in interval
-
-  data_freshness              TIMESTAMP
 }
 ```
 
@@ -340,18 +397,22 @@ recalculated AS (
   GROUP BY ai.date_key, ai.interval_type
 )
 INSERT INTO fact_revenue_timeseries (
+  uuid, randid, created_at, updated_at,
   date_key, interval_type, convenience_fee_total, subscription_fee_total, gateway_fee_paid_total,
-  total_revenue, net_revenue_after_gateway, settlement_transaction_count, data_freshness
+  total_revenue, net_revenue_after_gateway, settlement_transaction_count
 )
 SELECT
+  gen_random_uuid(), gen_random_uuid(), NOW(), NOW(),
   date_key, interval_type,
   convenience_fee_total, subscription_fee_total, gateway_fee_paid_total,
   convenience_fee_total + subscription_fee_total,
   convenience_fee_total + subscription_fee_total - gateway_fee_paid_total,
-  settlement_transaction_count, NOW()
+  settlement_transaction_count
 FROM recalculated
 ON CONFLICT (date_key, interval_type) DO UPDATE SET
   convenience_fee_total = EXCLUDED.convenience_fee_total,
+  updated_at = NOW();
+
   subscription_fee_total = EXCLUDED.subscription_fee_total, updated_at = NOW();
 ```
 
@@ -367,6 +428,9 @@ ON CONFLICT (date_key, interval_type) DO UPDATE SET
 ```sql
 fact_platform_balance {
   uuid                        VARCHAR(255) PRIMARY KEY  -- Always 'platform-singleton'
+  randid                      VARCHAR(255)
+  created_at                  TIMESTAMP
+  updated_at                  TIMESTAMP
 
   -- Platform Revenue (YTD)
   total_revenue_ytd           BIGINT   -- convenience_fee_ytd + subscription_fee_ytd
@@ -378,8 +442,6 @@ fact_platform_balance {
   settlement_pending_count    INT      -- Transactions awaiting settlement (COMPLETED state)
   settlement_completed_count  INT      -- Transactions fully settled (SETTLED state)
   active_transactions_count   INT      -- Volume metric (Last 30 days)
-
-  snapshot_timestamp          TIMESTAMP
 }
 ```
 
@@ -425,8 +487,8 @@ platform_snapshot AS (
   SELECT pending_balance, available_balance, pending_balance + available_balance AS total
   FROM ledger_accounts WHERE owner_type = 'PLATFORM' LIMIT 1
 )
-INSERT INTO fact_platform_balance (uuid, ...)
-VALUES ('platform-singleton', ...)
+INSERT INTO fact_platform_balance (uuid, randid, created_at, updated_at, ...)
+VALUES ('platform-singleton', gen_random_uuid(), NOW(), NOW(), ...)
 ON CONFLICT (uuid) DO UPDATE SET
   convenience_fee_ytd        = fact_platform_balance.convenience_fee_ytd + (SELECT delta_convenience FROM revenue_deltas),
   subscription_fee_ytd       = fact_platform_balance.subscription_fee_ytd + (SELECT delta_subscription FROM revenue_deltas),
@@ -508,7 +570,12 @@ fact_platform_balance {
 
 ```sql
 fact_user_accumulation {
-  account_uuid                VARCHAR(255) PRIMARY KEY -- FK to ledger_accounts
+  uuid                        VARCHAR(255) PRIMARY KEY
+  randid                      VARCHAR(255)
+  created_at                  TIMESTAMP
+  updated_at                  TIMESTAMP
+
+  account_uuid                VARCHAR(255)             -- FK to ledger_accounts
   dim_account_uuid            VARCHAR(255)             -- FK to dim_account (owner details)
 
   -- Wallet Metrics
@@ -541,17 +608,17 @@ fact_user_accumulation {
 
 ```sql
 INSERT INTO fact_user_accumulation (
+  uuid, randid, created_at, updated_at,
   account_uuid, dim_account_uuid, total_earnings, current_pending_balance,
   current_available_balance, total_withdrawn, safe_balance_to_withdraw,
-  account_status, has_pending_balance, has_available_balance,
-  data_freshness
+  account_status, has_pending_balance, has_available_balance
 )
 SELECT
+  gen_random_uuid(), gen_random_uuid(), NOW(), NOW(),
   la.uuid, da.uuid,
   la.total_deposit_amount, la.pending_balance, la.available_balance,
   la.total_withdrawal_amount, LEAST(la.available_balance, la.expected_available_balance),
-  'ACTIVE', (la.pending_balance > 0), (la.available_balance > 0),
-  NOW()
+  'ACTIVE', (la.pending_balance > 0), (la.available_balance > 0)
 FROM ledger_accounts la
 JOIN dim_account da ON da.account_id = la.id AND da.is_current = true
 WHERE la.owner_type = 'SELLER'
@@ -575,6 +642,9 @@ ON CONFLICT (account_uuid) DO UPDATE SET
 ```sql
 fact_ledger_timeseries {
   uuid                        VARCHAR(255) PRIMARY KEY
+  randid                      VARCHAR(255)
+  created_at                  TIMESTAMP
+  updated_at                  TIMESTAMP
 
   -- Dimensions
   date_key                    INT            -- YYYYMMDD
@@ -641,14 +711,16 @@ recalculated AS (
   GROUP BY ag.date_key, ag.bucket, ag.entry_direction, le.currency
 )
 INSERT INTO fact_ledger_timeseries (
+  uuid, randid, created_at, updated_at,
   date_key, bucket, entry_direction,
   entry_count, total_amount, avg_amount, min_amount, max_amount,
-  currency, data_freshness
+  currency
 )
 SELECT
+  gen_random_uuid(), gen_random_uuid(), NOW(), NOW(),
   date_key, bucket, entry_direction,
   entry_count, total_amount, avg_amount::BIGINT, min_amount, max_amount,
-  currency, data_freshness
+  currency
 FROM recalculated
 ON CONFLICT (date_key, bucket, entry_direction) DO UPDATE SET
   entry_count = EXCLUDED.entry_count,
@@ -724,6 +796,9 @@ FROM fact_ledger_timeseries;
 ```sql
 fact_withdrawal_timeseries {
   uuid                        VARCHAR(255) PRIMARY KEY
+  randid                      VARCHAR(255)
+  created_at                  TIMESTAMP
+  updated_at                  TIMESTAMP
 
   -- Time grain
   date_key                    INT            -- YYYYMMDD
@@ -783,11 +858,17 @@ recalculated AS (
   GROUP BY ai.date_key, ai.interval_type
 )
 INSERT INTO fact_withdrawal_timeseries (
+  uuid, randid, created_at, updated_at,
   date_key, interval_type,
   attempt_count, success_count, failed_count,
   total_requested_amount, total_disbursed_amount, avg_processing_time_sec
 )
-SELECT * FROM recalculated
+SELECT
+  gen_random_uuid(), gen_random_uuid(), NOW(), NOW(),
+  r.date_key, r.interval_type,
+  r.attempt_count, r.success_count, r.failed_count,
+  r.total_requested_amount, r.total_disbursed_amount, r.avg_processing_time_sec
+FROM recalculated r
 ON CONFLICT (date_key, interval_type) DO UPDATE SET
   success_count = EXCLUDED.success_count,
   total_disbursed_amount = EXCLUDED.total_disbursed_amount,
