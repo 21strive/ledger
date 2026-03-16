@@ -138,12 +138,16 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 			entry.BalanceAfter = balanceTracker[key]
 		}
 
-		metadataJSON, err := marshalMetadata(entry.Metadata)
-		if err != nil {
-			return ErrFailedInsertSQL.WithError(err)
+		var metadataArg any
+		if len(entry.Metadata) > 0 {
+			metadataJSON, err := marshalMetadata(entry.Metadata)
+			if err != nil {
+				return ErrFailedInsertSQL.WithError(err)
+			}
+			metadataArg = metadataJSON
 		}
 
-		_, err = r.db.ExecContext(
+		_, err := r.db.ExecContext(
 			ctx,
 			query,
 			entry.UUID,
@@ -156,7 +160,7 @@ func (r *PostgresLedgerEntryRepository) SaveBatch(ctx context.Context, entries [
 			entry.SourceType,
 			entry.SourceID,
 			entry.BalanceAfter,
-			metadataJSON,
+			metadataArg,
 			entry.CreatedAt,
 			entry.UpdatedAt,
 		)
