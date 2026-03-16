@@ -209,9 +209,9 @@ func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, 
 	return &account, nil
 }
 
-// CreatePaymentGatewayAccount creates a PAYMENT_GATEWAY-type account (singleton, like platform).
-func (c *LedgerClient) CreatePaymentGatewayAccount(ctx context.Context, email string, currency domain.Currency) (*domain.Account, error) {
-	ownerID := string(domain.OwnerTypePaymentGateway)
+// CreatePaymentGatewayAccount creates a PAYMENT_GATEWAY-type account (singleton, no DOKU sub-account).
+func (c *LedgerClient) CreatePaymentGatewayAccount(ctx context.Context, currency domain.Currency) (*domain.Account, error) {
+	ownerID := "DOKU"
 	existing, err := c.repoProvider.Account().GetPaymentGatewayAccount(ctx)
 	if err == nil {
 		c.logger.InfoContext(ctx, "Payment gateway account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.UUID)
@@ -221,37 +221,7 @@ func (c *LedgerClient) CreatePaymentGatewayAccount(ctx context.Context, email st
 		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to check existing payment gateway account", err)
 	}
 
-	// Provision DOKU sub-account
-	var dokuSubAccountID string
-	response, dokuErr := c.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
-		Email: email,
-		Name:  ownerID,
-	})
-	c.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
-
-	if dokuErr != nil {
-		if dokuErr.StatusCode == http.StatusConflict {
-			messageStr := fmt.Sprintf("%v", dokuErr.Message)
-			re := regexp.MustCompile(`account id:\s*(SAC-[\w-]+)`)
-			matches := re.FindStringSubmatch(messageStr)
-			if len(matches) > 1 {
-				dokuSubAccountID = matches[1]
-				c.logger.InfoContext(ctx, "Email already registered, using existing SAC ID", "sac_id", dokuSubAccountID, "email", email)
-			} else {
-				return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists,
-					"DOKU sub account already exists but could not extract SAC ID",
-					fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-			}
-		} else {
-			return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
-				"failed to create DOKU sub account",
-				fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-		}
-	} else {
-		dokuSubAccountID = response.ID.String
-	}
-
-	account := domain.NewPaymentGatewayAccount(dokuSubAccountID, ownerID, currency)
+	account := domain.NewPaymentGatewayAccount("", ownerID, currency)
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
 		if err := tx.Account().Save(ctx, &account); err != nil {
 			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to create payment gateway account", err)
