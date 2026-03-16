@@ -155,7 +155,7 @@ func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, emai
 
 // CreatePlatformAccount creates a PLATFORM-type account (no DOKU sub-account creation).
 func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, currency domain.Currency) (*domain.Account, error) {
-	ownerID := "PLATFORM"
+	ownerID := domain.OWNER_TYPE_PLATFORM
 	existing, err := c.repoProvider.Account().GetByOwner(ctx, domain.OwnerTypePlatform, ownerID)
 	if err == nil {
 		c.logger.InfoContext(ctx, "Platform account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.UUID)
