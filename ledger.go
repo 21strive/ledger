@@ -155,7 +155,7 @@ func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, emai
 
 // CreatePlatformAccount creates a PLATFORM-type account (no DOKU sub-account creation).
 func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, currency domain.Currency) (*domain.Account, error) {
-	ownerID := "PLATFORM"
+	ownerID := domain.OWNER_TYPE_PLATFORM
 	existing, err := c.repoProvider.Account().GetByOwner(ctx, domain.OwnerTypePlatform, ownerID)
 	if err == nil {
 		c.logger.InfoContext(ctx, "Platform account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.UUID)
@@ -204,6 +204,32 @@ func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, 
 	})
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "transaction failed while creating platform account", err)
+	}
+
+	return &account, nil
+}
+
+// CreatePaymentGatewayAccount creates a PAYMENT_GATEWAY-type account (singleton, no DOKU sub-account).
+func (c *LedgerClient) CreatePaymentGatewayAccount(ctx context.Context, currency domain.Currency) (*domain.Account, error) {
+	ownerID := "DOKU"
+	existing, err := c.repoProvider.Account().GetPaymentGatewayAccount(ctx)
+	if err == nil {
+		c.logger.InfoContext(ctx, "Payment gateway account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.UUID)
+		return existing, nil
+	}
+	if !ledgererr.IsAppError(err, repo.ErrNotFound) {
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to check existing payment gateway account", err)
+	}
+
+	account := domain.NewPaymentGatewayAccount("", ownerID, currency)
+	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		if err := tx.Account().Save(ctx, &account); err != nil {
+			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to create payment gateway account", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "transaction failed while creating payment gateway account", err)
 	}
 
 	return &account, nil

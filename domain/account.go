@@ -21,8 +21,9 @@ const (
 type OwnerType string
 
 const (
+	OWNER_TYPE_PLATFORM               = "PLATFORM"
 	OwnerTypeSeller         OwnerType = "SELLER"
-	OwnerTypePlatform       OwnerType = "PLATFORM"
+	OwnerTypePlatform       OwnerType = OWNER_TYPE_PLATFORM
 	OwnerTypePaymentGateway OwnerType = "PAYMENT_GATEWAY"
 )
 
