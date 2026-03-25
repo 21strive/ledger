@@ -926,3 +926,181 @@ ORDER BY d.created_at DESC;
 | **8. Account Profile**     | `dim_account` + `dim_bank_account`  | Per Account           | Profile/Bank Change |
 | **9. Withdrawal Master**   | `fact_withdrawal_timeseries`        | Daily                 | Disbursement Update |
 | **10. Withdrawal History** | `disbursements` (Raw)               | Transaction           | Real-time           |
+
+---
+
+## 11. Dashboard Query Recipes
+
+Sample SQL queries for populating specific dashboard pages.
+
+### A. Dashboard Overview (`/`)
+
+**Components**:
+
+1. **Cards**: Total Revenue | Platform Balance in Wallet | Total Active Sellers
+2. **Chart**: Revenue Trend (Last 30 Days)
+
+```sql
+-- 1. Overview Cards (Single Query)
+SELECT
+  -- Revenue Card (YTD)
+  total_revenue_ytd,
+  (convenience_fee_ytd + subscription_fee_ytd) AS current_revenue,
+
+  -- Platform Wallet Card
+  platform_total_balance,
+  platform_available_balance,
+
+  -- Users Card
+  total_seller_accounts,
+  active_transactions_count AS active_users_last_30d
+FROM fact_platform_balance
+WHERE uuid = 'platform-singleton';
+
+-- 2. Revenue Trend Chart (Daily)
+SELECT
+  date_key,
+  convenience_fee_total + subscription_fee_total AS total_revenue,
+  gateway_fee_paid_total AS expense_gateway,
+  settlement_transaction_count
+FROM fact_revenue_timeseries
+WHERE interval_type = 'DAILY'
+  AND date_key >= CAST(TO_CHAR(NOW() - INTERVAL '30 days', 'YYYYMMDD') AS INT)
+ORDER BY date_key ASC;
+```
+
+### B. Platform Wallet (`/platform-wallet`)
+
+**Components**:
+
+1. **Detail Cards**: Available Balance | Pending In-Flight | Total Withdrawn
+2. **Chart**: Fee Collection vs Expenses (Monthly)
+
+```sql
+-- 1. Wallet Detail Cards
+SELECT
+  platform_available_balance,
+  platform_pending_balance,
+  platform_total_balance,
+
+  -- Pending Settlements (In-flight money)
+  settlement_pending_count,
+
+  -- Lifetime Stats
+  total_revenue_ytd,
+  gateway_fee_ytd
+FROM fact_platform_balance
+WHERE uuid = 'platform-singleton';
+
+-- 2. Financial Performance Chart (Monthly)
+SELECT
+  date_key, -- YYYYMM
+  interval_label, -- "2026-03"
+  (convenience_fee_total + subscription_fee_total) AS revenue_in,
+  gateway_fee_paid_total AS expenses_out,
+  net_revenue_after_gateway AS net_profit
+FROM fact_revenue_timeseries
+WHERE interval_type = 'MONTHLY'
+  AND date_key >= CAST(TO_CHAR(NOW() - INTERVAL '12 months', 'YYYYMM') AS INT)
+ORDER BY date_key DESC;
+```
+
+### C. User Wallets (`/user-wallets`)
+
+**Components**:
+
+1. **Filterable Table**: List of sellers with balances and status
+2. **Action**: View details
+
+```sql
+-- 1. Seller Wallet List (Pagination: Offset/Limit)
+SELECT
+  da.account_id,        -- Link to detailed view
+  da.email,
+  da.owner_type,        -- Should be SELLER
+
+  fua.current_available_balance, -- Primary Sort Column
+  fua.current_pending_balance,
+  fua.total_earnings,   -- Lifetime value
+  fua.total_withdrawn,
+
+  fua.account_status,   -- Badge color
+  fua.updated_at        -- Last activity
+FROM fact_user_accumulation fua
+JOIN dim_account da ON fua.dim_account_uuid = da.uuid
+WHERE da.is_current = TRUE
+  AND (:search IS NULL OR da.email ILIKE :search)
+ORDER BY fua.current_available_balance DESC
+LIMIT :limit OFFSET :offset;
+```
+
+### D. Withdrawals (`/withdrawals`)
+
+**Components**:
+
+1. **Status Cards**: Pending Requests | Successfully Disbursed Today
+2. **Table**: Recent withdrawal history with bank info
+
+```sql
+-- 1. Withdrawal Status Overview (Today)
+SELECT
+  count(*) FILTER (WHERE status = 'PENDING') as pending_count,
+  count(*) FILTER (WHERE status = 'COMPLETED') as completed_today,
+  COALESCE(sum(amount) FILTER (WHERE status = 'COMPLETED'), 0) as amount_disbursed_today
+FROM disbursements
+WHERE created_at >= CURRENT_DATE;
+
+-- 2. Withdrawal List (Rich Details)
+SELECT
+  d.id,
+  d.created_at,
+  d.amount,
+  d.currency,
+  d.status,          -- PENDING | COMPLETED | FAILED
+  d.failure_reason,
+
+  -- Bank Details
+  dim_bank.bank_name,
+  d.account_number,
+  d.account_name
+FROM disbursements d
+LEFT JOIN dim_bank ON d.bank_code = dim_bank.bank_code
+ORDER BY d.created_at DESC
+LIMIT :limit OFFSET :offset;
+```
+
+### E. Transactions (`/transactions`)
+
+**Components**:
+
+1. **Table**: Master list of all financial movements (Sales, Settlements, Fees)
+
+```sql
+-- 1. Master Transaction List
+-- Note: Hits Raw Ledger Entries for auditability, joined with Product info
+SELECT
+  le.id,
+  le.created_at,
+
+  -- Amount & Flow
+  le.amount,
+  le.currency,
+  le.entry_type,      -- CREDIT | DEBIT
+  le.balance_bucket,  -- AVAILABLE | PENDING
+
+  -- Context
+  le.source_type,     -- PRODUCT_TRANSACTION | DISBURSEMENT
+  le.description,
+
+  -- Related Product Info (Index usage critical here)
+  pt.invoice_number,
+  pt.product_type
+FROM ledger_entries le
+LEFT JOIN product_transactions pt
+  ON le.source_id = pt.id
+  AND le.source_type = 'PRODUCT_TRANSACTION'
+WHERE (:account_id IS NULL OR le.ledger_account_id = :account_id)
+  AND (:date_from IS NULL OR le.created_at >= :date_from)
+ORDER BY le.created_at DESC
+LIMIT :limit OFFSET :offset;
+```

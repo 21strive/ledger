@@ -1123,14 +1123,11 @@ Run migrations in order using migration tool (e.g., golang-migrate, Goose)
 
 Visual documentation of the ledger system architecture is available in the `diagrams/` directory:
 
-| Diagram                       | File                                                                                           | Description                                                |
-| ----------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Payment Flow                  | [`diagrams/01-payment-flow.md`](diagrams/01-payment-flow.md)                                   | Complete payment lifecycle from purchase to settlement     |
-| Safe Disbursement Flow        | [`diagrams/06-safe-disbursement-flow.md`](diagrams/06-safe-disbursement-flow.md)               | Complete withdrawal flow with MIN(expected, actual) safety |
-| Disbursement Failure Rollback | [`diagrams/08-disbursement-failure-rollback.md`](diagrams/08-disbursement-failure-rollback.md) | DOKU API failure handling and balance rollback             |
-| Balance State Management      | [`diagrams/09-balance-state-management.md`](diagrams/09-balance-state-management.md)           | Complete balance update rules for all operations           |
-| CSV Reconciliation            | [`diagrams/10-reconciliation-csv-upload.md`](diagrams/10-reconciliation-csv-upload.md)         | Settlement CSV upload and reconciliation flow              |
-| Balance Update Timing         | [`docs/diagrams/11-balance-update-timing.md`](docs/diagrams/11-balance-update-timing.md)       | When balances are updated during payment lifecycle         |
+| Diagram                     | File                                                                                     | Description                                                              |
+| --------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Payment Execution           | [`diagrams/101-payment-execution.md`](diagrams/101-payment-execution.md)                 | Payment request, completion, and initial ledger recording                |
+| Settlement & Reconciliation | [`diagrams/102-settlement-reconciliation.md`](diagrams/102-settlement-reconciliation.md) | Settlement CSV upload, matching, and balance updates (Actual & Expected) |
+| Withdrawal (Disbursement)   | [`diagrams/103-withdrawal-disbursement.md`](diagrams/103-withdrawal-disbursement.md)     | Withdrawal flow using Safe Balance strategy and rollback mechanism       |
 
 See [`diagrams/README.md`](diagrams/README.md) for full documentation of all diagrams and architecture rationale.
 
