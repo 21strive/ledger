@@ -31,9 +31,10 @@ type GeneratePaymentRequest struct {
 	Metadata    map[string]any `json:"metadata"`     // Product details (title, resolution, etc.)
 
 	// Payment configuration
-	PaymentChannel string   `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
-	ExpiresIn      int64    `json:"expires_in"`      // Payment expiration in minutes (default: 60 minutes, max: 999999)
-	FeeModel       FeeModel `json:"fee_model"`       // Who pays gateway fee (defaults to GATEWAY_ON_CUSTOMER)
+	PaymentChannel  string   `json:"payment_channel"`   // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
+	ExpiresIn       int64    `json:"expires_in"`        // Payment expiration in minutes (default: 60 minutes, max: 999999)
+	FeeModel        FeeModel `json:"fee_model"`         // Who pays gateway fee (defaults to GATEWAY_ON_CUSTOMER)
+	SkipPlatformFee bool     `json:"skip_platform_fee"` // When true, platform fee is not charged
 }
 
 // GeneratePaymentResponse contains the result of payment generation
@@ -80,8 +81,8 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	// Calculate fees
 	feeCalc := domain.NewFeeCalculator(feeConfigs)
 
-	// Validate payment channel is supported
-	if !feeCalc.HasPaymentChannel(req.PaymentChannel) {
+	// Validate payment channel is supported (only when specified)
+	if req.PaymentChannel != "" && !feeCalc.HasPaymentChannel(req.PaymentChannel) {
 		return nil, ledgererr.ErrUnsupportedPaymentChannel.WithError(
 			fmt.Errorf("payment channel %q not found in fee configs, supported: %v", req.PaymentChannel, feeCalc.SupportedPaymentChannels()),
 		)
@@ -94,7 +95,10 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	}
 
 	currency := domain.Currency(req.Currency)
-	feeBreakdown := feeCalc.GetFeeBreakdownWithModel(req.SellerPrice, req.PaymentChannel, currency, feeModel)
+	feeBreakdown := feeCalc.GetFeeBreakdownWithOptions(req.SellerPrice, req.PaymentChannel, currency, domain.FeeBreakdownOptions{
+		FeeModel:        feeModel,
+		SkipPlatformFee: req.SkipPlatformFee,
+	})
 
 	c.logger.InfoContext(ctx, "Calculated fee breakdown",
 		"seller_price", feeBreakdown.SellerPrice,
@@ -431,9 +435,6 @@ func (c *LedgerClient) validateGeneratePaymentRequest(req *GeneratePaymentReques
 	}
 	if req.Currency == "" {
 		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "currency is required", nil)
-	}
-	if req.PaymentChannel == "" {
-		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "payment_channel is required", nil)
 	}
 
 	// Validate currency
