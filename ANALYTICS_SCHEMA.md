@@ -2,7 +2,6 @@
 
 **Document Status**: Draft
 **Target Audience**: Data Engineers, Backend Developers
-**Related Documents**: `ANALYTICS_SCHEMA_DESIGN.md`
 
 ## Overview
 

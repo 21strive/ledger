@@ -1119,6 +1119,14 @@ Run migrations in order using migration tool (e.g., golang-migrate, Goose)
 
 ## References
 
+### Analytics Source of Truth (CRITICAL)
+
+For any analytics-related task (schema changes, ETL logic, dimension/fact mapping, dashboard metrics, or reconciliation reporting), always reference and align with:
+
+- [`ANALYTICS_SCHEMA.md`](ANALYTICS_SCHEMA.md)
+
+If there is any conflict between implementation details and analytics assumptions, treat `ANALYTICS_SCHEMA.md` as the primary source for analytics behavior and naming.
+
 ### Architecture Diagrams
 
 Visual documentation of the ledger system architecture is available in the `diagrams/` directory:
