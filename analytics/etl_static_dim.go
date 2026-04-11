@@ -2,9 +2,7 @@ package analytics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,15 +11,28 @@ import (
 // RunStaticDimensionsETL ensures static dimensions are populated.
 func (c *LedgerAnalyticsClient) RunStaticDimensionsETL(ctx context.Context, opts ETLOptions) error {
 	jobName := "static_dimensions_loader"
+	jobStart := time.Now()
+	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "has_recalculate_date", opts.RecalculateDate != nil)
 
-	return c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
-		logID, err := c.LogMicrobatchStart(ctx, jobName, time.Now(), time.Now())
-		if err != nil {
+	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
+		// Keep dim_date maintained on every cycle (idempotent top-up),
+		// while other static dimensions are initialized only once.
+		if err := c.ensureDimDate(ctx, opts); err != nil {
+			c.logger.Error("Failed to ensure dim_date", "job", jobName, "run_id", opts.RunID, "error", err)
 			return err
 		}
 
-		if err := c.ensureDimDate(ctx); err != nil {
-			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+		alreadyCompleted, err := c.HasCompletedRun(ctx, jobName)
+		if err != nil {
+			return err
+		}
+		if alreadyCompleted {
+			c.logger.Info("Static dimensions already initialized, skipping", "job", jobName, "run_id", opts.RunID)
+			return nil
+		}
+
+		logID, err := c.LogMicrobatchStart(ctx, jobName, time.Now(), time.Now())
+		if err != nil {
 			return err
 		}
 
@@ -70,12 +81,25 @@ func (c *LedgerAnalyticsClient) RunStaticDimensionsETL(ctx context.Context, opts
 			return err
 		}
 
+		c.logger.Info("ETL job completed", "job", jobName, "run_id", opts.RunID)
 		return c.LogMicrobatchEnd(ctx, logID, StatusCompleted, 0, "Static dimensions verified")
 	})
+
+	if err != nil {
+		c.logger.Error("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "failed", "duration", time.Since(jobStart), "error", err)
+		return err
+	}
+	c.logger.Info("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "success", "duration", time.Since(jobStart))
+	return nil
 }
 
 // ensureDimDate ensures dim_date table is populated for a reasonable range.
-func (c *LedgerAnalyticsClient) ensureDimDate(ctx context.Context) error {
+// If opts.RecalculateDate is set, it force-upserts that single day.
+func (c *LedgerAnalyticsClient) ensureDimDate(ctx context.Context, opts ETLOptions) error {
+	if opts.RecalculateDate != nil {
+		return c.upsertDimDate(ctx, *opts.RecalculateDate)
+	}
+
 	today := time.Now().Truncate(24 * time.Hour)
 	todayKey := int(today.Year()*10000 + int(today.Month())*100 + today.Day())
 
@@ -93,15 +117,25 @@ func (c *LedgerAnalyticsClient) ensureDimDate(ctx context.Context) error {
 	end := start.AddDate(2, 0, 0)
 
 	for d := start; d.Before(end); d = d.AddDate(0, 0, 1) {
-		key := int(d.Year()*10000 + int(d.Month())*100 + d.Day())
-		query := `
-			INSERT INTO dim_date (uuid, randid, created_at, updated_at, date_key, date)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (date_key) DO NOTHING
-		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), key, d); err != nil {
-			return fmt.Errorf("failed to insert date %d: %w", key, err)
+		if err := c.upsertDimDate(ctx, d); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (c *LedgerAnalyticsClient) upsertDimDate(ctx context.Context, d time.Time) error {
+	normalized := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
+	key := int(normalized.Year()*10000 + int(normalized.Month())*100 + normalized.Day())
+	query := `
+		INSERT INTO dim_date (uuid, randid, created_at, updated_at, date_key, date)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (date_key) DO UPDATE SET
+			updated_at = EXCLUDED.updated_at,
+			date = EXCLUDED.date
+	`
+	if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), key, normalized); err != nil {
+		return fmt.Errorf("failed to upsert date %d: %w", key, err)
 	}
 	return nil
 }
@@ -202,29 +236,23 @@ func (c *LedgerAnalyticsClient) ensureDimAccountOwnerType(ctx context.Context) e
 }
 
 func (c *LedgerAnalyticsClient) ensureDimBank(ctx context.Context) error {
-	// Read bank_lists.json from current working directory
-	data, err := os.ReadFile("bank_lists.json")
-	if err != nil {
-		return fmt.Errorf("failed to read bank_lists.json: %w", err)
+	if c.dokuClient == nil {
+		return fmt.Errorf("doku client is not configured")
 	}
 
-	var banks []struct {
-		Name      string `json:"name"`
-		BiCode    string `json:"bi_code"`
-		SwiftCode string `json:"swift_code"`
-	}
-
-	if err := json.Unmarshal(data, &banks); err != nil {
-		return fmt.Errorf("failed to parse bank_lists.json: %w", err)
-	}
+	banks := c.dokuClient.GetSupportedBanks()
 
 	for _, bank := range banks {
+		if bank.BICode == "" {
+			continue
+		}
+
 		query := `
 			INSERT INTO dim_bank (uuid, randid, created_at, updated_at, bank_code, bank_name, swift_code)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (bank_code) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), bank.BiCode, bank.Name, bank.SwiftCode); err != nil {
+		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), bank.BICode, bank.Name, bank.SwiftCode); err != nil {
 			return err
 		}
 	}

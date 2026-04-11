@@ -14,25 +14,33 @@ type ETLOptions struct {
 	// EndTime specifies the upper bound for the data processing window.
 	// If nil, defaults to time.Now().
 	EndTime *time.Time
+	// RecalculateDate forces date-specific recalculation where supported (UTC midnight).
+	RecalculateDate *time.Time
+	// RunID is the correlation ID for one scheduler cycle across all jobs/log lines.
+	RunID string
 }
 
 // RunDimAccountETL executes the ETL job for dim_account (SCD Type 2).
 // It syncs changes from ledger_accounts to dim_account.
 func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOptions) error {
 	jobName := "dim_account_loader"
+	jobStart := time.Now()
 
 	// Default to current time if not specified
 	batchEnd := time.Now()
 	if opts.EndTime != nil {
 		batchEnd = *opts.EndTime
 	}
+	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd)
 
-	return c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
+	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
 		// 1. Get last watermark
 		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
 		if err != nil {
+			c.logger.Error("Failed to get watermark", "job", jobName, "run_id", opts.RunID, "error", err)
 			return err
 		}
+		c.logger.Info("Loaded watermark", "job", jobName, "run_id", opts.RunID, "last_watermark", lastWatermark)
 
 		// 2. Log start
 		batchStart := time.Now()
@@ -149,10 +157,19 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 
 		if err := tx.Commit(); err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, err.Error())
+			c.logger.Error("Failed to commit ETL transaction", "job", jobName, "run_id", opts.RunID, "processed_count", processedCount, "error", err)
 			return err
 		}
+		c.logger.Info("ETL job completed", "job", jobName, "run_id", opts.RunID, "processed_count", processedCount)
 
 		// 4. Log completion
 		return c.LogMicrobatchEnd(ctx, logID, StatusCompleted, processedCount, "Success")
 	})
+
+	if err != nil {
+		c.logger.Error("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "failed", "duration", time.Since(jobStart), "error", err)
+		return err
+	}
+	c.logger.Info("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "success", "duration", time.Since(jobStart))
+	return nil
 }

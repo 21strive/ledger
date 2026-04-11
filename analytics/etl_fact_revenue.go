@@ -11,8 +11,9 @@ import (
 // Source: product_transactions (status = 'SETTLED' updated since last watermark)
 func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context, opts ETLOptions) error {
 	jobName := "fact_revenue_timeseries_loader"
+	jobStart := time.Now()
 
-	return c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
+	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
 		// 1. Get Watermark
 		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
 		if err != nil {
@@ -22,6 +23,7 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 		batchEnd := time.Now()
 		c.logger.Info("Starting ETL job",
 			"job", jobName,
+			"run_id", opts.RunID,
 			"watermark", lastWatermark,
 			"batch_end", batchEnd,
 		)
@@ -112,7 +114,7 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 		}
 
 		rowsAffected, _ := result.RowsAffected()
-		c.logger.Info("ETL job completed", "job", jobName, "rows_affected", rowsAffected)
+		c.logger.Info("ETL job completed", "job", jobName, "run_id", opts.RunID, "rows_affected", rowsAffected)
 
 		// 4. Update Log & Watermark
 		if err := c.LogMicrobatchEnd(ctx, logID, "COMPLETED", int(rowsAffected), fmt.Sprintf("Processed %d rows", rowsAffected)); err != nil {
@@ -121,4 +123,11 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 
 		return nil
 	})
+
+	if err != nil {
+		c.logger.Error("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "failed", "duration", time.Since(jobStart), "error", err)
+		return err
+	}
+	c.logger.Info("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "success", "duration", time.Since(jobStart))
+	return nil
 }

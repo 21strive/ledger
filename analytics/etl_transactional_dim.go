@@ -12,17 +12,21 @@ import (
 // It sources data from the disbursements table.
 func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts ETLOptions) error {
 	jobName := "dim_bank_account_loader"
+	jobStart := time.Now()
 
 	batchEnd := time.Now()
 	if opts.EndTime != nil {
 		batchEnd = *opts.EndTime
 	}
+	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd)
 
-	return c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
+	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
 		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
 		if err != nil {
+			c.logger.Error("Failed to get watermark", "job", jobName, "run_id", opts.RunID, "error", err)
 			return err
 		}
+		c.logger.Info("Loaded watermark", "job", jobName, "run_id", opts.RunID, "last_watermark", lastWatermark)
 
 		logID, err := c.LogMicrobatchStart(ctx, jobName, time.Now(), batchEnd)
 		if err != nil {
@@ -94,9 +98,18 @@ func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts E
 
 		if err := tx.Commit(); err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, err.Error())
+			c.logger.Error("Failed to commit ETL transaction", "job", jobName, "run_id", opts.RunID, "processed_count", processedCount, "error", err)
 			return err
 		}
+		c.logger.Info("ETL job completed", "job", jobName, "run_id", opts.RunID, "processed_count", processedCount)
 
 		return c.LogMicrobatchEnd(ctx, logID, StatusCompleted, processedCount, "Success")
 	})
+
+	if err != nil {
+		c.logger.Error("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "failed", "duration", time.Since(jobStart), "error", err)
+		return err
+	}
+	c.logger.Info("ETL job summary", "job", jobName, "run_id", opts.RunID, "status", "success", "duration", time.Since(jobStart))
+	return nil
 }

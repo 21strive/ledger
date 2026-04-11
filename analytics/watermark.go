@@ -30,6 +30,26 @@ type MicrobatchLog struct {
 	Message       string    `db:"message"`
 }
 
+// HasCompletedRun returns true if the given job has at least one COMPLETED log.
+// This is used by one-time bootstrap jobs (e.g. static dimensions).
+func (c *LedgerAnalyticsClient) HasCompletedRun(ctx context.Context, jobName string) (bool, error) {
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM analytics_microbatch_log
+			WHERE job_name = $1 AND status = 'COMPLETED'
+		)
+	`
+
+	var exists bool
+	if err := c.db.QueryRowContext(ctx, query, jobName).Scan(&exists); err != nil {
+		c.logger.Error("Failed to check completed run", "job", jobName, "error", err)
+		return false, fmt.Errorf("failed to check completed run for %s: %w", jobName, err)
+	}
+
+	return exists, nil
+}
+
 // GetLastWatermark retrieves the last successful batch_end time for a given job.
 func (c *LedgerAnalyticsClient) GetLastWatermark(ctx context.Context, jobName string) (time.Time, error) {
 	query := `
