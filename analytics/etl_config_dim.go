@@ -15,14 +15,12 @@ func (c *LedgerAnalyticsClient) RunDimPaymentChannelETL(ctx context.Context, opt
 	jobName := "dim_payment_channel_loader"
 	jobStart := time.Now()
 
-	batchEnd := time.Now()
-	if opts.EndTime != nil {
-		batchEnd = *opts.EndTime
-	}
-	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd)
+	batchEnd := c.GetRunBatchEnd(jobName, opts)
+	recalculateMode := opts.RecalculateDate != nil
+	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd, "recalculate_mode", recalculateMode)
 
 	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
-		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
+		lastWatermark, err := c.GetRunWatermark(ctx, jobName, opts)
 		if err != nil {
 			c.logger.Error("Failed to get watermark", "job", jobName, "run_id", opts.RunID, "error", err)
 			return err
@@ -41,44 +39,64 @@ func (c *LedgerAnalyticsClient) RunDimPaymentChannelETL(ctx context.Context, opt
 		}
 		defer tx.Rollback()
 
+		type paymentChannelRow struct {
+			channel string
+		}
+
 		// Query unique payment channels updated since last run
 		query := `
 			SELECT DISTINCT payment_channel
 			FROM fee_configs
-			WHERE updated_at > $1 AND updated_at <= $2
+			WHERE (
+				(NOT $3 AND updated_at > $1 AND updated_at <= $2)
+				OR
+				($3 AND updated_at >= DATE_TRUNC('day', $1) AND updated_at <= $2)
+			)
 		`
 
-		rows, err := tx.QueryContext(ctx, query, lastWatermark, batchEnd)
+		rows, err := tx.QueryContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to query fee_configs: %w", err)
 		}
-		defer rows.Close()
 
-		processedCount := 0
+		channelRows := make([]paymentChannelRow, 0)
 		for rows.Next() {
 			var channel string
 			if err := rows.Scan(&channel); err != nil {
-				c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, err.Error())
+				_ = rows.Close()
+				c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 				return fmt.Errorf("failed to scan payment_channel: %w", err)
 			}
+			channelRows = append(channelRows, paymentChannelRow{channel: channel})
+		}
+
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return fmt.Errorf("failed while iterating payment_channel rows: %w", err)
+		}
+
+		if err := rows.Close(); err != nil {
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return fmt.Errorf("failed to close payment_channel rows: %w", err)
+		}
+
+		processedCount := 0
+		for _, row := range channelRows {
+			channel := row.channel
 
 			// Derive attributes
 			isVA := strings.Contains(strings.ToUpper(channel), "VA") || strings.Contains(strings.ToUpper(channel), "VIRTUAL")
-			settlementDays := 0
-			if strings.Contains(strings.ToUpper(channel), "CC") || strings.Contains(strings.ToUpper(channel), "CREDIT") {
-				settlementDays = 3 // Typical T+3 for cards
-			}
 
 			// Upsert
 			upsertQuery := `
 				INSERT INTO dim_payment_channel (
 					uuid, randid, created_at, updated_at,
-					payment_channel_key, is_virtual_account, settlement_days
-				) VALUES ($1, $2, $3, $4, $5, $6, $7)
+					payment_channel_key, is_virtual_account
+				) VALUES ($1, $2, $3, $4, $5, $6)
 				ON CONFLICT (payment_channel_key) DO UPDATE SET
 					is_virtual_account = EXCLUDED.is_virtual_account,
-					settlement_days = EXCLUDED.settlement_days,
 					updated_at = NOW()
 			`
 
@@ -88,7 +106,7 @@ func (c *LedgerAnalyticsClient) RunDimPaymentChannelETL(ctx context.Context, opt
 
 			if _, err := tx.ExecContext(ctx, upsertQuery,
 				newUUID, newRandID, now, now,
-				channel, isVA, settlementDays,
+				channel, isVA,
 			); err != nil {
 				c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, err.Error())
 				return fmt.Errorf("failed to upsert dim_payment_channel: %w", err)

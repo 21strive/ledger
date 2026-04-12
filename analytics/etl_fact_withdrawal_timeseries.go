@@ -14,17 +14,26 @@ func (c *LedgerAnalyticsClient) RunFactWithdrawalTimeseriesETL(ctx context.Conte
 	jobStart := time.Now()
 
 	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
-		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
+		lastWatermark, err := c.GetRunWatermark(ctx, jobName, opts)
 		if err != nil {
 			return fmt.Errorf("failed to get watermark: %w", err)
 		}
+		recalculateMode := opts.RecalculateDate != nil
 
 		batchEnd := time.Now()
+		if opts.EndTime != nil {
+			batchEnd = *opts.EndTime
+		}
+		if opts.RecalculateEndDate != nil {
+			endOfDay := time.Date(opts.RecalculateEndDate.Year(), opts.RecalculateEndDate.Month(), opts.RecalculateEndDate.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), time.UTC)
+			batchEnd = endOfDay
+		}
 		c.logger.Info("Starting ETL job",
 			"job", jobName,
 			"run_id", opts.RunID,
 			"watermark", lastWatermark,
 			"batch_end", batchEnd,
+			"recalculate_mode", recalculateMode,
 		)
 
 		logID, err := c.LogMicrobatchStart(ctx, jobName, lastWatermark, batchEnd)
@@ -35,7 +44,8 @@ func (c *LedgerAnalyticsClient) RunFactWithdrawalTimeseriesETL(ctx context.Conte
 		query := `
 WITH watermark_delta AS (
   SELECT d.* FROM disbursements d
-  WHERE d.updated_at > $1 AND d.updated_at <= $2
+	WHERE (NOT $3 AND d.updated_at > $1 AND d.updated_at <= $2)
+		 OR ($3 AND d.created_at >= DATE_TRUNC('day', $1) AND d.created_at <= $2)
 ),
 affected_intervals AS (
   SELECT DISTINCT
@@ -83,7 +93,7 @@ ON CONFLICT (date_key, interval_type) DO UPDATE SET
   updated_at = NOW();
 		`
 
-		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd)
+		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			return fmt.Errorf("failed to execute ETL query: %w", err)
 		}

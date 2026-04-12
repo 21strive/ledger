@@ -38,6 +38,7 @@ type config struct {
 	mode            string
 	endTime         *time.Time
 	recalculateDate *time.Time
+	recalculateEnd  *time.Time
 }
 
 func main() {
@@ -66,6 +67,7 @@ func run(args []string) error {
 		"redis_db", cfg.redisDB,
 		"has_end_time", cfg.endTime != nil,
 		"has_recalculate_date", cfg.recalculateDate != nil,
+		"has_recalculate_end_date", cfg.recalculateEnd != nil,
 	)
 
 	db, err := sql.Open("postgres", cfg.databaseURL)
@@ -115,7 +117,11 @@ func run(args []string) error {
 	)
 
 	client := analytics.NewLedgerAnalyticsClient(db, redisClient, logger, dokuClient)
-	opts := analytics.ETLOptions{EndTime: cfg.endTime, RecalculateDate: cfg.recalculateDate}
+	opts := analytics.ETLOptions{
+		EndTime:            cfg.endTime,
+		RecalculateDate:    cfg.recalculateDate,
+		RecalculateEndDate: cfg.recalculateEnd,
+	}
 	logger.Info("analytics client initialized")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -149,19 +155,21 @@ func parseConfig(args []string) (*config, error) {
 		fmt.Fprintln(fs.Output(), "Modes:")
 		fmt.Fprintln(fs.Output(), "  full, dimensions, facts")
 		fmt.Fprintln(fs.Output(), "  static, account, bank-account, payment-channel")
-		fmt.Fprintln(fs.Output(), "  fact-revenue, fact-platform-balance, fact-user-accumulation, fact-ledger-timeseries, fact-withdrawal")
+		fmt.Fprintln(fs.Output(), "  fact-revenue, fact-platform-balance, fact-user-accumulation, fact-withdrawal")
 		fmt.Fprintln(fs.Output(), "")
 		fmt.Fprintln(fs.Output(), "Environment Variables:")
 		fmt.Fprintln(fs.Output(), "  DATABASE_URL (preferred)")
 		fmt.Fprintln(fs.Output(), "  DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT, DB_SSLMODE")
 		fmt.Fprintln(fs.Output(), "  DB_MAXCONNS, DB_MAXIDLECONNS")
 		fmt.Fprintln(fs.Output(), "  REDIS_HOST, REDIS_USER, REDIS_PASS, REDIS_CLUSTER, REDIS_DB")
-		fmt.Fprintln(fs.Output(), "  ETL_MODE, ETL_INTERVAL, ETL_ONCE, ETL_END_TIME, ETL_RECALCULATE_DATE")
+		fmt.Fprintln(fs.Output(), "  ETL_MODE, ETL_INTERVAL, ETL_ONCE, ETL_END_TIME, ETL_RECALCULATE_DATE, ETL_RECALCULATE_END_DATE")
 		fmt.Fprintln(fs.Output(), "  DOKU_CLIENT_ID, DOKU_SECRET_KEY, DOKU_PRIVATE_KEY")
 		fmt.Fprintln(fs.Output(), "")
 		fmt.Fprintln(fs.Output(), "Examples:")
 		fmt.Fprintln(fs.Output(), "  etl_scheduler --once --mode full")
 		fmt.Fprintln(fs.Output(), "  etl_scheduler --mode full --interval 5m")
+		fmt.Fprintln(fs.Output(), "  etl_scheduler --once --mode full --recalculate-date 2026-04-11")
+		fmt.Fprintln(fs.Output(), "  etl_scheduler --once --mode full --recalculate-date 2026-01-01 --recalculate-end-date 2026-01-31")
 		fmt.Fprintln(fs.Output(), "  etl_scheduler --once --mode static --recalculate-date 2026-04-11")
 	}
 
@@ -176,10 +184,11 @@ func parseConfig(args []string) (*config, error) {
 	fs.IntVar(&cfg.redisDB, "redis-db", getenvInt("REDIS_DB", 0), "Redis database index (non-cluster mode)")
 	fs.DurationVar(&cfg.interval, "interval", getenvDuration("ETL_INTERVAL", 30*time.Minute), "Interval between runs")
 	fs.BoolVar(&cfg.once, "once", getenvBool("ETL_ONCE", false), "Run a single ETL cycle and exit")
-	fs.StringVar(&cfg.mode, "mode", getenv("ETL_MODE", "full"), "ETL mode: full, dimensions, facts, static, account, bank-account, payment-channel, fact-revenue, fact-platform-balance, fact-user-accumulation, fact-ledger-timeseries, fact-withdrawal")
+	fs.StringVar(&cfg.mode, "mode", getenv("ETL_MODE", "full"), "ETL mode: full, dimensions, facts, static, account, bank-account, payment-channel, fact-revenue, fact-platform-balance, fact-user-accumulation, fact-withdrawal")
 
 	endTimeFlag := fs.String("end-time", getenv("ETL_END_TIME", ""), "Optional ETL end time in RFC3339")
-	recalculateDateFlag := fs.String("recalculate-date", getenv("ETL_RECALCULATE_DATE", ""), "Optional date to force-recalculate dim_date (YYYY-MM-DD)")
+	recalculateDateFlag := fs.String("recalculate-date", getenv("ETL_RECALCULATE_DATE", ""), "Optional date to force ETL watermark for all jobs and recalculate dim_date (YYYY-MM-DD)")
+	recalculateEndFlag := fs.String("recalculate-end-date", getenv("ETL_RECALCULATE_END_DATE", ""), "Optional end date for recalculation range (YYYY-MM-DD)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -222,6 +231,22 @@ func parseConfig(args []string) (*config, error) {
 		}
 		dateOnly := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, time.UTC)
 		cfg.recalculateDate = &dateOnly
+	}
+
+	if *recalculateEndFlag != "" {
+		parsed, err := time.Parse("2006-01-02", *recalculateEndFlag)
+		if err != nil {
+			return nil, fmt.Errorf("parse recalculate-end-date: %w", err)
+		}
+		dateOnly := time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, time.UTC)
+		cfg.recalculateEnd = &dateOnly
+	}
+
+	if cfg.recalculateEnd != nil && cfg.recalculateDate == nil {
+		return nil, errors.New("recalculate-end-date requires recalculate-date")
+	}
+	if cfg.recalculateDate != nil && cfg.recalculateEnd != nil && cfg.recalculateEnd.Before(*cfg.recalculateDate) {
+		return nil, errors.New("recalculate-end-date must be greater than or equal to recalculate-date")
 	}
 
 	cfg.mode = strings.ToLower(strings.TrimSpace(cfg.mode))
@@ -314,8 +339,6 @@ func runSelectedJob(ctx context.Context, client *analytics.LedgerAnalyticsClient
 		err = client.RunFactPlatformBalanceETL(ctx, opts)
 	case "fact-user-accumulation":
 		err = client.RunFactUserAccumulationETL(ctx, opts)
-	case "fact-ledger-timeseries":
-		err = client.RunFactLedgerTimeseriesETL(ctx, opts)
 	case "fact-withdrawal":
 		err = client.RunFactWithdrawalTimeseriesETL(ctx, opts)
 	default:
@@ -356,7 +379,7 @@ func runAllDimensions(ctx context.Context, client *analytics.LedgerAnalyticsClie
 }
 
 func runAllFacts(ctx context.Context, client *analytics.LedgerAnalyticsClient, opts analytics.ETLOptions) error {
-	return client.RunFactRevenueTimeseriesETL(ctx, opts)
+	return client.RunAllFacts(ctx, opts)
 }
 
 func getenv(key, fallback string) string {

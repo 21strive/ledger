@@ -13,6 +13,7 @@ import (
 const (
 	StatusRunning   = "RUNNING"
 	StatusCompleted = "COMPLETED"
+	StatusSuccess   = "SUCCESS"
 	StatusFailed    = "FAILED"
 )
 
@@ -55,7 +56,7 @@ func (c *LedgerAnalyticsClient) GetLastWatermark(ctx context.Context, jobName st
 	query := `
 		SELECT COALESCE(MAX(batch_end), '1970-01-01'::TIMESTAMP)
 		FROM analytics_microbatch_log
-		WHERE job_name = $1 AND status = 'COMPLETED'
+		WHERE job_name = $1 AND status IN ('COMPLETED', 'SUCCESS')
 	`
 
 	var lastWatermark time.Time
@@ -69,6 +70,73 @@ func (c *LedgerAnalyticsClient) GetLastWatermark(ctx context.Context, jobName st
 	}
 
 	return lastWatermark, nil
+}
+
+// MarkRunningBatchesFailed marks dangling RUNNING batches as FAILED for a job.
+// This prevents stale RUNNING rows from lingering after crashes/interrupted runs.
+func (c *LedgerAnalyticsClient) MarkRunningBatchesFailed(ctx context.Context, jobName, reason string) error {
+	query := `
+		UPDATE analytics_microbatch_log
+		SET status = $1,
+			message = CASE
+				WHEN message = '' THEN $2
+				ELSE message || ' | ' || $2
+			END,
+			updated_at = $3
+		WHERE job_name = $4 AND status = $5
+	`
+
+	result, err := c.db.ExecContext(ctx, query, StatusFailed, reason, time.Now(), jobName, StatusRunning)
+	if err != nil {
+		return fmt.Errorf("failed to mark running batches as failed: %w", err)
+	}
+
+	if rows, err := result.RowsAffected(); err == nil && rows > 0 {
+		c.logger.Warn("Marked dangling RUNNING batches as FAILED", "job", jobName, "count", rows, "reason", reason)
+	}
+
+	return nil
+}
+
+// GetRunWatermark returns the watermark for the current run.
+// When RecalculateDate is provided, it is used as the effective watermark
+// to force a backfill/resync from that date (UTC midnight).
+func (c *LedgerAnalyticsClient) GetRunWatermark(ctx context.Context, jobName string, opts ETLOptions) (time.Time, error) {
+	if opts.RecalculateDate != nil {
+		forced := time.Date(
+			opts.RecalculateDate.Year(),
+			opts.RecalculateDate.Month(),
+			opts.RecalculateDate.Day(),
+			0, 0, 0, 0,
+			time.UTC,
+		)
+		c.logger.Info("Using forced watermark from recalculate-date", "job", jobName, "run_id", opts.RunID, "forced_watermark", forced)
+		return forced, nil
+	}
+
+	return c.GetLastWatermark(ctx, jobName)
+}
+
+// GetRunBatchEnd returns the upper window bound for the run.
+// Priority: recalculate-end-date (end of day UTC) > explicit EndTime > now.
+func (c *LedgerAnalyticsClient) GetRunBatchEnd(jobName string, opts ETLOptions) time.Time {
+	batchEnd := time.Now()
+	if opts.EndTime != nil {
+		batchEnd = *opts.EndTime
+	}
+
+	if opts.RecalculateEndDate != nil {
+		batchEnd = time.Date(
+			opts.RecalculateEndDate.Year(),
+			opts.RecalculateEndDate.Month(),
+			opts.RecalculateEndDate.Day(),
+			23, 59, 59, int(time.Second-time.Nanosecond),
+			time.UTC,
+		)
+		c.logger.Info("Using forced batch end from recalculate-end-date", "job", jobName, "run_id", opts.RunID, "forced_batch_end", batchEnd)
+	}
+
+	return batchEnd
 }
 
 // LogMicrobatchStart logs the start of a microbatch job.

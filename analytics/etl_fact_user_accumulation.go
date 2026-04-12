@@ -14,17 +14,26 @@ func (c *LedgerAnalyticsClient) RunFactUserAccumulationETL(ctx context.Context, 
 	jobStart := time.Now()
 
 	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
-		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
+		lastWatermark, err := c.GetRunWatermark(ctx, jobName, opts)
 		if err != nil {
 			return fmt.Errorf("failed to get watermark: %w", err)
 		}
+		recalculateMode := opts.RecalculateDate != nil
 
 		batchEnd := time.Now()
+		if opts.EndTime != nil {
+			batchEnd = *opts.EndTime
+		}
+		if opts.RecalculateEndDate != nil {
+			endOfDay := time.Date(opts.RecalculateEndDate.Year(), opts.RecalculateEndDate.Month(), opts.RecalculateEndDate.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), time.UTC)
+			batchEnd = endOfDay
+		}
 		c.logger.Info("Starting ETL job",
 			"job", jobName,
 			"run_id", opts.RunID,
 			"watermark", lastWatermark,
 			"batch_end", batchEnd,
+			"recalculate_mode", recalculateMode,
 		)
 
 		logID, err := c.LogMicrobatchStart(ctx, jobName, lastWatermark, batchEnd)
@@ -51,15 +60,18 @@ SELECT
   la.pending_balance,
   la.available_balance,
   COALESCE(la.total_withdrawal_amount, 0),
-  LEAST(la.available_balance, COALESCE(la.expected_available_balance, la.available_balance)),
+	la.available_balance,
   'ACTIVE',
   (la.pending_balance > 0),
   (la.available_balance > 0)
 FROM ledger_accounts la
-JOIN dim_account da ON da.account_id = la.id AND da.is_current = true
+JOIN dim_account da ON da.account_id = la.uuid AND da.is_current = true
 WHERE la.owner_type = 'SELLER'
-  AND la.updated_at > $1
-  AND la.updated_at <= $2
+	AND (
+		(NOT $3 AND la.updated_at > $1 AND la.updated_at <= $2)
+		OR
+		($3 AND la.updated_at >= DATE_TRUNC('day', $1) AND la.updated_at <= $2)
+	)
 ON CONFLICT (account_uuid) DO UPDATE SET
   current_available_balance = EXCLUDED.current_available_balance,
   current_pending_balance = EXCLUDED.current_pending_balance,
@@ -71,7 +83,7 @@ ON CONFLICT (account_uuid) DO UPDATE SET
   updated_at = NOW();
 		`
 
-		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd)
+		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			return fmt.Errorf("failed to execute ETL query: %w", err)
 		}

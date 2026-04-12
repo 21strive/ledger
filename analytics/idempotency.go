@@ -35,6 +35,11 @@ func (c *LedgerAnalyticsClient) releaseLock(ctx context.Context, jobName string)
 // RunWithIdempotency wraps a function execution with Redis-based locking explicitly for ETL jobs.
 // It ensures only one instance of 'jobName' runs at a time.
 func (c *LedgerAnalyticsClient) RunWithIdempotency(ctx context.Context, jobName string, jobFunc func(ctx context.Context) error) error {
+	// Cleanup stale RUNNING records from previous interrupted executions.
+	if err := c.MarkRunningBatchesFailed(ctx, jobName, "auto-failed before new run: previous execution interrupted (error message unavailable)"); err != nil {
+		c.logger.Warn("Failed to cleanup stale RUNNING batches", "job", jobName, "error", err)
+	}
+
 	acquired, err := c.acquireLock(ctx, jobName)
 	if err != nil {
 		return fmt.Errorf("failed to check lock: %w", err)
@@ -53,6 +58,10 @@ func (c *LedgerAnalyticsClient) RunWithIdempotency(ctx context.Context, jobName 
 
 	c.logger.Info("Starting job execution", "job", jobName)
 	if err := jobFunc(ctx); err != nil {
+		reason := fmt.Sprintf("auto-failed on job error: %s", err.Error())
+		if markErr := c.MarkRunningBatchesFailed(ctx, jobName, reason); markErr != nil {
+			c.logger.Warn("Failed to mark RUNNING batch as FAILED after job error", "job", jobName, "error", markErr)
+		}
 		c.logger.Error("Job failed", "job", jobName, "error", err)
 		return err
 	}

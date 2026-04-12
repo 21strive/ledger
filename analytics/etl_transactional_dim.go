@@ -14,14 +14,12 @@ func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts E
 	jobName := "dim_bank_account_loader"
 	jobStart := time.Now()
 
-	batchEnd := time.Now()
-	if opts.EndTime != nil {
-		batchEnd = *opts.EndTime
-	}
-	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd)
+	batchEnd := c.GetRunBatchEnd(jobName, opts)
+	recalculateMode := opts.RecalculateDate != nil
+	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd, "recalculate_mode", recalculateMode)
 
 	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
-		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
+		lastWatermark, err := c.GetRunWatermark(ctx, jobName, opts)
 		if err != nil {
 			c.logger.Error("Failed to get watermark", "job", jobName, "run_id", opts.RunID, "error", err)
 			return err
@@ -40,31 +38,74 @@ func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts E
 		}
 		defer tx.Rollback()
 
+		type bankUsage struct {
+			accountUUID string
+			bankCode    string
+			accNumber   string
+			accName     string
+			firstSeen   time.Time
+			lastSeen    time.Time
+		}
+
 		// Identify new bank usages from disbursements
 		// We group by account and bank details to find unique combinations used in this window
 		query := `
 			SELECT DISTINCT account_uuid, bank_code, account_number, account_name, MIN(created_at), MAX(created_at)
 			FROM disbursements
-			WHERE updated_at > $1 AND updated_at <= $2
+			WHERE (
+				(NOT $3 AND updated_at > $1 AND updated_at <= $2)
+				OR
+				($3 AND updated_at >= DATE_TRUNC('day', $1) AND updated_at <= $2)
+			)
 			GROUP BY account_uuid, bank_code, account_number, account_name
 		`
 
-		rows, err := tx.QueryContext(ctx, query, lastWatermark, batchEnd)
+		rows, err := tx.QueryContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to query disbursements: %w", err)
 		}
-		defer rows.Close()
 
-		processedCount := 0
+		usages := make([]bankUsage, 0)
 		for rows.Next() {
 			var accountUUID, bankCode, accNumber, accName string
 			var firstSeen, lastSeen time.Time
 
 			if err := rows.Scan(&accountUUID, &bankCode, &accNumber, &accName, &firstSeen, &lastSeen); err != nil {
-				c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, err.Error())
+				_ = rows.Close()
+				c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 				return fmt.Errorf("failed to scan row: %w", err)
 			}
+
+			usages = append(usages, bankUsage{
+				accountUUID: accountUUID,
+				bankCode:    bankCode,
+				accNumber:   accNumber,
+				accName:     accName,
+				firstSeen:   firstSeen,
+				lastSeen:    lastSeen,
+			})
+		}
+
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return fmt.Errorf("failed while iterating disbursement rows: %w", err)
+		}
+
+		if err := rows.Close(); err != nil {
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return fmt.Errorf("failed to close disbursement rows: %w", err)
+		}
+
+		processedCount := 0
+		for _, u := range usages {
+			accountUUID := u.accountUUID
+			bankCode := u.bankCode
+			accNumber := u.accNumber
+			accName := u.accName
+			firstSeen := u.firstSeen
+			lastSeen := u.lastSeen
 
 			// Upsert logic
 			// If exists, update last_used_at if the new usage is more recent

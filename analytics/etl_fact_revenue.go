@@ -15,17 +15,26 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 
 	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
 		// 1. Get Watermark
-		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
+		lastWatermark, err := c.GetRunWatermark(ctx, jobName, opts)
 		if err != nil {
 			return fmt.Errorf("failed to get watermark: %w", err)
 		}
+		recalculateMode := opts.RecalculateDate != nil
 
 		batchEnd := time.Now()
+		if opts.EndTime != nil {
+			batchEnd = *opts.EndTime
+		}
+		if opts.RecalculateEndDate != nil {
+			endOfDay := time.Date(opts.RecalculateEndDate.Year(), opts.RecalculateEndDate.Month(), opts.RecalculateEndDate.Day(), 23, 59, 59, int(time.Second-time.Nanosecond), time.UTC)
+			batchEnd = endOfDay
+		}
 		c.logger.Info("Starting ETL job",
 			"job", jobName,
 			"run_id", opts.RunID,
 			"watermark", lastWatermark,
 			"batch_end", batchEnd,
+			"recalculate_mode", recalculateMode,
 		)
 
 		// Create microbatch log entry
@@ -34,6 +43,11 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 			return fmt.Errorf("failed to log microbatch start: %w", err)
 		}
 
+		// forceTarget := true
+		// if forceTarget {
+		// 	return fmt.Errorf("simulated forced error in %s via ETL_TEST_FORCE_FACT_ERROR=%s", jobName, forceTarget)
+		// }
+
 		// 2. Prepare the SQL Query
 		// Logic:
 		// 1. Identify settlements in current batch window (updated_at > lastWatermark)
@@ -41,24 +55,27 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 		// 3. Recalculate full metrics for affected buckets (UPSERT on conflict)
 
 		query := `
-		WITH watermark_delta AS (
+		WITH source_rows AS (
 		  SELECT pt.*
 		  FROM product_transactions pt
-		  WHERE pt.status = 'SETTLED' 
-		    AND pt.updated_at > $1 
-		    AND pt.updated_at <= $2
+		  WHERE pt.status = 'SETTLED'
+		    AND (
+		      (NOT $3 AND pt.updated_at > $1 AND pt.updated_at <= $2)
+		      OR
+		      ($3 AND pt.settled_at >= DATE_TRUNC('day', $1) AND pt.settled_at <= $2)
+		    )
 		),
 		affected_intervals AS (
 		  SELECT DISTINCT
-		    TO_CHAR(DATE_TRUNC(i.trunc_unit, wd.settled_at), 'YYYYMMDD')::INT AS date_key,
+		    TO_CHAR(DATE_TRUNC(i.trunc_unit, sr.settled_at), 'YYYYMMDD')::INT AS date_key,
 		    i.interval_type,
 		    CASE i.interval_type
-		      WHEN 'DAILY' THEN TO_CHAR(wd.settled_at, 'YYYY-MM-DD')
-		      WHEN 'WEEKLY' THEN TO_CHAR(wd.settled_at, '"W"IW-YYYY')
-		      WHEN 'MONTHLY' THEN TO_CHAR(wd.settled_at, 'YYYY-MM')
-		      WHEN 'YEARLY' THEN TO_CHAR(wd.settled_at, 'YYYY')
+		      WHEN 'DAILY' THEN TO_CHAR(sr.settled_at, 'YYYY-MM-DD')
+		      WHEN 'WEEKLY' THEN TO_CHAR(sr.settled_at, '"W"IW-YYYY')
+		      WHEN 'MONTHLY' THEN TO_CHAR(sr.settled_at, 'YYYY-MM')
+		      WHEN 'YEARLY' THEN TO_CHAR(sr.settled_at, 'YYYY')
 		    END as interval_label
-		  FROM watermark_delta wd
+		  FROM source_rows sr
 		  CROSS JOIN ( VALUES ('day', 'DAILY'), ('week', 'WEEKLY'), ('month', 'MONTHLY'), ('year', 'YEARLY') ) AS i(trunc_unit, interval_type)
 		),
 		recalculated AS (
@@ -87,14 +104,13 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 		  uuid, randid, created_at, updated_at,
 		  date_key, interval_type, interval_label,
 		  convenience_fee_total, subscription_fee_total, gateway_fee_paid_total,
-		  total_revenue, net_revenue_after_gateway, settlement_transaction_count
+		  total_revenue, settlement_transaction_count
 		)
 		SELECT
 		  gen_random_uuid(), substr(md5(random()::text || clock_timestamp()::text), 1, 16), NOW(), NOW(),
 		  date_key, interval_type, interval_label,
 		  convenience_fee_total, subscription_fee_total, gateway_fee_paid_total,
 		  convenience_fee_total + subscription_fee_total,
-		  (convenience_fee_total + subscription_fee_total) - gateway_fee_paid_total,
 		  settlement_transaction_count
 		FROM recalculated
 		ON CONFLICT (date_key, interval_type) DO UPDATE SET
@@ -102,13 +118,12 @@ func (c *LedgerAnalyticsClient) RunFactRevenueTimeseriesETL(ctx context.Context,
 		  subscription_fee_total = EXCLUDED.subscription_fee_total,
 		  gateway_fee_paid_total = EXCLUDED.gateway_fee_paid_total,
 		  total_revenue = EXCLUDED.total_revenue,
-		  net_revenue_after_gateway = EXCLUDED.net_revenue_after_gateway,
 		  settlement_transaction_count = EXCLUDED.settlement_transaction_count,
 		  updated_at = NOW();
 		`
 
 		// 3. Execute Query
-		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd)
+		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			return fmt.Errorf("failed to execute ETL query: %w", err)
 		}

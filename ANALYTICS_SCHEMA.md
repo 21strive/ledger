@@ -97,7 +97,7 @@ dim_date {
 > **Grain**: Account + Validity Period
 > **Source**: `ledger_accounts`
 
-Tracks changes in account ownership type, email, or currency over time.
+Tracks changes in account ownership type, owner_id, or currency over time.
 
 ```sql
 dim_account {
@@ -108,7 +108,7 @@ dim_account {
 
   account_id              UUID           -- FK to ledger_accounts.id
   owner_type              VARCHAR(50)    -- SELLER | BUYER | PLATFORM
-  email                   VARCHAR(255)
+  owner_id                VARCHAR(255)
   currency                VARCHAR(3)
   doku_subaccount_id      VARCHAR(255)
 
@@ -124,7 +124,7 @@ dim_account {
 ```sql
 -- Insert new record on change detection
 INSERT INTO dim_account (uuid, randid, created_at, updated_at, ...)
-SELECT gen_random_uuid(), gen_random_uuid(), NOW(), NOW(), id, owner_type, ...
+SELECT gen_random_uuid(), gen_random_uuid(), NOW(), NOW(), uuid, owner_type, ...
 FROM ledger_accounts la
 WHERE la.updated_at > :last_watermark
 ```
@@ -255,7 +255,6 @@ dim_payment_channel {
 
   payment_channel_key   VARCHAR(50)
   is_virtual_account    BOOLEAN
-  settlement_days       INT
 }
 ```
 
@@ -346,7 +345,6 @@ fact_revenue_timeseries {
   subscription_fee_total      BIGINT        -- SUM(seller_price) WHERE product_type = 'SUBSCRIPTION'
   gateway_fee_paid_total      BIGINT        -- SUM(doku_fee) from SETTLED transactions
   total_revenue               BIGINT        -- convenience_fee_total + subscription_fee_total
-  net_revenue_after_gateway   BIGINT        -- total_revenue - gateway_fee_paid_total
 
   -- Count metrics
   transaction_count           INT           -- COUNT COMPLETED transactions in interval
@@ -398,14 +396,13 @@ recalculated AS (
 INSERT INTO fact_revenue_timeseries (
   uuid, randid, created_at, updated_at,
   date_key, interval_type, convenience_fee_total, subscription_fee_total, gateway_fee_paid_total,
-  total_revenue, net_revenue_after_gateway, settlement_transaction_count
+  total_revenue, settlement_transaction_count
 )
 SELECT
   gen_random_uuid(), gen_random_uuid(), NOW(), NOW(),
   date_key, interval_type,
   convenience_fee_total, subscription_fee_total, gateway_fee_paid_total,
   convenience_fee_total + subscription_fee_total,
-  convenience_fee_total + subscription_fee_total - gateway_fee_paid_total,
   settlement_transaction_count
 FROM recalculated
 ON CONFLICT (date_key, interval_type) DO UPDATE SET
@@ -420,16 +417,17 @@ ON CONFLICT (date_key, interval_type) DO UPDATE SET
 ## 2. Platform Master Accumulation
 
 **Dashboard Section**: Overview cards — Platform Revenue, Gateway Fees  
-**Backed By**: `fact_platform_balance` (single-row live snapshot)
+**Backed By**: `fact_platform_balance` (yearly snapshot keyed by `date_key`)
 
 ### Schema
 
 ```sql
 fact_platform_balance {
-  uuid                        VARCHAR(255) PRIMARY KEY  -- Always 'platform-singleton'
+  uuid                        VARCHAR(255) PRIMARY KEY
   randid                      VARCHAR(255)
   created_at                  TIMESTAMP
   updated_at                  TIMESTAMP
+  date_key                    INT      -- YYYY0101 (one row per year)
 
   -- Platform Revenue (YTD)
   total_revenue_ytd           BIGINT   -- convenience_fee_ytd + subscription_fee_ytd
@@ -478,7 +476,7 @@ balance_deltas AS (
     COALESCE(SUM(amount) FILTER (WHERE entry_type = 'CREDIT'), 0)        AS delta_user_earnings, -- Simplified proxy
     COALESCE(SUM(ABS(amount)) FILTER (WHERE source_type = 'DISBURSEMENT'), 0) AS delta_user_withdrawn
   FROM ledger_entries le
-  JOIN ledger_accounts la ON le.ledger_account_id = la.id
+  JOIN ledger_accounts la ON le.account_uuid = la.uuid
   WHERE la.owner_type = 'SELLER'
     AND le.created_at > :last_watermark AND le.created_at <= :batch_end
 ),
@@ -486,9 +484,9 @@ platform_snapshot AS (
   SELECT pending_balance, available_balance, pending_balance + available_balance AS total
   FROM ledger_accounts WHERE owner_type = 'PLATFORM' LIMIT 1
 )
-INSERT INTO fact_platform_balance (uuid, randid, created_at, updated_at, ...)
-VALUES ('platform-singleton', gen_random_uuid(), NOW(), NOW(), ...)
-ON CONFLICT (uuid) DO UPDATE SET
+INSERT INTO fact_platform_balance (uuid, randid, created_at, updated_at, date_key, ...)
+VALUES (gen_random_uuid(), gen_random_uuid(), NOW(), NOW(), :year_date_key, ...)
+ON CONFLICT (date_key) DO UPDATE SET
   convenience_fee_ytd        = fact_platform_balance.convenience_fee_ytd + (SELECT delta_convenience FROM revenue_deltas),
   subscription_fee_ytd       = fact_platform_balance.subscription_fee_ytd + (SELECT delta_subscription FROM revenue_deltas),
   gateway_fee_ytd            = fact_platform_balance.gateway_fee_ytd + (SELECT delta_gateway FROM revenue_deltas),
@@ -619,7 +617,7 @@ SELECT
   la.total_withdrawal_amount, LEAST(la.available_balance, la.expected_available_balance),
   'ACTIVE', (la.pending_balance > 0), (la.available_balance > 0)
 FROM ledger_accounts la
-JOIN dim_account da ON da.account_id = la.id AND da.is_current = true
+JOIN dim_account da ON da.account_id = la.uuid AND da.is_current = true
 WHERE la.owner_type = 'SELLER'
   AND la.updated_at > :last_watermark
   AND la.updated_at <= :batch_end
@@ -631,149 +629,14 @@ ON CONFLICT (account_uuid) DO UPDATE SET
 
 ---
 
-## 6. Ledger Entries — Time Series
-
-**Dashboard Section**: Ledger Entries Chart (Filterable by Credit/Debit/Type)  
-**Backed By**: `fact_ledger_timeseries`
-
-### Schema
-
-```sql
-fact_ledger_timeseries {
-  uuid                        VARCHAR(255) PRIMARY KEY
-  randid                      VARCHAR(255)
-  created_at                  TIMESTAMP
-  updated_at                  TIMESTAMP
-
-  -- Dimensions
-  date_key                    INT            -- YYYYMMDD
-  bucket                      VARCHAR(50)    -- PENDING | AVAILABLE
-  entry_direction             VARCHAR(50)    -- CREDIT | DEBIT
-
-  -- Metrics
-  entry_count                 INT            -- Volume of entries
-  total_amount                BIGINT         -- Sum of absolute amounts
-  avg_amount                  BIGINT
-  min_amount                  BIGINT
-  max_amount                  BIGINT
-
-  currency                    VARCHAR(3)
-}
-```
-
-### ETL Strategy
-
-- **Trigger**: Incremental Delta (Micro-batch every 5m)
-- **Source**: `ledger_entries` (created since watermark)
-- **Logic**:
-  1. Group new entries by Date + Bucket + Direction
-  2. Recalculate aggregates for affected groups
-  3. Upsert into fact table
-- **Grain**: Daily aggregate per bucket/direction (drastically reduces row count vs raw ledger)
-
-#### Source Query
-
-```sql
-WITH watermark_delta AS (
-  -- All ledger entries created since last batch
-  SELECT le.*
-  FROM ledger_entries le
-  WHERE le.created_at > :last_watermark
-    AND le.created_at <= :batch_end
-),
-affected_groups AS (
-  -- Unique (date, bucket, direction) combinations that need recalculation
-  SELECT DISTINCT
-    TO_CHAR(wd.created_at, 'YYYYMMDD')::INT                   AS date_key,
-    wd.balance_bucket                                          AS bucket,
-    CASE WHEN wd.amount >= 0 THEN 'CREDIT' ELSE 'DEBIT' END   AS entry_direction
-  FROM watermark_delta wd
-),
-recalculated AS (
-  -- Full recount for each affected group (idempotent)
-  SELECT
-    ag.date_key,
-    ag.bucket,
-    ag.entry_direction,
-    COUNT(*)             AS entry_count,
-    SUM(ABS(le.amount))  AS total_amount,
-    AVG(ABS(le.amount))  AS avg_amount,
-    MIN(ABS(le.amount))  AS min_amount,
-    MAX(ABS(le.amount))  AS max_amount,
-    le.currency,
-    NOW()                AS data_freshness
-  FROM affected_groups ag
-  JOIN ledger_entries le
-    ON TO_CHAR(le.created_at, 'YYYYMMDD')::INT = ag.date_key
-    AND le.balance_bucket = ag.bucket
-    AND CASE WHEN le.amount >= 0 THEN 'CREDIT' ELSE 'DEBIT' END = ag.entry_direction
-  GROUP BY ag.date_key, ag.bucket, ag.entry_direction, le.currency
-)
-INSERT INTO fact_ledger_timeseries (
-  uuid, randid, created_at, updated_at,
-  date_key, bucket, entry_direction,
-  entry_count, total_amount, avg_amount, min_amount, max_amount,
-  currency
-)
-SELECT
-  gen_random_uuid(), gen_random_uuid(), NOW(), NOW(),
-  date_key, bucket, entry_direction,
-  entry_count, total_amount, avg_amount::BIGINT, min_amount, max_amount,
-  currency
-FROM recalculated
-ON CONFLICT (date_key, bucket, entry_direction) DO UPDATE SET
-  entry_count = EXCLUDED.entry_count,
-  total_amount = EXCLUDED.total_amount,
-  updated_at = NOW();
-```
-
----
-
-## 7. Ledger Master Accumulation
-
-**Dashboard Section**: Ledger Overview — Total Transacted Volume, Net Flow  
-**Backed By**: Aggregation of `fact_ledger_timeseries`
-
-### Metrics Calculation
-
-| Metric                  | Formula                                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------- |
-| **Total Transactions**  | `SUM(entry_count)`                                                                       |
-| **Net Flow**            | `SUM(total_amount WHERE direction='CREDIT') - SUM(total_amount WHERE direction='DEBIT')` |
-| **Total Credit Volume** | `SUM(total_amount WHERE direction='CREDIT')`                                             |
-| **Total Debit Volume**  | `SUM(total_amount WHERE direction='DEBIT')`                                              |
-
-### ETL Strategy
-
-- **Note**: This section is calculated at **Query Time** by summing the pre-aggregated `fact_ledger_timeseries`. No separate ETL process required.
-
-#### View Query
-
-```sql
--- Ledger master accumulation (Query-time aggregate)
-SELECT
-  SUM(entry_count)                                                          AS total_transactions,
-  SUM(CASE WHEN entry_direction = 'CREDIT' THEN total_amount ELSE 0 END)
-  - SUM(CASE WHEN entry_direction = 'DEBIT' THEN total_amount ELSE 0 END)  AS net_flow,
-
-  SUM(CASE WHEN entry_direction = 'CREDIT' THEN entry_count ELSE 0 END)   AS total_credit_transactions,
-  SUM(CASE WHEN entry_direction = 'DEBIT'  THEN entry_count ELSE 0 END)   AS total_debit_transactions,
-
-  SUM(CASE WHEN entry_direction = 'CREDIT' THEN total_amount ELSE 0 END)  AS total_credit_amount,
-  SUM(CASE WHEN entry_direction = 'DEBIT'  THEN total_amount ELSE 0 END)  AS total_debit_amount
-FROM fact_ledger_timeseries;
-```
-
----
-
-## 8. Account Profile
+## 6. Account Profile
 
 **Dashboard Section**: Account Details View  
 **Backed By**: `dim_account` + `dim_bank_account` + `fact_user_accumulation`
 
 ### Schema Relationships
 
-1. **Identity**: `dim_account` (SCD Type 2) provides point-in-time snapshot of email, type, status.
+1. **Identity**: `dim_account` (SCD Type 2) provides point-in-time snapshot of owner_id, type, status.
 2. **Banking**: `dim_bank_account` provides history of all bank accounts associated with the user.
 3. **Financials**: `fact_user_accumulation` provides current wallet balances and lifetime stats.
 
@@ -785,7 +648,7 @@ FROM fact_ledger_timeseries;
 
 ---
 
-## 9. Withdrawal Master Accumulation
+## 7. Withdrawal Master Accumulation
 
 **Dashboard Section**: Withdrawal Overview — Total Payouts, Pending Requests, Success Rate  
 **Backed By**: `fact_withdrawal_timeseries`
@@ -876,7 +739,7 @@ ON CONFLICT (date_key, interval_type) DO UPDATE SET
 
 ---
 
-## 10. Withdrawal — Per Account
+## 8. Withdrawal — Per Account
 
 **Dashboard Section**: Withdrawal History (per user)  
 **Backed By**: `dim_bank_account` + `fact_withdrawal_timeseries`
@@ -916,19 +779,17 @@ ORDER BY d.created_at DESC;
 | Dashboard Section          | Primary Fact Table                  | Granularity           | Update Trigger      |
 | :------------------------- | :---------------------------------- | :-------------------- | :------------------ |
 | **1. Platform Revenue**    | `fact_revenue_timeseries`           | Daily/Monthly         | Settlement Events   |
-| **2. Platform Overview**   | `fact_platform_balance`             | Snapshot (Singleton)  | Every Batch         |
-| **3. Platform Wallet**     | `fact_platform_balance`             | Snapshot (Singleton)  | Every Batch         |
-| **4. User/Seller Master**  | `fact_platform_balance`             | Snapshot (Singleton)  | Every Batch         |
+| **2. Platform Overview**   | `fact_platform_balance`             | Yearly Snapshot       | Every Batch         |
+| **3. Platform Wallet**     | `fact_platform_balance`             | Yearly Snapshot       | Every Batch         |
+| **4. User/Seller Master**  | `fact_platform_balance`             | Yearly Snapshot       | Every Batch         |
 | **5. User Wallets**        | `fact_user_accumulation`            | One row per Seller    | Balance Change      |
-| **6. Ledger Entries**      | `fact_ledger_timeseries`            | Daily × Bucket × Type | Entry Creation      |
-| **7. Ledger Master**       | _(Query on fact_ledger_timeseries)_ | Aggregated            | N/A                 |
-| **8. Account Profile**     | `dim_account` + `dim_bank_account`  | Per Account           | Profile/Bank Change |
-| **9. Withdrawal Master**   | `fact_withdrawal_timeseries`        | Daily                 | Disbursement Update |
-| **10. Withdrawal History** | `disbursements` (Raw)               | Transaction           | Real-time           |
+| **6. Account Profile**     | `dim_account` + `dim_bank_account`  | Per Account           | Profile/Bank Change |
+| **7. Withdrawal Master**   | `fact_withdrawal_timeseries`        | Daily                 | Disbursement Update |
+| **8. Withdrawal History**  | `disbursements` (Raw)               | Transaction           | Real-time           |
 
 ---
 
-## 11. Dashboard Query Recipes
+## 9. Dashboard Query Recipes
 
 Sample SQL queries for populating specific dashboard pages.
 
@@ -954,7 +815,19 @@ SELECT
   total_seller_accounts,
   active_transactions_count AS active_users_last_30d
 FROM fact_platform_balance
-WHERE uuid = 'platform-singleton';
+WHERE date_key = CAST(TO_CHAR(DATE_TRUNC('year', NOW()), 'YYYYMMDD') AS INT);
+
+-- Optional fallback (if current year row is not present yet)
+SELECT
+  total_revenue_ytd,
+  (convenience_fee_ytd + subscription_fee_ytd) AS current_revenue,
+  platform_total_balance,
+  platform_available_balance,
+  total_seller_accounts,
+  active_transactions_count AS active_users_last_30d
+FROM fact_platform_balance
+ORDER BY date_key DESC
+LIMIT 1;
 
 -- 2. Revenue Trend Chart (Daily)
 SELECT
@@ -989,15 +862,26 @@ SELECT
   total_revenue_ytd,
   gateway_fee_ytd
 FROM fact_platform_balance
-WHERE uuid = 'platform-singleton';
+WHERE date_key = CAST(TO_CHAR(DATE_TRUNC('year', NOW()), 'YYYYMMDD') AS INT);
+
+-- Optional fallback (if current year row is not present yet)
+SELECT
+  platform_available_balance,
+  platform_pending_balance,
+  platform_total_balance,
+  settlement_pending_count,
+  total_revenue_ytd,
+  gateway_fee_ytd
+FROM fact_platform_balance
+ORDER BY date_key DESC
+LIMIT 1;
 
 -- 2. Financial Performance Chart (Monthly)
 SELECT
   date_key, -- YYYYMM
   interval_label, -- "2026-03"
   (convenience_fee_total + subscription_fee_total) AS revenue_in,
-  gateway_fee_paid_total AS expenses_out,
-  net_revenue_after_gateway AS net_profit
+  gateway_fee_paid_total AS expenses_out
 FROM fact_revenue_timeseries
 WHERE interval_type = 'MONTHLY'
   AND date_key >= CAST(TO_CHAR(NOW() - INTERVAL '12 months', 'YYYYMM') AS INT)
@@ -1015,7 +899,7 @@ ORDER BY date_key DESC;
 -- 1. Seller Wallet List (Pagination: Offset/Limit)
 SELECT
   da.account_id,        -- Link to detailed view
-  da.email,
+  da.owner_id,
   da.owner_type,        -- Should be SELLER
 
   fua.current_available_balance, -- Primary Sort Column
@@ -1028,7 +912,7 @@ SELECT
 FROM fact_user_accumulation fua
 JOIN dim_account da ON fua.dim_account_uuid = da.uuid
 WHERE da.is_current = TRUE
-  AND (:search IS NULL OR da.email ILIKE :search)
+  AND (:search IS NULL OR da.owner_id ILIKE :search)
 ORDER BY fua.current_available_balance DESC
 LIMIT :limit OFFSET :offset;
 ```

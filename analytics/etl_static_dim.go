@@ -94,10 +94,25 @@ func (c *LedgerAnalyticsClient) RunStaticDimensionsETL(ctx context.Context, opts
 }
 
 // ensureDimDate ensures dim_date table is populated for a reasonable range.
-// If opts.RecalculateDate is set, it force-upserts that single day.
+// If opts.RecalculateDate is set, it force-upserts the range from
+// recalculate-date to recalculate-end-date (or single day if end is not set).
 func (c *LedgerAnalyticsClient) ensureDimDate(ctx context.Context, opts ETLOptions) error {
 	if opts.RecalculateDate != nil {
-		return c.upsertDimDate(ctx, *opts.RecalculateDate)
+		start := time.Date(opts.RecalculateDate.Year(), opts.RecalculateDate.Month(), opts.RecalculateDate.Day(), 0, 0, 0, 0, time.UTC)
+		end := start
+		if opts.RecalculateEndDate != nil {
+			end = time.Date(opts.RecalculateEndDate.Year(), opts.RecalculateEndDate.Month(), opts.RecalculateEndDate.Day(), 0, 0, 0, 0, time.UTC)
+		}
+		if end.Before(start) {
+			return fmt.Errorf("recalculate-end-date is before recalculate-date")
+		}
+
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+			if err := c.upsertDimDate(ctx, d); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)

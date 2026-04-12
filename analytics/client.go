@@ -3,6 +3,8 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -72,48 +74,40 @@ func (c *LedgerAnalyticsClient) RunAllDimensions(opts ETLOptions) error {
 }
 
 // RunAllFacts runs all fact table ETL jobs sequentially.
-func (c *LedgerAnalyticsClient) RunAllFacts(opts ETLOptions) error {
+func (c *LedgerAnalyticsClient) RunAllFacts(ctx context.Context, opts ETLOptions) error {
 	start := time.Now()
-	ctx := context.Background()
+	jobs := []struct {
+		name string
+		run  func(context.Context, ETLOptions) error
+	}{
+		{name: "fact_revenue_timeseries", run: c.RunFactRevenueTimeseriesETL},
+		{name: "fact_platform_balance", run: c.RunFactPlatformBalanceETL},
+		{name: "fact_user_accumulation", run: c.RunFactUserAccumulationETL},
+		{name: "fact_withdrawal_timeseries", run: c.RunFactWithdrawalTimeseriesETL},
+	}
 	completedJobs := 0
-	totalJobs := 5
+	totalJobs := len(jobs)
+	failedJobs := 0
+	var groupedErrors []error
 
 	c.logger.Info("Starting facts pipeline", "run_id", opts.RunID, "total_jobs", totalJobs)
 
-	// 1. Fact Revenue Timeseries (daily/monthly/yearly revenue aggregation)
-	if err := c.RunFactRevenueTimeseriesETL(ctx, opts); err != nil {
-		c.logger.Error("Facts pipeline failed", "run_id", opts.RunID, "failed_job", "fact_revenue_timeseries", "completed_jobs", completedJobs, "total_jobs", totalJobs, "duration", time.Since(start), "error", err)
-		return err
-	}
-	completedJobs++
+	for _, job := range jobs {
+		if err := job.run(ctx, opts); err != nil {
+			failedJobs++
+			groupedErrors = append(groupedErrors, fmt.Errorf("%s: %w", job.name, err))
+			c.logger.Error("Facts job failed", "run_id", opts.RunID, "failed_job", job.name, "completed_jobs", completedJobs, "failed_jobs", failedJobs, "total_jobs", totalJobs, "duration", time.Since(start), "error", err)
+			continue
+		}
 
-	// 2. Fact Platform Balance (singleton snapshot of platform metrics)
-	if err := c.RunFactPlatformBalanceETL(ctx, opts); err != nil {
-		c.logger.Error("Facts pipeline failed", "run_id", opts.RunID, "failed_job", "fact_platform_balance", "completed_jobs", completedJobs, "total_jobs", totalJobs, "duration", time.Since(start), "error", err)
-		return err
+		completedJobs++
 	}
-	completedJobs++
 
-	// 3. Fact User Accumulation (per-seller wallet snapshots)
-	if err := c.RunFactUserAccumulationETL(ctx, opts); err != nil {
-		c.logger.Error("Facts pipeline failed", "run_id", opts.RunID, "failed_job", "fact_user_accumulation", "completed_jobs", completedJobs, "total_jobs", totalJobs, "duration", time.Since(start), "error", err)
+	if failedJobs > 0 {
+		err := fmt.Errorf("facts pipeline completed with errors (%d/%d failed): %w", failedJobs, totalJobs, errors.Join(groupedErrors...))
+		c.logger.Error("Facts pipeline completed with errors", "run_id", opts.RunID, "completed_jobs", completedJobs, "failed_jobs", failedJobs, "total_jobs", totalJobs, "duration", time.Since(start), "error", err)
 		return err
 	}
-	completedJobs++
-
-	// 4. Fact Ledger Timeseries (daily ledger entry aggregation)
-	if err := c.RunFactLedgerTimeseriesETL(ctx, opts); err != nil {
-		c.logger.Error("Facts pipeline failed", "run_id", opts.RunID, "failed_job", "fact_ledger_timeseries", "completed_jobs", completedJobs, "total_jobs", totalJobs, "duration", time.Since(start), "error", err)
-		return err
-	}
-	completedJobs++
-
-	// 5. Fact Withdrawal Timeseries (daily/monthly disbursement metrics)
-	if err := c.RunFactWithdrawalTimeseriesETL(ctx, opts); err != nil {
-		c.logger.Error("Facts pipeline failed", "run_id", opts.RunID, "failed_job", "fact_withdrawal_timeseries", "completed_jobs", completedJobs, "total_jobs", totalJobs, "duration", time.Since(start), "error", err)
-		return err
-	}
-	completedJobs++
 
 	c.logger.Info("Facts pipeline completed", "run_id", opts.RunID, "completed_jobs", completedJobs, "total_jobs", totalJobs, "duration", time.Since(start))
 
@@ -121,7 +115,7 @@ func (c *LedgerAnalyticsClient) RunAllFacts(opts ETLOptions) error {
 }
 
 // RunFullETL runs the complete analytics pipeline (Dimensions -> Facts).
-func (c *LedgerAnalyticsClient) RunFullETL(opts ETLOptions) error {
+func (c *LedgerAnalyticsClient) RunFullETL(ctx context.Context, opts ETLOptions) error {
 	start := time.Now()
 	c.logger.Info("Starting full analytics ETL", "run_id", opts.RunID, "steps", 2)
 
@@ -132,7 +126,7 @@ func (c *LedgerAnalyticsClient) RunFullETL(opts ETLOptions) error {
 	}
 
 	// 2. Facts
-	if err := c.RunAllFacts(opts); err != nil {
+	if err := c.RunAllFacts(ctx, opts); err != nil {
 		c.logger.Error("Full analytics ETL failed", "run_id", opts.RunID, "failed_step", "facts", "duration", time.Since(start), "error", err)
 		return err
 	}
@@ -154,11 +148,6 @@ func (c *LedgerAnalyticsClient) RunFactPlatformBalanceETLScheduler() error {
 // RunFactUserAccumulationETLScheduler wrapper for scheduler (user_accumulation)
 func (c *LedgerAnalyticsClient) RunFactUserAccumulationETLScheduler() error {
 	return c.RunFactUserAccumulationETL(context.Background(), ETLOptions{})
-}
-
-// RunFactLedgerTimeseriesETLScheduler wrapper for scheduler (ledger_timeseries)
-func (c *LedgerAnalyticsClient) RunFactLedgerTimeseriesETLScheduler() error {
-	return c.RunFactLedgerTimeseriesETL(context.Background(), ETLOptions{})
 }
 
 // RunFactWithdrawalTimeseriesETLScheduler wrapper for scheduler (withdrawal_timeseries)

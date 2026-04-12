@@ -34,7 +34,7 @@ CREATE TABLE dim_account (
     account_id VARCHAR(255) NOT NULL,
     -- FK to ledger_accounts.uuid
     owner_type VARCHAR(50),
-    email VARCHAR(255),
+    owner_id VARCHAR(255),
     currency VARCHAR(3),
     doku_subaccount_id VARCHAR(255),
     effective_date DATE,
@@ -116,8 +116,7 @@ CREATE TABLE dim_payment_channel (
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     payment_channel_key VARCHAR(50) NOT NULL UNIQUE,
-    is_virtual_account BOOLEAN DEFAULT FALSE,
-    settlement_days INT NOT NULL DEFAULT 0
+    is_virtual_account BOOLEAN DEFAULT FALSE
 );
 
 -- 10. dim_account_status
@@ -171,7 +170,6 @@ CREATE TABLE fact_revenue_timeseries (
     subscription_fee_total BIGINT DEFAULT 0,
     gateway_fee_paid_total BIGINT DEFAULT 0,
     total_revenue BIGINT DEFAULT 0,
-    net_revenue_after_gateway BIGINT DEFAULT 0,
     transaction_count INT DEFAULT 0,
     settlement_transaction_count INT DEFAULT 0,
     UNIQUE(date_key, interval_type)
@@ -183,6 +181,7 @@ CREATE TABLE fact_platform_balance (
     randid VARCHAR(255) NOT NULL UNIQUE,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
+    date_key INT NOT NULL UNIQUE,
     -- Revenue YTD
     total_revenue_ytd BIGINT DEFAULT 0,
     convenience_fee_ytd BIGINT DEFAULT 0,
@@ -224,25 +223,7 @@ CREATE TABLE fact_user_accumulation (
     has_available_balance BOOLEAN DEFAULT FALSE
 );
 
--- 6. fact_ledger_timeseries
-CREATE TABLE fact_ledger_timeseries (
-    uuid VARCHAR(255) PRIMARY KEY,
-    randid VARCHAR(255) NOT NULL UNIQUE,
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL,
-    date_key INT NOT NULL,
-    bucket VARCHAR(50) NOT NULL,
-    entry_direction VARCHAR(50) NOT NULL,
-    entry_count INT DEFAULT 0,
-    total_amount BIGINT DEFAULT 0,
-    avg_amount BIGINT DEFAULT 0,
-    min_amount BIGINT DEFAULT 0,
-    max_amount BIGINT DEFAULT 0,
-    currency VARCHAR(3) NOT NULL,
-    UNIQUE(date_key, bucket, entry_direction, currency)
-);
-
--- 9. fact_withdrawal_timeseries
+-- 6. fact_withdrawal_timeseries
 CREATE TABLE fact_withdrawal_timeseries (
     uuid VARCHAR(255) PRIMARY KEY,
     randid VARCHAR(255) NOT NULL UNIQUE,
@@ -258,3 +239,34 @@ CREATE TABLE fact_withdrawal_timeseries (
     avg_processing_time_sec INT DEFAULT 0,
     UNIQUE(date_key, interval_type)
 );
+
+-- Analytics Indexes
+-- Watermark lookup: latest completed batch per job.
+CREATE INDEX idx_analytics_microbatch_job_status_end ON analytics_microbatch_log(job_name, status, batch_end DESC);
+
+-- Optional troubleshooting view: recent runs by status.
+CREATE INDEX idx_analytics_microbatch_status_updated ON analytics_microbatch_log(status, updated_at DESC);
+
+-- Dim account SCD2 access patterns.
+CREATE INDEX idx_dim_account_account_current ON dim_account(account_id, is_current);
+
+CREATE INDEX idx_dim_account_account_effective ON dim_account(account_id, effective_date DESC);
+
+-- Transactional bank dimension lookups.
+CREATE INDEX idx_dim_bank_account_account ON dim_bank_account(account_uuid);
+
+CREATE INDEX idx_dim_bank_account_last_used ON dim_bank_account(last_used_at DESC);
+
+-- Payment channel filters.
+CREATE INDEX idx_dim_payment_channel_va ON dim_payment_channel(is_virtual_account);
+
+-- Fact filters for common dashboard queries.
+CREATE INDEX idx_fact_revenue_interval_date ON fact_revenue_timeseries(interval_type, date_key DESC);
+
+CREATE INDEX idx_fact_platform_balance_date ON fact_platform_balance(date_key DESC);
+
+CREATE INDEX idx_fact_withdrawal_interval_date ON fact_withdrawal_timeseries(interval_type, date_key DESC);
+
+CREATE INDEX idx_fact_user_accumulation_dim_account ON fact_user_accumulation(dim_account_uuid);
+
+CREATE INDEX idx_fact_user_accumulation_updated ON fact_user_accumulation(updated_at DESC);

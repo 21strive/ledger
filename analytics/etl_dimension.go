@@ -16,6 +16,8 @@ type ETLOptions struct {
 	EndTime *time.Time
 	// RecalculateDate forces date-specific recalculation where supported (UTC midnight).
 	RecalculateDate *time.Time
+	// RecalculateEndDate sets optional end date for recalculation range (UTC midnight).
+	RecalculateEndDate *time.Time
 	// RunID is the correlation ID for one scheduler cycle across all jobs/log lines.
 	RunID string
 }
@@ -26,16 +28,13 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 	jobName := "dim_account_loader"
 	jobStart := time.Now()
 
-	// Default to current time if not specified
-	batchEnd := time.Now()
-	if opts.EndTime != nil {
-		batchEnd = *opts.EndTime
-	}
-	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd)
+	batchEnd := c.GetRunBatchEnd(jobName, opts)
+	recalculateMode := opts.RecalculateDate != nil
+	c.logger.Info("Starting ETL job", "job", jobName, "run_id", opts.RunID, "batch_end", batchEnd, "recalculate_mode", recalculateMode)
 
 	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
 		// 1. Get last watermark
-		lastWatermark, err := c.GetLastWatermark(ctx, jobName)
+		lastWatermark, err := c.GetRunWatermark(ctx, jobName, opts)
 		if err != nil {
 			c.logger.Error("Failed to get watermark", "job", jobName, "run_id", opts.RunID, "error", err)
 			return err
@@ -58,29 +57,47 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 		}
 		defer tx.Rollback()
 
+		type changedAccount struct {
+			accountUUID      string
+			ownerType        string
+			ownerID          string
+			currency         string
+			dokuSubAccountID string
+		}
+
 		// Step 3a: Identify changed accounts
 		// We fetch all accounts updated in the window (watermark, batchEnd]
 		queryChanged := `
-			SELECT uuid, owner_type, currency, doku_subaccount_id
+			SELECT uuid, owner_type, owner_id, currency, doku_subaccount_id
 			FROM ledger_accounts
-			WHERE updated_at > $1 AND updated_at <= $2
+			WHERE (
+				(NOT $3 AND updated_at > $1 AND updated_at <= $2)
+				OR
+				($3 AND updated_at >= DATE_TRUNC('day', $1) AND updated_at <= $2)
+			)
 		`
 
-		rows, err := tx.QueryContext(ctx, queryChanged, lastWatermark, batchEnd)
+		rows, err := tx.QueryContext(ctx, queryChanged, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to query changed accounts: %w", err)
 		}
-		defer rows.Close()
 
-		processedCount := 0
+		changedAccounts := make([]changedAccount, 0)
 		for rows.Next() {
 			var accountUUID, ownerType, currency string
+			var ownerID sql.NullString
 			var dokuID sql.NullString
 
-			if err := rows.Scan(&accountUUID, &ownerType, &currency, &dokuID); err != nil {
-				c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, err.Error())
+			if err := rows.Scan(&accountUUID, &ownerType, &ownerID, &currency, &dokuID); err != nil {
+				_ = rows.Close()
+				c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 				return fmt.Errorf("failed to scan account row: %w", err)
+			}
+
+			ownerIDValue := ""
+			if ownerID.Valid {
+				ownerIDValue = ownerID.String
 			}
 
 			dokuSubAccountID := ""
@@ -88,16 +105,45 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 				dokuSubAccountID = dokuID.String
 			}
 
+			changedAccounts = append(changedAccounts, changedAccount{
+				accountUUID:      accountUUID,
+				ownerType:        ownerType,
+				ownerID:          ownerIDValue,
+				currency:         currency,
+				dokuSubAccountID: dokuSubAccountID,
+			})
+		}
+
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return fmt.Errorf("failed while iterating changed accounts: %w", err)
+		}
+
+		if err := rows.Close(); err != nil {
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return fmt.Errorf("failed to close changed accounts rows: %w", err)
+		}
+
+		processedCount := 0
+		for _, acct := range changedAccounts {
+			accountUUID := acct.accountUUID
+			ownerType := acct.ownerType
+			ownerID := acct.ownerID
+			currency := acct.currency
+			dokuSubAccountID := acct.dokuSubAccountID
+
 			// Check if we need to create a new version
 			var currentUUID, curOwnerType, curCurrency string
+			var curOwnerID sql.NullString
 			var curDokuID sql.NullString
 
 			checkQuery := `
-				SELECT uuid, owner_type, currency, doku_subaccount_id
+				SELECT uuid, owner_type, owner_id, currency, doku_subaccount_id
 				FROM dim_account
 				WHERE account_id = $1 AND is_current = true
 			`
-			err := tx.QueryRowContext(ctx, checkQuery, accountUUID).Scan(&currentUUID, &curOwnerType, &curCurrency, &curDokuID)
+			err := tx.QueryRowContext(ctx, checkQuery, accountUUID).Scan(&currentUUID, &curOwnerType, &curOwnerID, &curCurrency, &curDokuID)
 
 			needsUpdate := false
 			if err == sql.ErrNoRows {
@@ -107,12 +153,16 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 				return fmt.Errorf("failed to check existing dimension: %w", err)
 			} else {
 				// Compare values to prevent unnecessary SCD2 versions if only balance changed
+				curOwnerIDValue := ""
+				if curOwnerID.Valid {
+					curOwnerIDValue = curOwnerID.String
+				}
 				curDokuSubAccountID := ""
 				if curDokuID.Valid {
 					curDokuSubAccountID = curDokuID.String
 				}
 
-				if curOwnerType != ownerType || curCurrency != currency || curDokuSubAccountID != dokuSubAccountID {
+				if curOwnerType != ownerType || curOwnerIDValue != ownerID || curCurrency != currency || curDokuSubAccountID != dokuSubAccountID {
 					needsUpdate = true
 				}
 			}
@@ -138,15 +188,15 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 			insertQuery := `
 				INSERT INTO dim_account (
 					uuid, randid, created_at, updated_at,
-					account_id, owner_type, email, currency, doku_subaccount_id,
+					account_id, owner_type, owner_id, currency, doku_subaccount_id,
 					effective_date, end_date, is_current
-				) VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, NULL, true)
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, true)
 			`
 			newUUID := uuid.New().String()
 			newRandID := uuid.New().String()
 			if _, err := tx.ExecContext(ctx, insertQuery,
 				newUUID, newRandID, time.Now(), time.Now(),
-				accountUUID, ownerType, currency, dokuSubAccountID,
+				accountUUID, ownerType, ownerID, currency, dokuSubAccountID,
 				batchEnd, // Effective from this batch timestamp
 			); err != nil {
 				c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, err.Error())
