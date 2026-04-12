@@ -3,7 +3,7 @@ module github.com/21strive/ledger
 go 1.25.1
 
 require (
-	github.com/21strive/doku v0.0.0-20260307200715-d3aabd6c1b35
+	github.com/21strive/doku v0.0.0-20260412121521-b3fe6b43c538
 	github.com/21strive/redifu v0.13.2
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
