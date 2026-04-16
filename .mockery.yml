@@ -1,0 +1,16 @@
+all: false
+dir: "internal/mocks"
+filename: "{{.InterfaceName | snakecase}}.go"
+force-file-write: true
+formatter: goimports
+log-level: info
+structname: "Mock{{.InterfaceName}}"
+pkgname: mocks
+recursive: false
+require-template-schema-exists: false
+template: testify
+packages:
+  github.com/21strive/ledger/domain:
+    interfaces:
+      LedgerRepository:
+      ReconciliationLogRepository:
