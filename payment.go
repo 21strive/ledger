@@ -237,6 +237,191 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 	}, nil
 }
 
+// GenerateSubscriptionPaymentRequest contains the parameters to generate a subscription payment
+// where the beneficiary is the PLATFORM (no seller split).
+type GenerateSubscriptionPaymentRequest struct {
+	// Buyer information
+	BuyerAccountID string `json:"buyer_account_id"`
+	BuyerName      string `json:"buyer_name"`
+	BuyerEmail     string `json:"buyer_email"`
+
+	// Subscription information
+	ProductID         string         `json:"product_id"`
+	SubscriptionPrice int64          `json:"subscription_price"` // Price charged to buyer
+	Currency          string         `json:"currency"`           // IDR or USD
+	Metadata          map[string]any `json:"metadata"`
+
+	// Payment configuration
+	PaymentChannel string   `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
+	ExpiresIn      int64    `json:"expires_in"`      // Payment expiration in minutes (default: 60)
+	FeeModel       FeeModel `json:"fee_model"`       // Who pays gateway fee (defaults to GATEWAY_ON_CUSTOMER)
+}
+
+// GenerateSubscriptionPayment creates a payment for a platform subscription purchase.
+// Unlike GeneratePayment, there is no seller — the platform receives all net proceeds.
+// The platform account's DOKU SAC is used for the payment gateway call.
+func (c *LedgerClient) GenerateSubscriptionPayment(ctx context.Context, req *GenerateSubscriptionPaymentRequest) (*GeneratePaymentResponse, error) {
+	if err := c.validateGenerateSubscriptionPaymentRequest(req); err != nil {
+		return nil, err
+	}
+
+	// Platform is the beneficiary — use platform account's DOKU SAC
+	platformAccount, err := c.repoProvider.Account().GetPlatformAccount(ctx)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get platform account", err)
+	}
+
+	// Load fee configurations
+	feeConfigs, err := c.repoProvider.FeeConfig().GetAllActive(ctx)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to load fee configurations", err)
+	}
+
+	feeCalc := domain.NewFeeCalculator(feeConfigs)
+
+	if req.PaymentChannel != "" && !feeCalc.HasPaymentChannel(req.PaymentChannel) {
+		return nil, ledgererr.ErrUnsupportedPaymentChannel.WithError(
+			fmt.Errorf("payment channel %q not found in fee configs, supported: %v", req.PaymentChannel, feeCalc.SupportedPaymentChannels()),
+		)
+	}
+
+	feeModel := req.FeeModel
+	if feeModel == "" {
+		feeModel = domain.FeeModelGatewayOnCustomer
+	}
+
+	currency := domain.Currency(req.Currency)
+
+	// SkipPlatformFee=true: platform IS the seller, no additional platform commission on top
+	feeBreakdown := feeCalc.GetFeeBreakdownWithOptions(req.SubscriptionPrice, req.PaymentChannel, currency, domain.FeeBreakdownOptions{
+		FeeModel:        feeModel,
+		SkipPlatformFee: true,
+	})
+
+	c.logger.InfoContext(ctx, "Calculated subscription fee breakdown",
+		"subscription_price", feeBreakdown.SellerPrice,
+		"doku_fee", feeBreakdown.DokuFee,
+		"total_charged", feeBreakdown.TotalCharged,
+		"platform_net_amount", feeBreakdown.SellerNetAmount,
+		"fee_model", feeBreakdown.FeeModel,
+		"currency", feeBreakdown.Currency,
+	)
+
+	invoiceNumber := generateInvoiceNumber()
+
+	expiresInMinutes := req.ExpiresIn
+	if expiresInMinutes <= 0 {
+		expiresInMinutes = 60
+	}
+	expiresAt := time.Now().Add(time.Duration(expiresInMinutes) * time.Minute)
+
+	// Platform account UUID acts as the "seller" so that HandlePaymentSuccess credits it correctly
+	productTx := domain.NewProductTransaction(
+		req.BuyerAccountID,
+		platformAccount.UUID,
+		req.ProductID,
+		"SUBSCRIPTION",
+		invoiceNumber,
+		feeBreakdown,
+		req.Metadata,
+	)
+
+	dokuResp, dokuErr := c.dokuClient.AcceptPayment(&dokuRequests.DokuCreatePaymentRequest{
+		Amount:         feeBreakdown.TotalCharged,
+		CustomerName:   req.BuyerName,
+		CustomerEmail:  req.BuyerEmail,
+		SacID:          platformAccount.DokuSubAccountID,
+		PaymentDueDate: expiresInMinutes,
+		InvoiceNumber:  invoiceNumber,
+		PaymentMethod:  req.PaymentChannel,
+	})
+
+	if dokuErr != nil {
+		c.logger.ErrorContext(ctx, "DOKU AcceptPayment failed for subscription",
+			"invoice_number", invoiceNumber,
+			"error", dokuErr.Err,
+			"message", dokuErr.Message,
+			"status_code", dokuErr.StatusCode,
+		)
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "failed to create subscription payment with DOKU", fmt.Errorf("status: %d, error: %v", dokuErr.StatusCode, dokuErr.Message))
+	}
+
+	var paymentURL string
+	var paymentCode string
+	var dokuRequestID string
+
+	if dokuResp.Response.Payment != nil {
+		if dokuResp.Response.Payment.URL.Valid {
+			paymentURL = dokuResp.Response.Payment.URL.String
+		}
+		if dokuResp.Response.Payment.TokenID.Valid {
+			dokuRequestID = dokuResp.Response.Payment.TokenID.String
+		}
+	}
+
+	if dokuResp.Response.Order != nil {
+		if dokuResp.Response.Order.SessionID.Valid {
+			if dokuRequestID == "" {
+				dokuRequestID = dokuResp.Response.Order.SessionID.String
+			}
+		}
+	}
+
+	paymentReq := domain.NewPaymentRequest(
+		productTx.UUID,
+		dokuRequestID,
+		req.PaymentChannel,
+		feeBreakdown.TotalCharged,
+		currency,
+		expiresAt,
+	)
+	paymentReq.SetPaymentURL(paymentURL)
+	if paymentCode != "" {
+		paymentReq.SetPaymentCode(paymentCode)
+	}
+
+	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		if err := tx.ProductTransaction().Save(ctx, productTx); err != nil {
+			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save product transaction", err)
+		}
+		if err := tx.PaymentRequest().Save(ctx, paymentReq); err != nil {
+			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to save payment request", err)
+		}
+		return nil
+	})
+
+	if err != nil {
+		c.logger.ErrorContext(ctx, "Failed to save subscription payment records",
+			"invoice_number", invoiceNumber,
+			"error", err,
+		)
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to save subscription payment records", err)
+	}
+
+	c.logger.InfoContext(ctx, "Subscription payment generated successfully",
+		"transaction_id", productTx.UUID,
+		"invoice_number", invoiceNumber,
+		"total_charged", feeBreakdown.TotalCharged,
+		"payment_channel", req.PaymentChannel,
+		"checkout_url", paymentURL,
+	)
+
+	return &GeneratePaymentResponse{
+		TransactionID:   productTx.UUID,
+		InvoiceNumber:   invoiceNumber,
+		PaymentURL:      paymentURL,
+		PaymentCode:     paymentCode,
+		ExpiresAt:       expiresAt.Unix(),
+		SellerPrice:     feeBreakdown.SellerPrice,
+		SellerNetAmount: feeBreakdown.SellerNetAmount,
+		PlatformFee:     feeBreakdown.PlatformFee,
+		DokuFee:         feeBreakdown.DokuFee,
+		TotalCharged:    feeBreakdown.TotalCharged,
+		FeeModel:        string(feeBreakdown.FeeModel),
+		Currency:        string(currency),
+	}, nil
+}
+
 // GeneratePaymentGatewayOnSeller creates a payment where seller absorbs the gateway fee
 // Customer pays: seller_price + platform_fee (gateway fee NOT included)
 // Seller receives: seller_price - gateway_fee (seller absorbs the gateway cost)
@@ -411,6 +596,32 @@ func (c *LedgerClient) CalculateFeesWithModel(ctx context.Context, sellerPrice i
 	breakdown := feeCalc.GetFeeBreakdownWithModel(sellerPrice, paymentChannel, domain.Currency(currency), feeModel)
 
 	return &breakdown, nil
+}
+
+// validateGenerateSubscriptionPaymentRequest validates the subscription payment request fields
+func (c *LedgerClient) validateGenerateSubscriptionPaymentRequest(req *GenerateSubscriptionPaymentRequest) error {
+	if req.BuyerAccountID == "" {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "buyer_account_id is required", nil)
+	}
+	if req.BuyerName == "" {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "buyer_name is required", nil)
+	}
+	if req.BuyerEmail == "" {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "buyer_email is required", nil)
+	}
+	if req.ProductID == "" {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "product_id is required", nil)
+	}
+	if req.SubscriptionPrice <= 0 {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "subscription_price must be positive", nil)
+	}
+	if req.Currency == "" {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "currency is required", nil)
+	}
+	if req.Currency != string(domain.CurrencyIDR) && req.Currency != string(domain.CurrencyUSD) {
+		return ledgererr.NewError(ledgererr.CodeInvalidRequest, "currency must be IDR or USD", nil)
+	}
+	return nil
 }
 
 // validateGeneratePaymentRequest validates the payment request fields
