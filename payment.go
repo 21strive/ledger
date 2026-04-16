@@ -252,9 +252,9 @@ type GenerateSubscriptionPaymentRequest struct {
 	Metadata          map[string]any `json:"metadata"`
 
 	// Payment configuration
-	PaymentChannel string   `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
-	ExpiresIn      int64    `json:"expires_in"`      // Payment expiration in minutes (default: 60)
-	FeeModel       FeeModel `json:"fee_model"`       // Who pays gateway fee (defaults to GATEWAY_ON_CUSTOMER)
+	PaymentChannel string `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
+	ExpiresIn      int64  `json:"expires_in"`      // Payment expiration in minutes (default: 60)
+	// FeeModel is always GATEWAY_ON_SELLER: customer pays subscription_price only, platform absorbs DOKU fee
 }
 
 // GenerateSubscriptionPayment creates a payment for a platform subscription purchase.
@@ -285,16 +285,12 @@ func (c *LedgerClient) GenerateSubscriptionPayment(ctx context.Context, req *Gen
 		)
 	}
 
-	feeModel := req.FeeModel
-	if feeModel == "" {
-		feeModel = domain.FeeModelGatewayOnCustomer
-	}
-
 	currency := domain.Currency(req.Currency)
 
-	// SkipPlatformFee=true: platform IS the seller, no additional platform commission on top
+	// GATEWAY_ON_SELLER: customer pays subscription_price only, platform absorbs DOKU fee.
+	// SkipPlatformFee=true: platform IS the beneficiary, no additional commission split.
 	feeBreakdown := feeCalc.GetFeeBreakdownWithOptions(req.SubscriptionPrice, req.PaymentChannel, currency, domain.FeeBreakdownOptions{
-		FeeModel:        feeModel,
+		FeeModel:        domain.FeeModelGatewayOnSeller,
 		SkipPlatformFee: true,
 	})
 
@@ -333,7 +329,6 @@ func (c *LedgerClient) GenerateSubscriptionPayment(ctx context.Context, req *Gen
 		SacID:          platformAccount.DokuSubAccountID,
 		PaymentDueDate: expiresInMinutes,
 		InvoiceNumber:  invoiceNumber,
-		PaymentMethod:  req.PaymentChannel,
 	})
 
 	if dokuErr != nil {
