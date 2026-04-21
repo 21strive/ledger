@@ -572,25 +572,39 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 	return nil
 }
 
-// CalculateFees returns the fee breakdown without creating a transaction
-// Useful for showing the buyer the total cost before purchase
-// Defaults to GATEWAY_ON_CUSTOMER model for backward compatibility
-func (c *LedgerClient) CalculateFees(ctx context.Context, sellerPrice int64, paymentChannel string, currency string) (*domain.FeeBreakdown, error) {
+// CalculateFees returns the fee breakdown without creating a transaction.
+// Useful for showing the buyer the total cost before purchase.
+// Defaults to GATEWAY_ON_CUSTOMER model for backward compatibility.
+// The response also includes the payment channel with the lowest DOKU fee for the same seller price.
+func (c *LedgerClient) CalculateFees(ctx context.Context, sellerPrice int64, paymentChannel string, currency string) (*FeeCalculationResponse, error) {
 	return c.CalculateFeesWithModel(ctx, sellerPrice, paymentChannel, currency, domain.FeeModelGatewayOnCustomer)
 }
 
-// CalculateFeesWithModel returns the fee breakdown with specified fee model
-// Useful for showing the buyer the total cost before purchase
-func (c *LedgerClient) CalculateFeesWithModel(ctx context.Context, sellerPrice int64, paymentChannel string, currency string, feeModel domain.FeeModel) (*domain.FeeBreakdown, error) {
+// CalculateFeesWithModel returns the fee breakdown with specified fee model.
+// Useful for showing the buyer the total cost before purchase.
+// The response also includes the payment channel with the lowest DOKU fee for the same seller price.
+func (c *LedgerClient) CalculateFeesWithModel(ctx context.Context, sellerPrice int64, paymentChannel string, currency string, feeModel domain.FeeModel) (*FeeCalculationResponse, error) {
 	feeConfigs, err := c.repoProvider.FeeConfig().GetAllActive(ctx)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to load fee configurations", err)
 	}
 
 	feeCalc := domain.NewFeeCalculator(feeConfigs)
-	breakdown := feeCalc.GetFeeBreakdownWithModel(sellerPrice, paymentChannel, domain.Currency(currency), feeModel)
+	cur := domain.Currency(currency)
+	opts := domain.FeeBreakdownOptions{FeeModel: feeModel}
 
-	return &breakdown, nil
+	breakdown := feeCalc.GetFeeBreakdownWithOptions(sellerPrice, paymentChannel, cur, opts)
+
+	cheapestChannel, cheapestBreakdown := feeCalc.GetCheapestChannel(sellerPrice, cur, opts)
+
+	return &FeeCalculationResponse{
+		FeeBreakdown: breakdown,
+		CheapestPaymentChannel: CheapestChannelInfo{
+			PaymentChannel: cheapestChannel,
+			DokuFee:        cheapestBreakdown.DokuFee,
+			TotalCharged:   cheapestBreakdown.TotalCharged,
+		},
+	}, nil
 }
 
 // validateGenerateSubscriptionPaymentRequest validates the subscription payment request fields

@@ -202,3 +202,22 @@ func (fc *FeeCalculator) SupportedPaymentChannels() []string {
 	}
 	return channels
 }
+
+// GetCheapestChannel returns the payment channel with the lowest DOKU fee for the given amount.
+// Returns empty string if no channels are configured.
+func (fc *FeeCalculator) GetCheapestChannel(sellerPrice int64, currency Currency, opts FeeBreakdownOptions) (channel string, breakdown FeeBreakdown) {
+	var minFee int64 = math.MaxInt64
+
+	for ch := range fc.dokuFees {
+		chOpts := opts
+		chOpts.FeeModel = opts.FeeModel
+		b := fc.GetFeeBreakdownWithOptions(sellerPrice, ch, currency, chOpts)
+		if b.DokuFee < minFee {
+			minFee = b.DokuFee
+			channel = ch
+			breakdown = b
+		}
+	}
+
+	return
+}
