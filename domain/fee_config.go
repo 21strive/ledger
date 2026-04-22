@@ -21,6 +21,7 @@ type FeeType string
 const (
 	FeeTypeFixed      FeeType = "FIXED"
 	FeeTypePercentage FeeType = "PERCENTAGE"
+	FeeTypeHybrid     FeeType = "HYBRID" // fixed_amount + percentage of total_charged
 )
 
 // FeeConfig represents a fee configuration for a payment channel
@@ -58,6 +59,9 @@ func (fc *FeeConfig) CalculateFee(amount int64) int64 {
 		// Percentage is stored as whole number (e.g., 2.2 = 2.2%)
 		// Use math.Round for standard rounding (half up)
 		return int64(math.Round(float64(amount) * fc.Percentage / 100))
+	case FeeTypeHybrid:
+		percentageFee := int64(math.Round(float64(amount) * fc.Percentage / 100))
+		return fc.FixedAmount + percentageFee
 	default:
 		return 0
 	}
@@ -118,6 +122,19 @@ func (fc *FeeCalculator) calculateFees(sellerPrice int64, paymentChannel string,
 				// DOKU receives 52147, takes 2.2% = 1147, leaves 51000 ✓
 				percentage := dokuConfig.Percentage / 100
 				totalCharged = int64(math.Round(float64(baseAmount) / (1 - percentage)))
+				dokuFee = totalCharged - baseAmount
+			case FeeTypeHybrid:
+				// DOKU charges fixed_amount + X% on total_charged, so:
+				// total_charged - fixed_amount - (total_charged * X%) = base_amount
+				// total_charged * (1 - X%) = base_amount + fixed_amount
+				// total_charged = (base_amount + fixed_amount) / (1 - X%)
+				//
+				// Example: base_amount = 51000, DOKU = 1500 + 1%
+				// total_charged = (51000 + 1500) / (1 - 0.01) = 52500 / 0.99 = 53030
+				// doku_fee = 53030 - 51000 = 2030
+				// DOKU receives 53030, takes 1500 + 1% of 53030 (530) = 2030, leaves 51000 ✓
+				percentage := dokuConfig.Percentage / 100
+				totalCharged = int64(math.Round(float64(baseAmount+dokuConfig.FixedAmount) / (1 - percentage)))
 				dokuFee = totalCharged - baseAmount
 			}
 		} else {
@@ -201,4 +218,23 @@ func (fc *FeeCalculator) SupportedPaymentChannels() []string {
 		channels = append(channels, channel)
 	}
 	return channels
+}
+
+// GetCheapestChannel returns the payment channel with the lowest DOKU fee for the given amount.
+// Returns empty string if no channels are configured.
+func (fc *FeeCalculator) GetCheapestChannel(sellerPrice int64, currency Currency, opts FeeBreakdownOptions) (channel string, breakdown FeeBreakdown) {
+	var minFee int64 = math.MaxInt64
+
+	for ch := range fc.dokuFees {
+		chOpts := opts
+		chOpts.FeeModel = opts.FeeModel
+		b := fc.GetFeeBreakdownWithOptions(sellerPrice, ch, currency, chOpts)
+		if b.DokuFee < minFee {
+			minFee = b.DokuFee
+			channel = ch
+			breakdown = b
+		}
+	}
+
+	return
 }

@@ -1,5 +1,7 @@
 package ledger
 
+import "github.com/21strive/ledger/domain"
+
 // MoneyResponse represents a monetary amount with currency
 type MoneyResponse struct {
 	Amount   int64  `json:"amount"`
@@ -14,4 +16,19 @@ type BalanceResponse struct {
 	TotalWithdrawalAmount MoneyResponse `json:"total_withdrawal_amount"`
 	TotalDepositAmount    MoneyResponse `json:"total_deposit_amount"`
 	Currency              string        `json:"currency"`
+}
+
+// CheapestChannelInfo contains summary info for the payment channel with the lowest DOKU fee.
+type CheapestChannelInfo struct {
+	PaymentChannel string `json:"payment_channel"`
+	DokuFee        int64  `json:"doku_fee"`
+	TotalCharged   int64  `json:"total_charged"`
+}
+
+// FeeCalculationResponse wraps a FeeBreakdown and adds cheapest-channel guidance.
+type FeeCalculationResponse struct {
+	domain.FeeBreakdown
+	// CheapestPaymentChannel is the channel with the lowest DOKU fee for the same seller price.
+	// It equals the requested channel when that channel is already the cheapest.
+	CheapestPaymentChannel CheapestChannelInfo `json:"cheapest_payment_channel"`
 }
