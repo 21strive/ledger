@@ -252,9 +252,9 @@ type GenerateSubscriptionPaymentRequest struct {
 	Metadata          map[string]any `json:"metadata"`
 
 	// Payment configuration
-	PaymentChannel string `json:"payment_channel"` // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
-	ExpiresIn      int64  `json:"expires_in"`      // Payment expiration in minutes (default: 60)
-	// FeeModel is always GATEWAY_ON_SELLER: customer pays subscription_price only, platform absorbs DOKU fee
+	ExpiresIn int64 `json:"expires_in"` // Payment expiration in minutes (default: 60)
+	// FeeModel is always GATEWAY_ON_SELLER: customer pays subscription_price only, platform absorbs DOKU fee.
+	// PaymentChannel is not required — buyer selects channel via DOKU Checkout (payment_url).
 }
 
 // GenerateSubscriptionPayment creates a payment for a platform subscription purchase.
@@ -279,17 +279,12 @@ func (c *LedgerClient) GenerateSubscriptionPayment(ctx context.Context, req *Gen
 
 	feeCalc := domain.NewFeeCalculator(feeConfigs)
 
-	if req.PaymentChannel != "" && !feeCalc.HasPaymentChannel(req.PaymentChannel) {
-		return nil, ledgererr.ErrUnsupportedPaymentChannel.WithError(
-			fmt.Errorf("payment channel %q not found in fee configs, supported: %v", req.PaymentChannel, feeCalc.SupportedPaymentChannels()),
-		)
-	}
-
 	currency := domain.Currency(req.Currency)
 
 	// GATEWAY_ON_SELLER: customer pays subscription_price only, platform absorbs DOKU fee.
 	// SkipPlatformFee=true: platform IS the beneficiary, no additional commission split.
-	feeBreakdown := feeCalc.GetFeeBreakdownWithOptions(req.SubscriptionPrice, req.PaymentChannel, currency, domain.FeeBreakdownOptions{
+	// PaymentChannel is empty — buyer selects channel via DOKU Checkout, so DOKU fee is unknown upfront.
+	feeBreakdown := feeCalc.GetFeeBreakdownWithOptions(req.SubscriptionPrice, "", currency, domain.FeeBreakdownOptions{
 		FeeModel:        domain.FeeModelGatewayOnSeller,
 		SkipPlatformFee: true,
 	})
@@ -365,7 +360,7 @@ func (c *LedgerClient) GenerateSubscriptionPayment(ctx context.Context, req *Gen
 	paymentReq := domain.NewPaymentRequest(
 		productTx.UUID,
 		dokuRequestID,
-		req.PaymentChannel,
+		"", // channel unknown at creation; buyer selects via DOKU Checkout
 		feeBreakdown.TotalCharged,
 		currency,
 		expiresAt,
@@ -397,7 +392,6 @@ func (c *LedgerClient) GenerateSubscriptionPayment(ctx context.Context, req *Gen
 		"transaction_id", productTx.UUID,
 		"invoice_number", invoiceNumber,
 		"total_charged", feeBreakdown.TotalCharged,
-		"payment_channel", req.PaymentChannel,
 		"checkout_url", paymentURL,
 	)
 
