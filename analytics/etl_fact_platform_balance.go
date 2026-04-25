@@ -15,12 +15,6 @@ func (c *LedgerAnalyticsClient) RunFactPlatformBalanceETL(ctx context.Context, o
 	jobStart := time.Now()
 
 	err := c.RunWithIdempotency(ctx, jobName, func(ctx context.Context) error {
-    var (
-      logID          string
-      processedCount int
-      runErr         error
-    )
-
 		lastWatermark, err := c.GetRunWatermark(ctx, jobName, opts)
 		if err != nil {
 			return fmt.Errorf("failed to get watermark: %w", err)
@@ -42,18 +36,10 @@ func (c *LedgerAnalyticsClient) RunFactPlatformBalanceETL(ctx context.Context, o
 			"recalculate_mode", recalculateMode,
 		)
 
-    logID, err = c.LogMicrobatchStart(ctx, jobName, lastWatermark, batchEnd)
+		logID, err := c.LogMicrobatchStart(ctx, jobName, lastWatermark, batchEnd)
 		if err != nil {
 			return fmt.Errorf("failed to log microbatch start: %w", err)
 		}
-    defer func() {
-      if runErr == nil {
-        return
-      }
-      if endErr := c.LogMicrobatchEnd(ctx, logID, StatusFailed, processedCount, runErr.Error()); endErr != nil {
-        c.logger.Warn("failed to log FAILED microbatch end", "job", jobName, "run_id", opts.RunID, "log_id", logID, "error", endErr)
-      }
-    }()
 
 		query := `
 WITH daily_revenue_deltas AS (
@@ -94,7 +80,9 @@ seller_aggregates AS (
     COUNT(*) AS total_accounts,
     COALESCE(SUM(available_balance), 0) AS total_available,
     COALESCE(SUM(pending_balance), 0) AS total_pending,
-    COUNT(*) FILTER (WHERE available_balance > 0 OR pending_balance > 0) AS active_accounts
+    COUNT(*) FILTER (WHERE available_balance > 0 OR pending_balance > 0) AS active_accounts,
+    COALESCE(SUM(total_deposit_amount), 0) AS total_user_earnings,
+    COALESCE(SUM(total_withdrawal_amount), 0) AS total_user_withdrawn
   FROM ledger_accounts WHERE owner_type = 'SELLER'
 )
 INSERT INTO fact_platform_balance (
@@ -103,6 +91,7 @@ INSERT INTO fact_platform_balance (
   convenience_fee_ytd, subscription_fee_ytd, gateway_fee_ytd, total_revenue_ytd,
   platform_pending_balance, platform_available_balance, platform_total_balance,
   total_seller_accounts, total_user_available_balance, total_user_pending_balance,
+  total_user_earnings, total_user_withdrawn,
   settlement_completed_count, active_transactions_count
 )
 SELECT
@@ -122,6 +111,8 @@ SELECT
   (SELECT total_accounts FROM seller_aggregates),
   (SELECT total_available FROM seller_aggregates),
   (SELECT total_pending FROM seller_aggregates),
+  (SELECT total_user_earnings FROM seller_aggregates),
+  (SELECT total_user_withdrawn FROM seller_aggregates),
   0,
   (SELECT active_accounts FROM seller_aggregates)
 ON CONFLICT (date_key) DO UPDATE SET
@@ -135,23 +126,22 @@ ON CONFLICT (date_key) DO UPDATE SET
   total_seller_accounts = EXCLUDED.total_seller_accounts,
   total_user_available_balance = EXCLUDED.total_user_available_balance,
   total_user_pending_balance = EXCLUDED.total_user_pending_balance,
+  total_user_earnings = EXCLUDED.total_user_earnings,
+  total_user_withdrawn = EXCLUDED.total_user_withdrawn,
   active_transactions_count = EXCLUDED.active_transactions_count,
   updated_at = NOW();
 		`
 
 		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
-      runErr = fmt.Errorf("failed to execute ETL query: %w", err)
-      return runErr
+			return fmt.Errorf("failed to execute ETL query: %w", err)
 		}
 
 		rowsAffected, _ := result.RowsAffected()
-    processedCount = int(rowsAffected)
 		c.logger.Info("ETL job completed", "job", jobName, "run_id", opts.RunID, "rows_affected", rowsAffected)
 
-    if err := c.LogMicrobatchEnd(ctx, logID, StatusCompleted, processedCount, fmt.Sprintf("Processed %d rows", rowsAffected)); err != nil {
-      runErr = fmt.Errorf("failed to log microbatch end: %w", err)
-      return runErr
+		if err := c.LogMicrobatchEnd(ctx, logID, "COMPLETED", int(rowsAffected), fmt.Sprintf("Processed %d rows", rowsAffected)); err != nil {
+			return fmt.Errorf("failed to log microbatch end: %w", err)
 		}
 
 		return nil
