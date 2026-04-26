@@ -109,6 +109,19 @@ const (
 	CodeInvalidSettlementItem        ErrorCode = 400011
 	CodeInvalidSettlementCSVFormat   ErrorCode = 400012
 	CodeSettlementItemNotFound       ErrorCode = 404007
+
+	// Analytics error codes
+	CodeAnalyticsDataNotFound ErrorCode = 404008
+	CodeAnalyticsQueryError   ErrorCode = 500003
+	CodeInvalidLimit          ErrorCode = 400013
+	CodeInvalidOffset         ErrorCode = 400014
+	CodeInvalidYear           ErrorCode = 400015
+	CodeInvalidMonth          ErrorCode = 400016
+	CodeInvalidDateRange      ErrorCode = 400017
+	CodeInvalidIntervalType   ErrorCode = 400018
+	CodeInvalidAccountID      ErrorCode = 400019
+	CodeStartDateRequired     ErrorCode = 400020
+	CodeEndDateRequired       ErrorCode = 400021
 )
 
 // Ledger errors
@@ -160,4 +173,19 @@ var (
 	ErrSettlementItemNotFound       = NewError(CodeSettlementItemNotFound, "settlement item not found", nil)
 
 	ErrInvalidRequest = NewError(CodeInvalidRequest, "invalid request", nil)
+)
+
+// Analytics error
+var (
+	ErrAnalyticsDataNotFound = NewError(CodeAnalyticsDataNotFound, "analytics data not found", nil)
+	ErrAnalyticsQueryError   = NewError(CodeAnalyticsQueryError, "analytics query error", nil)
+	ErrInvalidLimit          = NewError(CodeInvalidLimit, "invalid limit", nil)
+	ErrInvalidOffset         = NewError(CodeInvalidOffset, "invalid offset", nil)
+	ErrInvalidYear           = NewError(CodeInvalidYear, "invalid year", nil)
+	ErrInvalidMonth          = NewError(CodeInvalidMonth, "invalid month", nil)
+	ErrInvalidDateRange      = NewError(CodeInvalidDateRange, "invalid date range", nil)
+	ErrInvalidIntervalType   = NewError(CodeInvalidIntervalType, "invalid interval type", nil)
+	ErrInvalidAccountID      = NewError(CodeInvalidAccountID, "invalid account id", nil)
+	ErrStartDateRequired     = NewError(CodeStartDateRequired, "start date is required", nil)
+	ErrEndDateRequired       = NewError(CodeEndDateRequired, "end date is required", nil)
 )
