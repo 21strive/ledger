@@ -37,10 +37,10 @@ func (c *LedgerAnalyticsClient) GetUserWallets(
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
+		return nil, ledgererr.ErrInvalidLimit.WithError(fmt.Errorf("max 200, got %d", limit))
 	}
 	if offset < 0 {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
+		return nil, ledgererr.ErrInvalidOffset.WithError(fmt.Errorf("must be >= 0, got %d", offset))
 	}
 
 	search = strings.TrimSpace(search)
@@ -72,7 +72,7 @@ LIMIT $2 OFFSET $3;`
 
 	rows, err := c.db.QueryContext(ctx, query, search, limit, offset)
 	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query user wallets", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 	defer rows.Close()
 
@@ -92,13 +92,13 @@ LIMIT $2 OFFSET $3;`
 			&row.HasPendingBalance,
 			&row.HasAvailableBalance,
 		); err != nil {
-			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan user wallet row", err)
+			return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading user wallet rows", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 
 	return result, nil

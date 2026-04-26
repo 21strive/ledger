@@ -33,10 +33,10 @@ func (c *LedgerAnalyticsClient) GetPlatformWalletTransactions(
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
+		return nil, ledgererr.ErrInvalidLimit.WithError(fmt.Errorf("max 200, got %d", limit))
 	}
 	if offset < 0 {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
+		return nil, ledgererr.ErrInvalidOffset.WithError(fmt.Errorf("must be >= 0, got %d", offset))
 	}
 
 	query := `
@@ -62,7 +62,7 @@ LIMIT $1 OFFSET $2;`
 
 	rows, err := c.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query platform wallet transactions", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 	defer rows.Close()
 
@@ -81,7 +81,7 @@ LIMIT $1 OFFSET $2;`
 			&row.BalanceAfter,
 			&invoiceNumber,
 		); err != nil {
-			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan platform wallet transaction row", err)
+			return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 		}
 
 		if invoiceNumber.Valid {
@@ -93,7 +93,7 @@ LIMIT $1 OFFSET $2;`
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading platform wallet transaction rows", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 
 	return result, nil
