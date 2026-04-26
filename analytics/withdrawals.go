@@ -3,8 +3,11 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 // WithdrawalsSummary represents summary cards for withdrawals page.
@@ -64,7 +67,10 @@ WHERE interval_type = 'MONTHLY';`
 		&result.AvgProcessingTimeSec,
 		&result.SuccessRatePercentage,
 	); err != nil {
-		return nil, fmt.Errorf("failed to query withdrawals summary: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "withdrawals summary not found", err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query withdrawals summary", err)
 	}
 
 	return result, nil
@@ -80,10 +86,10 @@ func (c *LedgerAnalyticsClient) GetWithdrawalTransactions(
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, fmt.Errorf("invalid limit: %d (max 200)", limit)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("invalid offset: %d (must be >= 0)", offset)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
 	}
 
 	query := `
@@ -108,7 +114,7 @@ LIMIT $1 OFFSET $2;`
 
 	rows, err := c.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query withdrawal transactions: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query withdrawal transactions", err)
 	}
 	defer rows.Close()
 
@@ -131,13 +137,13 @@ LIMIT $1 OFFSET $2;`
 			&row.UpdatedAt,
 			&row.ProcessedAt,
 		); err != nil {
-			return nil, fmt.Errorf("failed to scan withdrawal transaction row: %w", err)
+			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan withdrawal transaction row", err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed while reading withdrawal transaction rows: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading withdrawal transaction rows", err)
 	}
 
 	return result, nil

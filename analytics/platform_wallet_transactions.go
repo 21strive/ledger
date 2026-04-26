@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 // PlatformWalletTransactionRow represents one ledger row shown in platform wallet transaction list.
@@ -31,10 +33,10 @@ func (c *LedgerAnalyticsClient) GetPlatformWalletTransactions(
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, fmt.Errorf("invalid limit: %d (max 200)", limit)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("invalid offset: %d (must be >= 0)", offset)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
 	}
 
 	query := `
@@ -60,7 +62,7 @@ LIMIT $1 OFFSET $2;`
 
 	rows, err := c.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query platform wallet transactions: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query platform wallet transactions", err)
 	}
 	defer rows.Close()
 
@@ -79,7 +81,7 @@ LIMIT $1 OFFSET $2;`
 			&row.BalanceAfter,
 			&invoiceNumber,
 		); err != nil {
-			return nil, fmt.Errorf("failed to scan platform wallet transaction row: %w", err)
+			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan platform wallet transaction row", err)
 		}
 
 		if invoiceNumber.Valid {
@@ -91,7 +93,7 @@ LIMIT $1 OFFSET $2;`
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed while reading platform wallet transaction rows: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading platform wallet transaction rows", err)
 	}
 
 	return result, nil

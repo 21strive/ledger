@@ -2,7 +2,10 @@ package analytics
 
 import (
 	"context"
-	"fmt"
+	"database/sql"
+	"errors"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 // UserWalletOverviewCards represents the summary cards for the user wallets page.
@@ -42,7 +45,10 @@ WHERE da.is_current = TRUE
 		&result.TotalWithdrawn,
 		&result.ActiveWallets,
 	); err != nil {
-		return nil, fmt.Errorf("failed to query user wallets overview: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "user wallets overview data not found", err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query user wallets overview", err)
 	}
 
 	return result, nil

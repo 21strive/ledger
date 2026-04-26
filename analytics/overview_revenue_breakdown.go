@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 const (
@@ -68,7 +70,7 @@ ORDER BY frt.date_key ASC;`
 
 	rows, err := c.db.QueryContext(ctx, query, normalizedInterval, startDate, endDate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query overview revenue breakdown: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query overview revenue breakdown", err)
 	}
 	defer rows.Close()
 
@@ -85,13 +87,13 @@ ORDER BY frt.date_key ASC;`
 			&row.GatewayFeePaidTotal,
 			&row.SettlementTransactionCount,
 		); err != nil {
-			return nil, fmt.Errorf("failed to scan overview revenue breakdown row: %w", err)
+			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan overview revenue breakdown row", err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed while reading overview revenue breakdown rows: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading overview revenue breakdown rows", err)
 	}
 
 	return result, nil
@@ -103,17 +105,17 @@ func validateOverviewRevenueBreakdownParams(intervalType string, startDate time.
 	case RevenueIntervalDaily, RevenueIntervalWeekly, RevenueIntervalMonthly, RevenueIntervalYearly:
 		// valid
 	default:
-		return "", fmt.Errorf("invalid interval_type: %q (allowed: DAILY, WEEKLY, MONTHLY, YEARLY)", intervalType)
+		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid interval_type: %q (allowed: DAILY, WEEKLY, MONTHLY, YEARLY)", intervalType), nil)
 	}
 
 	if startDate.IsZero() {
-		return "", fmt.Errorf("start_date is required")
+		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, "start_date is required", nil)
 	}
 	if endDate.IsZero() {
-		return "", fmt.Errorf("end_date is required")
+		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, "end_date is required", nil)
 	}
 	if startDate.After(endDate) {
-		return "", fmt.Errorf("invalid date range: start_date must be before or equal to end_date")
+		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, "invalid date range: start_date must be before or equal to end_date", nil)
 	}
 
 	return normalizedInterval, nil
