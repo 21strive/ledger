@@ -2,7 +2,6 @@ package analytics
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -69,7 +68,6 @@ LIMIT $1 OFFSET $2;`
 	result := make([]PlatformWalletTransactionRow, 0)
 	for rows.Next() {
 		var row PlatformWalletTransactionRow
-		var invoiceNumber sql.NullString
 		if err := rows.Scan(
 			&row.LedgerEntryUUID,
 			&row.CreatedAt,
@@ -79,16 +77,10 @@ LIMIT $1 OFFSET $2;`
 			&row.SourceType,
 			&row.SourceID,
 			&row.BalanceAfter,
-			&invoiceNumber,
+			&row.InvoiceNumber,
 		); err != nil {
 			return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 		}
-
-		if invoiceNumber.Valid {
-			invoice := invoiceNumber.String
-			row.InvoiceNumber = &invoice
-		}
-
 		result = append(result, row)
 	}
 

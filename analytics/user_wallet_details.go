@@ -20,8 +20,8 @@ type UserWalletDetail struct {
 	TotalEarnings           int64          `json:"total_earnings"`
 	TotalWithdrawn          int64          `json:"total_withdrawn"`
 	SafeBalanceToWithdraw   int64          `json:"safe_balance_to_withdraw"`
-	AccountStatus           sql.NullString `json:"account_status"`
-	UpdatedAt               sql.NullTime   `json:"updated_at"`
+	AccountStatus           *string    `json:"account_status,omitempty"`
+	UpdatedAt               *time.Time `json:"updated_at,omitempty"`
 	HasPendingBalance       bool           `json:"has_pending_balance"`
 	HasAvailableBalance     bool           `json:"has_available_balance"`
 }
@@ -45,8 +45,8 @@ type UserWalletBankAccountHistoryRow struct {
 	AccountNumber string       `json:"account_number"`
 	AccountName   string       `json:"account_name"`
 	IsVerified    bool         `json:"is_verified"`
-	FirstUsedAt   sql.NullTime `json:"first_used_at"`
-	LastUsedAt    sql.NullTime `json:"last_used_at"`
+	FirstUsedAt   *time.Time `json:"first_used_at,omitempty"`
+	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
 }
 
 // GetUserWalletDetail returns one user wallet detail row by seller account UUID.
@@ -162,7 +162,6 @@ LIMIT $2 OFFSET $3;`
 	result := make([]UserWalletLedgerHistoryRow, 0)
 	for rows.Next() {
 		var row UserWalletLedgerHistoryRow
-		var invoiceNumber sql.NullString
 		if err := rows.Scan(
 			&row.LedgerEntryUUID,
 			&row.CreatedAt,
@@ -172,16 +171,10 @@ LIMIT $2 OFFSET $3;`
 			&row.SourceType,
 			&row.SourceID,
 			&row.EntryType,
-			&invoiceNumber,
+			&row.InvoiceNumber,
 		); err != nil {
 			return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 		}
-
-		if invoiceNumber.Valid {
-			invoice := invoiceNumber.String
-			row.InvoiceNumber = &invoice
-		}
-
 		result = append(result, row)
 	}
 
