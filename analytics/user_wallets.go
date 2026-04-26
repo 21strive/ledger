@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 // UserWalletRow represents one seller row in the user wallets table.
@@ -35,10 +37,10 @@ func (c *LedgerAnalyticsClient) GetUserWallets(
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, fmt.Errorf("invalid limit: %d (max 200)", limit)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("invalid offset: %d (must be >= 0)", offset)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
 	}
 
 	search = strings.TrimSpace(search)
@@ -70,7 +72,7 @@ LIMIT $2 OFFSET $3;`
 
 	rows, err := c.db.QueryContext(ctx, query, search, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query user wallets: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query user wallets", err)
 	}
 	defer rows.Close()
 
@@ -90,13 +92,13 @@ LIMIT $2 OFFSET $3;`
 			&row.HasPendingBalance,
 			&row.HasAvailableBalance,
 		); err != nil {
-			return nil, fmt.Errorf("failed to scan user wallet row: %w", err)
+			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan user wallet row", err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed while reading user wallet rows: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading user wallet rows", err)
 	}
 
 	return result, nil

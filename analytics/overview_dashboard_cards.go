@@ -2,7 +2,10 @@ package analytics
 
 import (
 	"context"
-	"fmt"
+	"database/sql"
+	"errors"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 // OverviewDashboardCards contains the year-to-date dashboard card metrics.
@@ -100,7 +103,10 @@ FROM
 		&result.ActiveSubscriptions,
 		&result.TotalActiveTransactions,
 	); err != nil {
-		return nil, fmt.Errorf("failed to query overview dashboard cards: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "overview dashboard cards data not found", err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query overview dashboard cards", err)
 	}
 
 	return result, nil

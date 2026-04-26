@@ -2,8 +2,12 @@ package analytics
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 // PlatformWalletOverviewCards represents the top summary cards on platform wallet page.
@@ -62,7 +66,10 @@ FROM fact_platform_balance;`
 		&result.TotalRevenueYTD,
 		&result.GatewayFeeYTD,
 	); err != nil {
-		return nil, fmt.Errorf("failed to query platform wallet overview cards: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "platform wallet overview cards not found", err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query platform wallet overview cards", err)
 	}
 
 	return result, nil
@@ -75,13 +82,13 @@ func (c *LedgerAnalyticsClient) GetPlatformWalletPerformance(
 	endDate time.Time,
 ) ([]PlatformWalletPerformanceRow, error) {
 	if startDate.IsZero() {
-		return nil, fmt.Errorf("start_date is required")
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "start_date is required", nil)
 	}
 	if endDate.IsZero() {
-		return nil, fmt.Errorf("end_date is required")
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "end_date is required", nil)
 	}
 	if startDate.After(endDate) {
-		return nil, fmt.Errorf("invalid date range: start_date must be before or equal to end_date")
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "invalid date range: start_date must be before or equal to end_date", nil)
 	}
 
 	query := `
@@ -99,7 +106,7 @@ ORDER BY frt.date_key ASC;`
 
 	rows, err := c.db.QueryContext(ctx, query, startDate, endDate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query platform wallet performance: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query platform wallet performance", err)
 	}
 	defer rows.Close()
 
@@ -112,13 +119,13 @@ ORDER BY frt.date_key ASC;`
 			&row.RevenueIn,
 			&row.ExpensesOut,
 		); err != nil {
-			return nil, fmt.Errorf("failed to scan platform wallet performance row: %w", err)
+			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan platform wallet performance row", err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed while reading platform wallet performance rows: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading platform wallet performance rows", err)
 	}
 
 	return result, nil
@@ -131,10 +138,10 @@ func (c *LedgerAnalyticsClient) GetPlatformWalletMonthlyComparison(
 	month int,
 ) (*PlatformWalletMonthlyComparison, error) {
 	if year < 2000 || year > 3000 {
-		return nil, fmt.Errorf("invalid year: %d", year)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid year: %d", year), nil)
 	}
 	if month < 1 || month > 12 {
-		return nil, fmt.Errorf("invalid month: %d (must be between 1 and 12)", month)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid month: %d (must be between 1 and 12)", month), nil)
 	}
 
 	query := `
@@ -197,7 +204,10 @@ SELECT
 		&result.SubscriptionChangePct,
 		&result.ConvenienceChangePct,
 	); err != nil {
-		return nil, fmt.Errorf("failed to query platform wallet monthly comparison: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "platform wallet monthly comparison not found", err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query platform wallet monthly comparison", err)
 	}
 
 	return result, nil

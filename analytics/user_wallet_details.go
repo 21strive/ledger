@@ -3,8 +3,11 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/21strive/ledger/ledgererr"
 )
 
 // UserWalletDetail represents the header/detail section for a single user wallet.
@@ -49,7 +52,7 @@ type UserWalletBankAccountHistoryRow struct {
 // GetUserWalletDetail returns one user wallet detail row by seller account UUID.
 func (c *LedgerAnalyticsClient) GetUserWalletDetail(ctx context.Context, accountID string) (*UserWalletDetail, error) {
 	if accountID == "" {
-		return nil, fmt.Errorf("account_id is required")
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "account_id is required", nil)
 	}
 
 	query := `
@@ -90,7 +93,10 @@ LIMIT 1;`
 		&result.HasPendingBalance,
 		&result.HasAvailableBalance,
 	); err != nil {
-		return nil, fmt.Errorf("failed to query user wallet detail: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "user wallet detail not found", err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query user wallet detail", err)
 	}
 
 	return result, nil
@@ -107,16 +113,16 @@ func (c *LedgerAnalyticsClient) GetUserWalletLedgerHistory(
 	offset int,
 ) ([]UserWalletLedgerHistoryRow, error) {
 	if accountID == "" {
-		return nil, fmt.Errorf("account_id is required")
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "account_id is required", nil)
 	}
 	if limit <= 0 {
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, fmt.Errorf("invalid limit: %d (max 200)", limit)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("invalid offset: %d (must be >= 0)", offset)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
 	}
 
 	query := `
@@ -149,7 +155,7 @@ LIMIT $2 OFFSET $3;`
 
 	rows, err := c.db.QueryContext(ctx, query, accountID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query user wallet ledger history: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query user wallet ledger history", err)
 	}
 	defer rows.Close()
 
@@ -168,7 +174,7 @@ LIMIT $2 OFFSET $3;`
 			&row.EntryType,
 			&invoiceNumber,
 		); err != nil {
-			return nil, fmt.Errorf("failed to scan user wallet ledger history row: %w", err)
+			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan user wallet ledger history row", err)
 		}
 
 		if invoiceNumber.Valid {
@@ -180,7 +186,7 @@ LIMIT $2 OFFSET $3;`
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed while reading user wallet ledger history rows: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading user wallet ledger history rows", err)
 	}
 
 	return result, nil
@@ -194,16 +200,16 @@ func (c *LedgerAnalyticsClient) GetUserWalletBankAccountHistory(
 	offset int,
 ) ([]UserWalletBankAccountHistoryRow, error) {
 	if accountID == "" {
-		return nil, fmt.Errorf("account_id is required")
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "account_id is required", nil)
 	}
 	if limit <= 0 {
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, fmt.Errorf("invalid limit: %d (max 200)", limit)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
 	}
 	if offset < 0 {
-		return nil, fmt.Errorf("invalid offset: %d (must be >= 0)", offset)
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
 	}
 
 	query := `
@@ -225,7 +231,7 @@ LIMIT $2 OFFSET $3;`
 
 	rows, err := c.db.QueryContext(ctx, query, accountID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query user wallet bank account history: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query user wallet bank account history", err)
 	}
 	defer rows.Close()
 
@@ -240,13 +246,13 @@ LIMIT $2 OFFSET $3;`
 			&row.FirstUsedAt,
 			&row.LastUsedAt,
 		); err != nil {
-			return nil, fmt.Errorf("failed to scan user wallet bank account history row: %w", err)
+			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan user wallet bank account history row", err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("failed while reading user wallet bank account history rows: %w", err)
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading user wallet bank account history rows", err)
 	}
 
 	return result, nil
