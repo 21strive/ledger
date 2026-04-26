@@ -68,9 +68,9 @@ WHERE interval_type = 'MONTHLY';`
 		&result.SuccessRatePercentage,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "withdrawals summary not found", err)
+			return nil, ledgererr.ErrAnalyticsDataNotFound.WithError(err)
 		}
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query withdrawals summary", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 
 	return result, nil
@@ -86,10 +86,10 @@ func (c *LedgerAnalyticsClient) GetWithdrawalTransactions(
 		limit = 20
 	}
 	if limit > 200 {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid limit: %d (max 200)", limit), nil)
+		return nil, ledgererr.ErrInvalidLimit.WithError(fmt.Errorf("max 200, got %d", limit))
 	}
 	if offset < 0 {
-		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid offset: %d (must be >= 0)", offset), nil)
+		return nil, ledgererr.ErrInvalidOffset.WithError(fmt.Errorf("must be >= 0, got %d", offset))
 	}
 
 	query := `
@@ -114,7 +114,7 @@ LIMIT $1 OFFSET $2;`
 
 	rows, err := c.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query withdrawal transactions", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 	defer rows.Close()
 
@@ -137,13 +137,13 @@ LIMIT $1 OFFSET $2;`
 			&row.UpdatedAt,
 			&row.ProcessedAt,
 		); err != nil {
-			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan withdrawal transaction row", err)
+			return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading withdrawal transaction rows", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 
 	return result, nil

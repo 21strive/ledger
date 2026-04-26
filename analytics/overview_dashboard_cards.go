@@ -104,9 +104,9 @@ FROM
 		&result.TotalActiveTransactions,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "overview dashboard cards data not found", err)
+			return nil, ledgererr.ErrAnalyticsDataNotFound.WithError(err)
 		}
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query overview dashboard cards", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 
 	return result, nil

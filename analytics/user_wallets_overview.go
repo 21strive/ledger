@@ -46,9 +46,9 @@ WHERE da.is_current = TRUE
 		&result.ActiveWallets,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ledgererr.NewError(ledgererr.CodeNotFound, "user wallets overview data not found", err)
+			return nil, ledgererr.ErrAnalyticsDataNotFound.WithError(err)
 		}
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query user wallets overview", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 
 	return result, nil

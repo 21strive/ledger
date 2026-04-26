@@ -70,7 +70,7 @@ ORDER BY frt.date_key ASC;`
 
 	rows, err := c.db.QueryContext(ctx, query, normalizedInterval, startDate, endDate)
 	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to query overview revenue breakdown", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 	defer rows.Close()
 
@@ -87,13 +87,13 @@ ORDER BY frt.date_key ASC;`
 			&row.GatewayFeePaidTotal,
 			&row.SettlementTransactionCount,
 		); err != nil {
-			return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to scan overview revenue breakdown row", err)
+			return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 		}
 		result = append(result, row)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed while reading overview revenue breakdown rows", err)
+		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
 
 	return result, nil
@@ -105,17 +105,17 @@ func validateOverviewRevenueBreakdownParams(intervalType string, startDate time.
 	case RevenueIntervalDaily, RevenueIntervalWeekly, RevenueIntervalMonthly, RevenueIntervalYearly:
 		// valid
 	default:
-		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, fmt.Sprintf("invalid interval_type: %q (allowed: DAILY, WEEKLY, MONTHLY, YEARLY)", intervalType), nil)
+		return "", ledgererr.ErrInvalidIntervalType.WithError(fmt.Errorf("allowed: DAILY, WEEKLY, MONTHLY, YEARLY, got %q", intervalType))
 	}
 
 	if startDate.IsZero() {
-		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, "start_date is required", nil)
+		return "", ledgererr.ErrStartDateRequired
 	}
 	if endDate.IsZero() {
-		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, "end_date is required", nil)
+		return "", ledgererr.ErrEndDateRequired
 	}
 	if startDate.After(endDate) {
-		return "", ledgererr.NewError(ledgererr.CodeInvalidRequest, "invalid date range: start_date must be before or equal to end_date", nil)
+		return "", ledgererr.ErrInvalidDateRange
 	}
 
 	return normalizedInterval, nil
