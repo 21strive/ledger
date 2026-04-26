@@ -31,12 +31,12 @@ type WithdrawalTransactionRow struct {
 	BankCode              string         `json:"bank_code"`
 	AccountNumber         string         `json:"account_number"`
 	AccountName           string         `json:"account_name"`
-	Description           sql.NullString `json:"description"`
-	ExternalTransactionID sql.NullString `json:"external_transaction_id"`
-	FailureReason         sql.NullString `json:"failure_reason"`
+	Description           *string       `json:"description,omitempty"`
+	ExternalTransactionID *string       `json:"external_transaction_id,omitempty"`
+	FailureReason         *string       `json:"failure_reason,omitempty"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
-	ProcessedAt           sql.NullTime   `json:"processed_at"`
+	ProcessedAt           *time.Time    `json:"processed_at,omitempty"`
 }
 
 // GetWithdrawalsSummary returns summary values by summing MONTHLY rows from fact_withdrawal_timeseries.

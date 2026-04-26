@@ -2,9 +2,9 @@ package analytics
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/21strive/ledger/ledgererr"
 )
@@ -18,8 +18,8 @@ type UserWalletRow struct {
 	CurrentPendingBalance   int64          `json:"current_pending_balance"`
 	TotalEarnings           int64          `json:"total_earnings"`
 	TotalWithdrawn          int64          `json:"total_withdrawn"`
-	AccountStatus           sql.NullString `json:"account_status"`
-	UpdatedAt               sql.NullTime   `json:"updated_at"`
+	AccountStatus           *string      `json:"account_status,omitempty"`
+	UpdatedAt               *time.Time   `json:"updated_at,omitempty"`
 	HasPendingBalance       bool           `json:"has_pending_balance"`
 	HasAvailableBalance     bool           `json:"has_available_balance"`
 }
