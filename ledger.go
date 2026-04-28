@@ -564,6 +564,13 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	switch dokuStatus {
 	case "SUCCESS":
 		_ = disbursement.MarkCompleted(dokuResp.Payout.InvoiceNumber)
+	case "FAILED", "REJECTED":
+		c.logger.WarnContext(ctx, "DOKU payout returned failed status",
+			"disbursement_id", disbursementID,
+			"doku_status", dokuStatus,
+			"doku_invoice", dokuResp.Payout.InvoiceNumber,
+		)
+		_ = disbursement.MarkFailed(fmt.Sprintf("DOKU payout status: %s", dokuStatus))
 	default:
 		_ = disbursement.MarkProcessing(dokuResp.Payout.InvoiceNumber)
 	}
@@ -581,8 +588,11 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		},
 	)
 
-	// Debit entry: -amount AVAILABLE
-	debitEntry := domain.NewDisbursementEntry(disbursementJournal.UUID, disbursementID, account.UUID, req.Amount)
+	// Debit entry: -amount AVAILABLE (only when money is in flight or completed)
+	var debitEntry *domain.LedgerEntry
+	if !disbursement.IsFailed() {
+		debitEntry = domain.NewDisbursementEntry(disbursementJournal.UUID, disbursementID, account.UUID, req.Amount)
+	}
 
 	// Persist disbursement record + journal + ledger entry atomically
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
@@ -593,8 +603,12 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		if err := tx.Disbursement().Save(ctx, disbursement); err != nil {
 			return err
 		}
-		if err := tx.LedgerEntry().Save(ctx, debitEntry); err != nil {
-			return err
+
+		// Write debit entry only if disbursement is not failed (money in flight or completed)
+		if debitEntry != nil {
+			if err := tx.LedgerEntry().Save(ctx, debitEntry); err != nil {
+				return err
+			}
 		}
 
 		// If disbursement is COMPLETED, increment total_withdrawal_amount
