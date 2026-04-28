@@ -31,10 +31,11 @@ type GeneratePaymentRequest struct {
 	Metadata    map[string]any `json:"metadata"`     // Product details (title, resolution, etc.)
 
 	// Payment configuration
-	PaymentChannel  string   `json:"payment_channel"`   // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
-	ExpiresIn       int64    `json:"expires_in"`        // Payment expiration in minutes (default: 60 minutes, max: 999999)
-	FeeModel        FeeModel `json:"fee_model"`         // Who pays gateway fee (defaults to GATEWAY_ON_CUSTOMER)
-	SkipPlatformFee bool     `json:"skip_platform_fee"` // When true, platform fee is not charged
+	PaymentChannel        string   `json:"payment_channel"`         // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
+	ExpiresIn             int64    `json:"expires_in"`              // Payment expiration in minutes (default: 60 minutes, max: 999999)
+	FeeModel              FeeModel `json:"fee_model"`               // Who pays gateway fee (defaults to GATEWAY_ON_CUSTOMER)
+	SkipPlatformFee       bool     `json:"skip_platform_fee"`       // When true, platform fee is not charged
+	PlatformFeeMultiplier int      `json:"platform_fee_multiplier"` // Multiplies platform fee only (e.g. installment: N due terms → multiplier=N). DOKU fee is not affected.
 }
 
 // GeneratePaymentResponse contains the result of payment generation
@@ -96,8 +97,9 @@ func (c *LedgerClient) GeneratePayment(ctx context.Context, req *GeneratePayment
 
 	currency := domain.Currency(req.Currency)
 	feeBreakdown := feeCalc.GetFeeBreakdownWithOptions(req.SellerPrice, req.PaymentChannel, currency, domain.FeeBreakdownOptions{
-		FeeModel:        feeModel,
-		SkipPlatformFee: req.SkipPlatformFee,
+		FeeModel:              feeModel,
+		SkipPlatformFee:       req.SkipPlatformFee,
+		PlatformFeeMultiplier: req.PlatformFeeMultiplier,
 	})
 
 	c.logger.InfoContext(ctx, "Calculated fee breakdown",

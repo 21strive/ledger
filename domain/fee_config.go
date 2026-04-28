@@ -95,9 +95,14 @@ func NewFeeCalculator(configs []*FeeConfig) *FeeCalculator {
 
 // calculateFees is the core fee calculation logic.
 // skipPlatformFee=true omits platform fee from base amount and result.
-func (fc *FeeCalculator) calculateFees(sellerPrice int64, paymentChannel string, skipPlatformFee bool) (platformFee, dokuFee, totalCharged int64) {
+// platformFeeMultiplier multiplies the platform fee (e.g. installment with 2 due terms → multiplier=2).
+// DOKU fee is never multiplied regardless of the multiplier value.
+func (fc *FeeCalculator) calculateFees(sellerPrice int64, paymentChannel string, skipPlatformFee bool, platformFeeMultiplier int) (platformFee, dokuFee, totalCharged int64) {
 	if !skipPlatformFee && fc.platformFee != nil {
 		platformFee = fc.platformFee.CalculateFee(sellerPrice)
+		if platformFeeMultiplier > 1 {
+			platformFee *= int64(platformFeeMultiplier)
+		}
 	}
 
 	baseAmount := sellerPrice + platformFee
@@ -151,13 +156,14 @@ func (fc *FeeCalculator) calculateFees(sellerPrice int64, paymentChannel string,
 // IMPORTANT: DOKU charges their fee on the TOTAL amount they receive, not on (seller_price + platform_fee)
 // So we need to reverse-calculate to ensure seller and platform get the right amounts
 func (fc *FeeCalculator) CalculateTotalFees(sellerPrice int64, paymentChannel string) (platformFee, dokuFee, totalCharged int64) {
-	return fc.calculateFees(sellerPrice, paymentChannel, false)
+	return fc.calculateFees(sellerPrice, paymentChannel, false, 0)
 }
 
 // FeeBreakdownOptions controls optional behaviour during fee calculation.
 type FeeBreakdownOptions struct {
-	FeeModel        FeeModel
-	SkipPlatformFee bool // When true, platform fee is not charged (e.g. partner / promo transactions)
+	FeeModel              FeeModel
+	SkipPlatformFee       bool // When true, platform fee is not charged (e.g. partner / promo transactions)
+	PlatformFeeMultiplier int  // When > 1, platform fee is multiplied (e.g. installment: 2 due terms → multiplier=2). DOKU fee is never multiplied.
 }
 
 // GetFeeBreakdown returns a complete fee breakdown for a transaction
@@ -173,7 +179,7 @@ func (fc *FeeCalculator) GetFeeBreakdownWithModel(sellerPrice int64, paymentChan
 
 // GetFeeBreakdownWithOptions returns a complete fee breakdown with full control over fee behaviour.
 func (fc *FeeCalculator) GetFeeBreakdownWithOptions(sellerPrice int64, paymentChannel string, currency Currency, opts FeeBreakdownOptions) FeeBreakdown {
-	platformFee, dokuFee, _ := fc.calculateFees(sellerPrice, paymentChannel, opts.SkipPlatformFee)
+	platformFee, dokuFee, _ := fc.calculateFees(sellerPrice, paymentChannel, opts.SkipPlatformFee, opts.PlatformFeeMultiplier)
 
 	var totalCharged, sellerNetAmount int64
 
