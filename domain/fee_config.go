@@ -29,6 +29,7 @@ type FeeConfig struct {
 	*redifu.Record `json:",inline" bson:",inline" db:"-"`
 	ConfigType     FeeConfigType // PLATFORM or DOKU
 	PaymentChannel string        // QRIS, VIRTUAL_ACCOUNT_MANDIRI, etc.
+	Name           string        // Human-readable name (e.g., "VA BCA", "GOPAY", "Virtual Account")
 	FeeType        FeeType       // FIXED or PERCENTAGE
 	FixedAmount    int64         // Fixed fee amount in smallest currency unit
 	Percentage     float64       // Percentage fee (e.g., 2.2 means 2.2%)
@@ -42,6 +43,7 @@ type FeeConfigRepository interface {
 	GetActiveByPaymentChannel(ctx context.Context, paymentChannel string) ([]*FeeConfig, error)
 	GetPlatformFee(ctx context.Context) (*FeeConfig, error)
 	GetAllActive(ctx context.Context) ([]*FeeConfig, error)
+	GetAllExcludingPlatform(ctx context.Context) ([]*FeeConfig, error)
 	Save(ctx context.Context, fc *FeeConfig) error
 	Update(ctx context.Context, fc *FeeConfig) error
 }

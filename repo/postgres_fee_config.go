@@ -20,7 +20,7 @@ func NewPostgresFeeConfigRepository(db DBTX) *PostgresFeeConfigRepository {
 
 func (r *PostgresFeeConfigRepository) GetByID(ctx context.Context, id string) (*domain.FeeConfig, error) {
 	query := `
-		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, name, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE uuid = $1
 	`
@@ -29,7 +29,7 @@ func (r *PostgresFeeConfigRepository) GetByID(ctx context.Context, id string) (*
 
 func (r *PostgresFeeConfigRepository) GetByConfigTypeAndChannel(ctx context.Context, configType domain.FeeConfigType, paymentChannel string) (*domain.FeeConfig, error) {
 	query := `
-		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, name, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE config_type = $1 AND payment_channel = $2
 	`
@@ -38,7 +38,7 @@ func (r *PostgresFeeConfigRepository) GetByConfigTypeAndChannel(ctx context.Cont
 
 func (r *PostgresFeeConfigRepository) GetActiveByPaymentChannel(ctx context.Context, paymentChannel string) ([]*domain.FeeConfig, error) {
 	query := `
-		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, name, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE payment_channel = $1 AND is_active = true
 	`
@@ -47,7 +47,7 @@ func (r *PostgresFeeConfigRepository) GetActiveByPaymentChannel(ctx context.Cont
 
 func (r *PostgresFeeConfigRepository) GetPlatformFee(ctx context.Context) (*domain.FeeConfig, error) {
 	query := `
-		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, name, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE config_type = 'PLATFORM' AND payment_channel = 'PLATFORM' AND is_active = true
 	`
@@ -56,7 +56,7 @@ func (r *PostgresFeeConfigRepository) GetPlatformFee(ctx context.Context) (*doma
 
 func (r *PostgresFeeConfigRepository) GetAllActive(ctx context.Context) ([]*domain.FeeConfig, error) {
 	query := `
-		SELECT uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		SELECT uuid, randid, config_type, payment_channel, name, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
 		FROM fee_configs
 		WHERE is_active = true
 		ORDER BY config_type, payment_channel
@@ -64,18 +64,29 @@ func (r *PostgresFeeConfigRepository) GetAllActive(ctx context.Context) ([]*doma
 	return r.scanMany(ctx, query)
 }
 
+func (r *PostgresFeeConfigRepository) GetAllExcludingPlatform(ctx context.Context) ([]*domain.FeeConfig, error) {
+	query := `
+		SELECT uuid, randid, config_type, payment_channel, name, fee_type, fixed_amount, percentage, is_active, created_at, updated_at
+		FROM fee_configs
+		WHERE config_type != $1
+		ORDER BY config_type, payment_channel
+	`
+	return r.scanMany(ctx, query, string(domain.FeeConfigTypePlatform))
+}
+
 func (r *PostgresFeeConfigRepository) Save(ctx context.Context, fc *domain.FeeConfig) error {
 	redifu.InitRecord(fc)
 
 	query := `
-		INSERT INTO fee_configs (uuid, randid, config_type, payment_channel, fee_type, fixed_amount, percentage, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO fee_configs (uuid, randid, config_type, payment_channel, name, fee_type, fixed_amount, percentage, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		fc.UUID,
 		fc.RandId,
 		string(fc.ConfigType),
 		toNullString(fc.PaymentChannel),
+		fc.Name,
 		string(fc.FeeType),
 		fc.FixedAmount,
 		fc.Percentage,
@@ -95,12 +106,13 @@ func (r *PostgresFeeConfigRepository) Update(ctx context.Context, fc *domain.Fee
 
 	query := `
 		UPDATE fee_configs
-		SET config_type = $1, payment_channel = $2, fee_type = $3, fixed_amount = $4, percentage = $5, is_active = $6, updated_at = $7
-		WHERE uuid = $8
+		SET config_type = $1, payment_channel = $2, name = $3, fee_type = $4, fixed_amount = $5, percentage = $6, is_active = $7, updated_at = $8
+		WHERE uuid = $9
 	`
 	result, err := r.db.ExecContext(ctx, query,
 		string(fc.ConfigType),
 		toNullString(fc.PaymentChannel),
+		fc.Name,
 		string(fc.FeeType),
 		fc.FixedAmount,
 		fc.Percentage,
@@ -148,6 +160,7 @@ func (r *PostgresFeeConfigRepository) scanMany(ctx context.Context, query string
 			randid         string
 			configType     string
 			paymentChannel sql.NullString
+			name           string
 			feeType        string
 			fixedAmount    int64
 			percentage     float64
@@ -161,6 +174,7 @@ func (r *PostgresFeeConfigRepository) scanMany(ctx context.Context, query string
 			&randid,
 			&configType,
 			&paymentChannel,
+			&name,
 			&feeType,
 			&fixedAmount,
 			&percentage,
@@ -174,6 +188,7 @@ func (r *PostgresFeeConfigRepository) scanMany(ctx context.Context, query string
 
 		fc := &domain.FeeConfig{
 			ConfigType:  domain.FeeConfigType(configType),
+			Name:        name,
 			FeeType:     domain.FeeType(feeType),
 			FixedAmount: fixedAmount,
 			Percentage:  percentage,
@@ -209,6 +224,7 @@ func (r *PostgresFeeConfigRepository) scanRow(scanner feeConfigScanner) (*domain
 		randid         string
 		configType     string
 		paymentChannel sql.NullString
+		name           string
 		feeType        string
 		fixedAmount    int64
 		percentage     float64
@@ -222,6 +238,7 @@ func (r *PostgresFeeConfigRepository) scanRow(scanner feeConfigScanner) (*domain
 		&randid,
 		&configType,
 		&paymentChannel,
+		&name,
 		&feeType,
 		&fixedAmount,
 		&percentage,
@@ -235,6 +252,7 @@ func (r *PostgresFeeConfigRepository) scanRow(scanner feeConfigScanner) (*domain
 
 	fc := &domain.FeeConfig{
 		ConfigType:  domain.FeeConfigType(configType),
+		Name:        name,
 		FeeType:     domain.FeeType(feeType),
 		FixedAmount: fixedAmount,
 		Percentage:  percentage,

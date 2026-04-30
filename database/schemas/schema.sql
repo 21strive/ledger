@@ -309,6 +309,7 @@ CREATE TABLE IF NOT EXISTS fee_configs (
             'PLATFORM'
         )
     ),
+    name VARCHAR(100) NOT NULL DEFAULT '',
     fee_type VARCHAR(20) NOT NULL CHECK (fee_type IN ('FIXED', 'PERCENTAGE')),
     fixed_amount BIGINT DEFAULT 0,
     percentage DECIMAL(10, 6) DEFAULT 0,
