@@ -603,6 +603,16 @@ func (c *LedgerClient) CalculateFeesWithModel(ctx context.Context, sellerPrice i
 	}, nil
 }
 
+// GetPaymentChannelFeeConfigs returns all fee configurations excluding the PLATFORM config.
+// Use this to present available payment channels and their fee details to end users.
+func (c *LedgerClient) GetPaymentChannelFeeConfigs(ctx context.Context) ([]*domain.FeeConfig, error) {
+	configs, err := c.repoProvider.FeeConfig().GetAllExcludingPlatform(ctx)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get payment channel fee configs", err)
+	}
+	return configs, nil
+}
+
 // validateGenerateSubscriptionPaymentRequest validates the subscription payment request fields
 func (c *LedgerClient) validateGenerateSubscriptionPaymentRequest(req *GenerateSubscriptionPaymentRequest) error {
 	if req.BuyerAccountID == "" {
