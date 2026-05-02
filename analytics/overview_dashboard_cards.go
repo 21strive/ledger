@@ -89,7 +89,7 @@ FROM
   CROSS JOIN range_revenue r
   CROSS JOIN range_active_subscriptions a;`
 
-	row := c.db.QueryRowContext(ctx, query, year)
+	row := c.ledgerAnalyticsDB.QueryRowContext(ctx, query, year)
 
 	result := &OverviewDashboardCards{}
 	if err := row.Scan(

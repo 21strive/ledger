@@ -23,20 +23,20 @@ type WithdrawalsSummary struct {
 
 // WithdrawalTransactionRow represents one withdrawal transaction row.
 type WithdrawalTransactionRow struct {
-	DisbursementID        string         `json:"disbursement_id"`
-	AccountUUID           string         `json:"account_uuid"`
-	Amount                int64          `json:"amount"`
-	Currency              string         `json:"currency"`
-	Status                string         `json:"status"`
-	BankCode              string         `json:"bank_code"`
-	AccountNumber         string         `json:"account_number"`
-	AccountName           string         `json:"account_name"`
-	Description           *string       `json:"description,omitempty"`
-	ExternalTransactionID *string       `json:"external_transaction_id,omitempty"`
-	FailureReason         *string       `json:"failure_reason,omitempty"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
-	ProcessedAt           *time.Time    `json:"processed_at,omitempty"`
+	DisbursementID        string     `json:"disbursement_id"`
+	AccountUUID           string     `json:"account_uuid"`
+	Amount                int64      `json:"amount"`
+	Currency              string     `json:"currency"`
+	Status                string     `json:"status"`
+	BankCode              string     `json:"bank_code"`
+	AccountNumber         string     `json:"account_number"`
+	AccountName           string     `json:"account_name"`
+	Description           *string    `json:"description,omitempty"`
+	ExternalTransactionID *string    `json:"external_transaction_id,omitempty"`
+	FailureReason         *string    `json:"failure_reason,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+	ProcessedAt           *time.Time `json:"processed_at,omitempty"`
 }
 
 // GetWithdrawalsSummary returns summary values by summing MONTHLY rows from fact_withdrawal_timeseries.
@@ -56,7 +56,7 @@ SELECT
 FROM fact_withdrawal_timeseries
 WHERE interval_type = 'MONTHLY';`
 
-	row := c.db.QueryRowContext(ctx, query)
+	row := c.ledgerAnalyticsDB.QueryRowContext(ctx, query)
 	result := &WithdrawalsSummary{}
 	if err := row.Scan(
 		&result.AttemptCount,
@@ -112,7 +112,7 @@ FROM disbursements
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;`
 
-	rows, err := c.db.QueryContext(ctx, query, limit, offset)
+	rows, err := c.ledgerAnalyticsDB.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}

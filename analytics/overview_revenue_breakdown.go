@@ -68,7 +68,7 @@ WHERE frt.interval_type = $1
     END
 ORDER BY frt.date_key ASC;`
 
-	rows, err := c.db.QueryContext(ctx, query, normalizedInterval, startDate, endDate)
+	rows, err := c.ledgerAnalyticsDB.QueryContext(ctx, query, normalizedInterval, startDate, endDate)
 	if err != nil {
 		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}

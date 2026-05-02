@@ -59,7 +59,7 @@ LEFT JOIN product_transactions pt
 ORDER BY le.created_at DESC
 LIMIT $1 OFFSET $2;`
 
-	rows, err := c.db.QueryContext(ctx, query, limit, offset)
+	rows, err := c.ledgerDB.QueryContext(ctx, query, limit, offset)
 	if err != nil {
 		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}

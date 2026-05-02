@@ -31,7 +31,7 @@ func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts E
 			return err
 		}
 
-		tx, err := c.db.BeginTx(ctx, nil)
+		tx, err := c.ledgerAnalyticsDB.BeginTx(ctx, nil)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return err

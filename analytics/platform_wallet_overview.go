@@ -56,7 +56,7 @@ SELECT
 	COALESCE(SUM(gateway_fee_ytd), 0) AS gateway_fee_ytd
 FROM fact_platform_balance;`
 
-	row := c.db.QueryRowContext(ctx, query)
+	row := c.ledgerAnalyticsDB.QueryRowContext(ctx, query)
 	result := &PlatformWalletOverviewCards{}
 	if err := row.Scan(
 		&result.PlatformAvailableBalance,
@@ -104,7 +104,7 @@ WHERE frt.interval_type = 'MONTHLY'
     AND TO_CHAR(DATE_TRUNC('month', $2::date), 'YYYYMMDD')::INT
 ORDER BY frt.date_key ASC;`
 
-	rows, err := c.db.QueryContext(ctx, query, startDate, endDate)
+	rows, err := c.ledgerAnalyticsDB.QueryContext(ctx, query, startDate, endDate)
 	if err != nil {
 		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
@@ -191,7 +191,7 @@ SELECT
 			/ (SELECT convenience_fee FROM previous_month)::numeric) * 100, 2)
 	END AS convenience_change_pct;`
 
-	row := c.db.QueryRowContext(ctx, query, year, month)
+	row := c.ledgerAnalyticsDB.QueryRowContext(ctx, query, year, month)
 	result := &PlatformWalletMonthlyComparison{}
 	if err := row.Scan(
 		&result.CurrentMonthLabel,

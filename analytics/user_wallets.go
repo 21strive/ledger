@@ -11,17 +11,17 @@ import (
 
 // UserWalletRow represents one seller row in the user wallets table.
 type UserWalletRow struct {
-	AccountID               string         `json:"account_id"`
-	OwnerID                 string         `json:"owner_id"`
-	OwnerType               string         `json:"owner_type"`
-	CurrentAvailableBalance int64          `json:"current_available_balance"`
-	CurrentPendingBalance   int64          `json:"current_pending_balance"`
-	TotalEarnings           int64          `json:"total_earnings"`
-	TotalWithdrawn          int64          `json:"total_withdrawn"`
-	AccountStatus           *string      `json:"account_status,omitempty"`
-	UpdatedAt               *time.Time   `json:"updated_at,omitempty"`
-	HasPendingBalance       bool           `json:"has_pending_balance"`
-	HasAvailableBalance     bool           `json:"has_available_balance"`
+	AccountID               string     `json:"account_id"`
+	OwnerID                 string     `json:"owner_id"`
+	OwnerType               string     `json:"owner_type"`
+	CurrentAvailableBalance int64      `json:"current_available_balance"`
+	CurrentPendingBalance   int64      `json:"current_pending_balance"`
+	TotalEarnings           int64      `json:"total_earnings"`
+	TotalWithdrawn          int64      `json:"total_withdrawn"`
+	AccountStatus           *string    `json:"account_status,omitempty"`
+	UpdatedAt               *time.Time `json:"updated_at,omitempty"`
+	HasPendingBalance       bool       `json:"has_pending_balance"`
+	HasAvailableBalance     bool       `json:"has_available_balance"`
 }
 
 // GetUserWallets returns the seller wallet list for the user wallets page.
@@ -70,7 +70,7 @@ WHERE da.is_current = TRUE
 ORDER BY fua.current_available_balance DESC, fua.updated_at DESC
 LIMIT $2 OFFSET $3;`
 
-	rows, err := c.db.QueryContext(ctx, query, search, limit, offset)
+	rows, err := c.ledgerAnalyticsDB.QueryContext(ctx, query, search, limit, offset)
 	if err != nil {
 		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}

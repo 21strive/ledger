@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // RunFactWithdrawalTimeseriesETL aggregates disbursement metrics into daily/monthly time series
@@ -41,48 +43,59 @@ func (c *LedgerAnalyticsClient) RunFactWithdrawalTimeseriesETL(ctx context.Conte
 			return fmt.Errorf("failed to log microbatch start: %w", err)
 		}
 
-		query := `
-WITH watermark_delta AS (
-  SELECT d.* FROM disbursements d
-	WHERE (NOT $3 AND d.updated_at > $1 AND d.updated_at <= $2)
-		 OR ($3 AND d.created_at >= DATE_TRUNC('day', $1) AND d.created_at <= $2)
-),
-affected_intervals AS (
-  SELECT DISTINCT
-    TO_CHAR(DATE_TRUNC(i.trunc_unit::TEXT, d.created_at), 'YYYYMMDD')::INT AS date_key,
-    i.interval_type
-  FROM watermark_delta d
-  CROSS JOIN (VALUES ('day'::TEXT, 'DAILY'::TEXT), ('month'::TEXT, 'MONTHLY'::TEXT)) AS i(trunc_unit, interval_type)
-),
-recalculated AS (
-  SELECT
-    ai.date_key, ai.interval_type,
-    COUNT(*) AS attempt_count,
-    COUNT(*) FILTER (WHERE status = 'COMPLETED') AS success_count,
-    COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_count,
-    COALESCE(SUM(amount), 0) AS total_requested_amount,
-    COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED'), 0) AS total_disbursed_amount,
-    COALESCE(AVG(EXTRACT(EPOCH FROM (processed_at - created_at))) FILTER (WHERE status = 'COMPLETED'), 0)::INT AS avg_processing_time_sec
-  FROM affected_intervals ai
-  JOIN disbursements d
-    ON TO_CHAR(DATE_TRUNC(CASE ai.interval_type WHEN 'DAILY' THEN 'day' WHEN 'MONTHLY' THEN 'month' END, d.created_at), 'YYYYMMDD')::INT = ai.date_key
-  GROUP BY ai.date_key, ai.interval_type
-)
+		// Phase 1: Query affected disbursements from ledgerDB
+		queryAffected := `
+SELECT DISTINCT
+  TO_CHAR(DATE_TRUNC(i.trunc_unit::TEXT, d.created_at), 'YYYYMMDD')::INT AS date_key,
+  i.interval_type,
+  COUNT(*) AS attempt_count,
+  COUNT(*) FILTER (WHERE d.status = 'COMPLETED') AS success_count,
+  COUNT(*) FILTER (WHERE d.status = 'FAILED') AS failed_count,
+  COALESCE(SUM(d.amount), 0) AS total_requested_amount,
+  COALESCE(SUM(d.amount) FILTER (WHERE d.status = 'COMPLETED'), 0) AS total_disbursed_amount,
+  COALESCE(AVG(EXTRACT(EPOCH FROM (d.processed_at - d.created_at))) FILTER (WHERE d.status = 'COMPLETED'), 0)::INT AS avg_processing_time_sec
+FROM disbursements d
+CROSS JOIN (VALUES ('day'::TEXT, 'DAILY'::TEXT), ('month'::TEXT, 'MONTHLY'::TEXT)) AS i(trunc_unit, interval_type)
+WHERE (NOT $3 AND d.updated_at > $1 AND d.updated_at <= $2)
+   OR ($3 AND d.created_at >= DATE_TRUNC('day', $1) AND d.created_at <= $2)
+GROUP BY date_key, interval_type
+		`
+
+		// Execute SELECT on ledgerDB to fetch withdrawal aggregates
+		rows, err := c.ledgerDB.QueryContext(ctx, queryAffected, lastWatermark, batchEnd, recalculateMode)
+		if err != nil {
+			return fmt.Errorf("failed to query source disbursements: %w", err)
+		}
+		defer rows.Close()
+
+		type withdrawalRecord struct {
+			dateKey                                    int64
+			intervalType                               string
+			attemptCount, successCount, failedCount    int64
+			totalRequestedAmount, totalDisbursedAmount int64
+			avgProcessingTimeSec                       int64
+		}
+
+		records := make([]withdrawalRecord, 0)
+		for rows.Next() {
+			var r withdrawalRecord
+			if err := rows.Scan(&r.dateKey, &r.intervalType, &r.attemptCount, &r.successCount, &r.failedCount, &r.totalRequestedAmount, &r.totalDisbursedAmount, &r.avgProcessingTimeSec); err != nil {
+				return fmt.Errorf("failed to scan withdrawal record: %w", err)
+			}
+			records = append(records, r)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed iterating withdrawal records: %w", err)
+		}
+
+		// Phase 2: Upsert into ledgerAnalyticsDB
+		insertQuery := `
 INSERT INTO fact_withdrawal_timeseries (
   uuid, randid, created_at, updated_at,
   date_key, interval_type,
   attempt_count, success_count, failed_count,
   total_requested_amount, total_disbursed_amount, avg_processing_time_sec
-)
-SELECT
-  gen_random_uuid(),
-  substr(md5(random()::text || clock_timestamp()::text), 1, 16),
-  NOW(),
-  NOW(),
-  date_key, interval_type,
-  attempt_count, success_count, failed_count,
-  total_requested_amount, total_disbursed_amount, avg_processing_time_sec
-FROM recalculated
+) VALUES ($1, $2, NOW(), NOW(), $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (date_key, interval_type) DO UPDATE SET
   attempt_count = EXCLUDED.attempt_count,
   success_count = EXCLUDED.success_count,
@@ -90,18 +103,32 @@ ON CONFLICT (date_key, interval_type) DO UPDATE SET
   total_requested_amount = EXCLUDED.total_requested_amount,
   total_disbursed_amount = EXCLUDED.total_disbursed_amount,
   avg_processing_time_sec = EXCLUDED.avg_processing_time_sec,
-  updated_at = NOW();
+  updated_at = NOW()
 		`
 
-		result, err := c.db.ExecContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
-		if err != nil {
-			return fmt.Errorf("failed to execute ETL query: %w", err)
+		processedCount := 0
+		for _, rec := range records {
+			_, err := c.ledgerAnalyticsDB.ExecContext(ctx, insertQuery,
+				uuid.New().String(),
+				uuid.New().String(),
+				rec.dateKey,
+				rec.intervalType,
+				rec.attemptCount,
+				rec.successCount,
+				rec.failedCount,
+				rec.totalRequestedAmount,
+				rec.totalDisbursedAmount,
+				rec.avgProcessingTimeSec,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to upsert fact_withdrawal_timeseries: %w", err)
+			}
+			processedCount++
 		}
 
-		rowsAffected, _ := result.RowsAffected()
-		c.logger.Info("ETL job completed", "job", jobName, "run_id", opts.RunID, "rows_affected", rowsAffected)
+		c.logger.Info("ETL job completed", "job", jobName, "run_id", opts.RunID, "rows_affected", processedCount)
 
-		if err := c.LogMicrobatchEnd(ctx, logID, "COMPLETED", int(rowsAffected), fmt.Sprintf("Processed %d rows", rowsAffected)); err != nil {
+		if err := c.LogMicrobatchEnd(ctx, logID, "COMPLETED", processedCount, fmt.Sprintf("Processed %d rows", processedCount)); err != nil {
 			return fmt.Errorf("failed to log microbatch end: %w", err)
 		}
 

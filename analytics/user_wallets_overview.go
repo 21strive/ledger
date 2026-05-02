@@ -35,7 +35,7 @@ JOIN dim_account da
 WHERE da.is_current = TRUE
   AND da.owner_type = 'SELLER';`
 
-	row := c.db.QueryRowContext(ctx, query)
+	row := c.ledgerAnalyticsDB.QueryRowContext(ctx, query)
 	result := &UserWalletOverviewCards{}
 	if err := row.Scan(
 		&result.TotalSellerAccounts,

@@ -15,19 +15,21 @@ import (
 // LedgerAnalyticsClient provides the interface for running analytics ETL jobs.
 // It manages dimension and fact table populations with idempotency and watermarking.
 type LedgerAnalyticsClient struct {
-	db         *sql.DB
-	redis      redis.UniversalClient
-	logger     *slog.Logger
-	dokuClient usecases.DokuUseCaseInterface
+	ledgerDB          *sql.DB
+	ledgerAnalyticsDB *sql.DB
+	redis             redis.UniversalClient
+	logger            *slog.Logger
+	dokuClient        usecases.DokuUseCaseInterface
 }
 
 // NewLedgerAnalyticsClient creates a new analytics client.
-func NewLedgerAnalyticsClient(db *sql.DB, redisClient redis.UniversalClient, logger *slog.Logger, dokuClient usecases.DokuUseCaseInterface) *LedgerAnalyticsClient {
+func NewLedgerAnalyticsClient(ledgerDB *sql.DB, ledgerAnalyticsDB *sql.DB, redisClient redis.UniversalClient, logger *slog.Logger, dokuClient usecases.DokuUseCaseInterface) *LedgerAnalyticsClient {
 	return &LedgerAnalyticsClient{
-		db:         db,
-		redis:      redisClient,
-		logger:     logger,
-		dokuClient: dokuClient,
+		ledgerDB:          ledgerDB,
+		ledgerAnalyticsDB: ledgerAnalyticsDB,
+		redis:             redisClient,
+		logger:            logger,
+		dokuClient:        dokuClient,
 	}
 }
 

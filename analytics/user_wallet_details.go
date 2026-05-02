@@ -12,18 +12,18 @@ import (
 
 // UserWalletDetail represents the header/detail section for a single user wallet.
 type UserWalletDetail struct {
-	AccountID               string         `json:"account_id"`
-	OwnerID                 string         `json:"owner_id"`
-	OwnerType               string         `json:"owner_type"`
-	CurrentAvailableBalance int64          `json:"current_available_balance"`
-	CurrentPendingBalance   int64          `json:"current_pending_balance"`
-	TotalEarnings           int64          `json:"total_earnings"`
-	TotalWithdrawn          int64          `json:"total_withdrawn"`
-	SafeBalanceToWithdraw   int64          `json:"safe_balance_to_withdraw"`
+	AccountID               string     `json:"account_id"`
+	OwnerID                 string     `json:"owner_id"`
+	OwnerType               string     `json:"owner_type"`
+	CurrentAvailableBalance int64      `json:"current_available_balance"`
+	CurrentPendingBalance   int64      `json:"current_pending_balance"`
+	TotalEarnings           int64      `json:"total_earnings"`
+	TotalWithdrawn          int64      `json:"total_withdrawn"`
+	SafeBalanceToWithdraw   int64      `json:"safe_balance_to_withdraw"`
 	AccountStatus           *string    `json:"account_status,omitempty"`
 	UpdatedAt               *time.Time `json:"updated_at,omitempty"`
-	HasPendingBalance       bool           `json:"has_pending_balance"`
-	HasAvailableBalance     bool           `json:"has_available_balance"`
+	HasPendingBalance       bool       `json:"has_pending_balance"`
+	HasAvailableBalance     bool       `json:"has_available_balance"`
 }
 
 // UserWalletLedgerHistoryRow represents one row in user wallet ledger history.
@@ -41,10 +41,10 @@ type UserWalletLedgerHistoryRow struct {
 
 // UserWalletBankAccountHistoryRow represents one bank account record used by a seller.
 type UserWalletBankAccountHistoryRow struct {
-	BankCode      string       `json:"bank_code"`
-	AccountNumber string       `json:"account_number"`
-	AccountName   string       `json:"account_name"`
-	IsVerified    bool         `json:"is_verified"`
+	BankCode      string     `json:"bank_code"`
+	AccountNumber string     `json:"account_number"`
+	AccountName   string     `json:"account_name"`
+	IsVerified    bool       `json:"is_verified"`
 	FirstUsedAt   *time.Time `json:"first_used_at,omitempty"`
 	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
 }
@@ -77,7 +77,7 @@ WHERE da.is_current = TRUE
   AND da.account_id = $1
 LIMIT 1;`
 
-	row := c.db.QueryRowContext(ctx, query, accountID)
+	row := c.ledgerAnalyticsDB.QueryRowContext(ctx, query, accountID)
 	result := &UserWalletDetail{}
 	if err := row.Scan(
 		&result.AccountID,
@@ -153,7 +153,7 @@ WHERE le.account_uuid = $1
 ORDER BY le.created_at DESC
 LIMIT $2 OFFSET $3;`
 
-	rows, err := c.db.QueryContext(ctx, query, accountID, limit, offset)
+	rows, err := c.ledgerDB.QueryContext(ctx, query, accountID, limit, offset)
 	if err != nil {
 		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}
@@ -222,7 +222,7 @@ WHERE da.is_current = TRUE
 ORDER BY dba.last_used_at DESC NULLS LAST, dba.first_used_at DESC NULLS LAST
 LIMIT $2 OFFSET $3;`
 
-	rows, err := c.db.QueryContext(ctx, query, accountID, limit, offset)
+	rows, err := c.ledgerAnalyticsDB.QueryContext(ctx, query, accountID, limit, offset)
 	if err != nil {
 		return nil, ledgererr.ErrAnalyticsQueryError.WithError(err)
 	}

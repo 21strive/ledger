@@ -43,7 +43,7 @@ func (c *LedgerAnalyticsClient) HasCompletedRun(ctx context.Context, jobName str
 	`
 
 	var exists bool
-	if err := c.db.QueryRowContext(ctx, query, jobName).Scan(&exists); err != nil {
+	if err := c.ledgerAnalyticsDB.QueryRowContext(ctx, query, jobName).Scan(&exists); err != nil {
 		c.logger.Error("Failed to check completed run", "job", jobName, "error", err)
 		return false, fmt.Errorf("failed to check completed run for %s: %w", jobName, err)
 	}
@@ -60,7 +60,7 @@ func (c *LedgerAnalyticsClient) GetLastWatermark(ctx context.Context, jobName st
 	`
 
 	var lastWatermark time.Time
-	err := c.db.QueryRowContext(ctx, query, jobName).Scan(&lastWatermark)
+	err := c.ledgerAnalyticsDB.QueryRowContext(ctx, query, jobName).Scan(&lastWatermark)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC), nil
@@ -86,7 +86,7 @@ func (c *LedgerAnalyticsClient) MarkRunningBatchesFailed(ctx context.Context, jo
 		WHERE job_name = $4 AND status = $5
 	`
 
-	result, err := c.db.ExecContext(ctx, query, StatusFailed, reason, time.Now(), jobName, StatusRunning)
+	result, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, StatusFailed, reason, time.Now(), jobName, StatusRunning)
 	if err != nil {
 		return fmt.Errorf("failed to mark running batches as failed: %w", err)
 	}
@@ -153,7 +153,7 @@ func (c *LedgerAnalyticsClient) LogMicrobatchStart(ctx context.Context, jobName 
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, '')
 	`
 
-	_, err := c.db.ExecContext(ctx, query,
+	_, err := c.ledgerAnalyticsDB.ExecContext(ctx, query,
 		id, randID, now, now,
 		jobName, batchStart, batchEnd, StatusRunning,
 	)
@@ -174,7 +174,7 @@ func (c *LedgerAnalyticsClient) LogMicrobatchEnd(ctx context.Context, logID stri
 		WHERE uuid = $5
 	`
 
-	_, err := c.db.ExecContext(ctx, query, status, rowsProcessed, message, time.Now(), logID)
+	_, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, status, rowsProcessed, message, time.Now(), logID)
 	if err != nil {
 		c.logger.Error("Failed to log microbatch end", "logID", logID, "error", err)
 		return fmt.Errorf("failed to log microbatch end: %w", err)

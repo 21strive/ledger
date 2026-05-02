@@ -25,20 +25,22 @@ import (
 )
 
 type config struct {
-	databaseURL     string
-	dbMaxConns      int
-	dbMaxIdleConns  int
-	redisHost       string
-	redisUsername   string
-	redisPassword   string
-	redisCluster    bool
-	redisDB         int
-	interval        time.Duration
-	once            bool
-	mode            string
-	endTime         *time.Time
-	recalculateDate *time.Time
-	recalculateEnd  *time.Time
+	databaseURL          string
+	databaseLedgerURL    string
+	databaseAnalyticsURL string
+	dbMaxConns           int
+	dbMaxIdleConns       int
+	redisHost            string
+	redisUsername        string
+	redisPassword        string
+	redisCluster         bool
+	redisDB              int
+	interval             time.Duration
+	once                 bool
+	mode                 string
+	endTime              *time.Time
+	recalculateDate      *time.Time
+	recalculateEnd       *time.Time
 }
 
 func main() {
@@ -70,22 +72,42 @@ func run(args []string) error {
 		"has_recalculate_end_date", cfg.recalculateEnd != nil,
 	)
 
-	db, err := sql.Open("postgres", cfg.databaseURL)
+	// Determine ledger/analytics DB URLs: fall back to single DATABASE_URL if specific ones not provided
+	ledgerURL := cfg.databaseLedgerURL
+	analyticsURL := cfg.databaseAnalyticsURL
+
+	if ledgerURL == "" {
+		ledgerURL = cfg.databaseURL
+	}
+	if analyticsURL == "" {
+		analyticsURL = cfg.databaseURL
+	}
+
+	ledgerDB, err := sql.Open("postgres", ledgerURL)
 	if err != nil {
-		logger.Error("failed to open database", "error", err)
-		return fmt.Errorf("open database: %w", err)
+		logger.Error("failed to open ledger (source) database", "error", err)
+		return fmt.Errorf("open ledger database: %w", err)
 	}
-	defer db.Close()
+	defer ledgerDB.Close()
 
-	db.SetMaxOpenConns(cfg.dbMaxConns)
-	db.SetMaxIdleConns(cfg.dbMaxIdleConns)
-	db.SetConnMaxLifetime(30 * time.Minute)
-
-	if err := db.Ping(); err != nil {
-		logger.Error("failed to ping database", "error", err)
-		return fmt.Errorf("ping database: %w", err)
+	ledgerAnalyticsDB, err := sql.Open("postgres", analyticsURL)
+	if err != nil {
+		logger.Error("failed to open analytics (target) database", "error", err)
+		return fmt.Errorf("open analytics database: %w", err)
 	}
-	logger.Info("database connected")
+	defer ledgerAnalyticsDB.Close()
+
+	// Use same pool settings for both DBs
+	for _, dbConn := range []*sql.DB{ledgerDB, ledgerAnalyticsDB} {
+		dbConn.SetMaxOpenConns(cfg.dbMaxConns)
+		dbConn.SetMaxIdleConns(cfg.dbMaxIdleConns)
+		dbConn.SetConnMaxLifetime(30 * time.Minute)
+		if err := dbConn.Ping(); err != nil {
+			logger.Error("failed to ping database", "error", err)
+			return fmt.Errorf("ping database: %w", err)
+		}
+	}
+	logger.Info("databases connected", "ledger_db", ledgerURL != "", "ledger_analytics_db", analyticsURL != "")
 
 	var redisClient redis.UniversalClient
 	if cfg.redisCluster {
@@ -117,7 +139,7 @@ func run(args []string) error {
 		getenv("DOKU_ENV", "sandbox") == "production",
 	)
 
-	client := analytics.NewLedgerAnalyticsClient(db, redisClient, logger, dokuClient)
+	client := analytics.NewLedgerAnalyticsClient(ledgerDB, ledgerAnalyticsDB, redisClient, logger, dokuClient)
 	opts := analytics.ETLOptions{
 		EndTime:            cfg.endTime,
 		RecalculateDate:    cfg.recalculateDate,
@@ -160,7 +182,7 @@ func parseConfig(args []string) (*config, error) {
 		fmt.Fprintln(fs.Output(), "")
 		fmt.Fprintln(fs.Output(), "Environment Variables:")
 		fmt.Fprintln(fs.Output(), "  DATABASE_URL (preferred)")
-		fmt.Fprintln(fs.Output(), "  DB_HOST, DB_NAME, DB_USER, DB_PASSWORD, DB_PORT, DB_SSLMODE")
+		fmt.Fprintln(fs.Output(), "  DATABASE_LEDGER_URL, DATABASE_ANALYTICS_URL (or DATABASE_URL)")
 		fmt.Fprintln(fs.Output(), "  DB_MAXCONNS, DB_MAXIDLECONNS")
 		fmt.Fprintln(fs.Output(), "  REDIS_HOST, REDIS_USER, REDIS_PASS, REDIS_CLUSTER, REDIS_DB")
 		fmt.Fprintln(fs.Output(), "  ETL_MODE, ETL_INTERVAL, ETL_ONCE, ETL_END_TIME, ETL_RECALCULATE_DATE, ETL_RECALCULATE_END_DATE")
@@ -176,6 +198,8 @@ func parseConfig(args []string) (*config, error) {
 
 	cfg := &config{}
 	fs.StringVar(&cfg.databaseURL, "database-url", getenv("DATABASE_URL", ""), "PostgreSQL connection string (takes precedence over DB_* envs)")
+	fs.StringVar(&cfg.databaseLedgerURL, "database-ledger-url", getenv("DATABASE_LEDGER_URL", ""), "PostgreSQL ledger/source DB connection string (optional)")
+	fs.StringVar(&cfg.databaseAnalyticsURL, "database-analytics-url", getenv("DATABASE_ANALYTICS_URL", ""), "PostgreSQL analytics/target DB connection string (optional)")
 	fs.IntVar(&cfg.dbMaxConns, "db-max-conns", getenvInt("DB_MAXCONNS", 30), "PostgreSQL max open connections")
 	fs.IntVar(&cfg.dbMaxIdleConns, "db-max-idle-conns", getenvInt("DB_MAXIDLECONNS", 10), "PostgreSQL max idle connections")
 	fs.StringVar(&cfg.redisHost, "redis-host", getenv("REDIS_HOST", "localhost:6379"), "Redis host/address (comma-separated when REDIS_CLUSTER=true)")
@@ -195,18 +219,9 @@ func parseConfig(args []string) (*config, error) {
 		return nil, err
 	}
 
-	if cfg.databaseURL == "" {
-		host := getenv("DB_HOST", "")
-		name := getenv("DB_NAME", "")
-		user := getenv("DB_USER", "")
-		password := getenv("DB_PASSWORD", "")
-		port := getenv("DB_PORT", "5432")
-		sslMode := getenv("DB_SSLMODE", "disable")
-
-		if host == "" || name == "" || user == "" || password == "" {
-			return nil, errors.New("database config is required: set DATABASE_URL or DB_HOST, DB_NAME, DB_USER, DB_PASSWORD")
-		}
-		cfg.databaseURL = buildPostgresURL(host, port, user, password, name, sslMode)
+	// Require either DATABASE_URL or both per-DB URLs
+	if cfg.databaseURL == "" && (cfg.databaseLedgerURL == "" || cfg.databaseAnalyticsURL == "") {
+		return nil, errors.New("database config is required: set DATABASE_URL or both DATABASE_LEDGER_URL and DATABASE_ANALYTICS_URL")
 	}
 	if cfg.redisHost == "" {
 		return nil, errors.New("redis-host is required (set REDIS_HOST or pass --redis-host)")
