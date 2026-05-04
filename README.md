@@ -15,9 +15,9 @@
 
 # Ledger
 
-Financial ledger package for recording product transactions, tracking seller balances, and reconciling settlements.
+Financial ledger package built exclusively for [DOKU](https://github.com/21strive/doku) as the payment gateway. Records product transactions, tracks seller balances, and reconciles DOKU settlement CSVs.
 
-> **Payment Gateway:** This package is tightly coupled with [DOKU](https://github.com/21strive/doku) as the sole payment gateway. `LedgerClient` requires a `DokuUseCaseInterface` at construction time. Account creation, balance inquiry, bank account validation, and seller withdrawals all call DOKU APIs directly. Swapping to another gateway requires changes to `ledger.go` and the `domain/settlement_csv.go` parser.
+> **This package is built for DOKU and DOKU only.** Account creation, balance inquiry, bank account validation, withdrawals, and settlement reconciliation are all implemented against DOKU APIs and CSV formats. It is not designed to be payment-gateway-agnostic.
 
 ---
 
