@@ -921,31 +921,72 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			}
 		}
 
-		if item.HasAmountDiscrepancy() {
-			c.logger.WarnContext(ctx, "Amount discrepancy in settlement - transaction will not be settled",
+		// Fee mismatch reconciliation
+		// feeDelta = ActualDokuFee (from CSV) - ExpectedDokuFee (from ProductTransaction)
+		feeDelta := csvRow.Fee - productTx.Fee.DokuFee
+		if feeDelta != 0 {
+			blocked := false
+			var blockReason string
+
+			switch productTx.Fee.FeeModel {
+			case domain.FeeModelGatewayOnCustomer:
+				// Platform absorbs when DOKU is more expensive
+				if feeDelta > 0 {
+					adjustedPlatformFee := productTx.Fee.PlatformFee - feeDelta
+					if adjustedPlatformFee < 0 {
+						blocked = true
+						blockReason = fmt.Sprintf("feeDelta (%d) exceeds PlatformFee (%d) — platform cannot absorb", feeDelta, productTx.Fee.PlatformFee)
+					}
+				}
+			case domain.FeeModelGatewayOnSeller:
+				// Seller absorbs when DOKU is more expensive
+				if feeDelta > 0 {
+					adjustedSellerNet := productTx.Fee.SellerNetAmount - feeDelta
+					if adjustedSellerNet < 0 {
+						blocked = true
+						blockReason = fmt.Sprintf("feeDelta (%d) exceeds SellerNetAmount (%d) — seller cannot absorb", feeDelta, productTx.Fee.SellerNetAmount)
+					}
+				}
+			}
+
+			if blocked {
+				c.logger.WarnContext(ctx, "Fee mismatch irreconcilable - transaction will not be settled",
+					"invoice_number", csvRow.InvoiceNumber,
+					"product_tx_id", productTx.UUID,
+					"fee_model", productTx.Fee.FeeModel,
+					"expected_doku_fee", productTx.Fee.DokuFee,
+					"actual_doku_fee", csvRow.Fee,
+					"fee_delta", feeDelta,
+					"reason", blockReason,
+				)
+				discrepancies = append(discrepancies, DiscrepancySummary{
+					Type:          "FEE_MISMATCH_IRRECONCILABLE",
+					InvoiceNumber: csvRow.InvoiceNumber,
+					Amount:        feeDelta,
+					Message:       fmt.Sprintf("Invoice %s: %s", csvRow.InvoiceNumber, blockReason),
+				})
+				item.IsMatched = false
+				batch.IncrementUnmatched()
+				settlementItems = append(settlementItems, item)
+				continue
+			}
+
+			// Reconcilable — store feeDelta on item for use in settlement entries
+			item.FeeAdjustment = feeDelta
+			c.logger.InfoContext(ctx, "Fee mismatch will be adjusted during settlement",
 				"invoice_number", csvRow.InvoiceNumber,
 				"product_tx_id", productTx.UUID,
-				"csv_pay_to_merchant", csvRow.PayToMerchant,
-				"expected_net_amount", item.ExpectedNetAmount,
-				"discrepancy", item.AmountDiscrepancy,
+				"fee_model", productTx.Fee.FeeModel,
+				"expected_doku_fee", productTx.Fee.DokuFee,
+				"actual_doku_fee", csvRow.Fee,
+				"fee_delta", feeDelta,
 			)
 			discrepancies = append(discrepancies, DiscrepancySummary{
-				Type:          "AMOUNT_MISMATCH",
+				Type:          "FEE_ADJUSTMENT_APPLIED",
 				InvoiceNumber: csvRow.InvoiceNumber,
-				Amount:        item.AmountDiscrepancy,
-				Message:       fmt.Sprintf("CSV PayToMerchant (%d) != ProductTx Expected (%d) - Transaction NOT settled", csvRow.PayToMerchant, item.ExpectedNetAmount),
+				Amount:        feeDelta,
+				Message:       fmt.Sprintf("Invoice %s: feeDelta=%d applied (fee_model=%s)", csvRow.InvoiceNumber, feeDelta, productTx.Fee.FeeModel),
 			})
-			// Track per seller
-			sellerDisc := sellerItemDiscrepancies[productTx.SellerAccountID]
-			sellerDisc.count++
-			sellerDisc.total += item.AmountDiscrepancy
-			sellerItemDiscrepancies[productTx.SellerAccountID] = sellerDisc
-
-			// Mark as unmatched and skip settlement for this transaction
-			item.IsMatched = false
-			batch.IncrementUnmatched()
-			settlementItems = append(settlementItems, item)
-			continue
 		}
 
 		// Only process matching transactions from here onwards
@@ -956,14 +997,8 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		batch.IncrementMatched()
 		batch.AddToTotals(csvRow.Amount, csvRow.Fee)
 
-		// Calculate actual amounts that go to seller and platform
-		// For GATEWAY_ON_CUSTOMER: SellerNetAmount = full seller price, PlatformFee = platform portion
-		// For GATEWAY_ON_SELLER: SellerNetAmount = combined (seller+platform), need to subtract PlatformFee for seller's actual amount
-		if productTx.Fee.FeeModel == domain.FeeModelGatewayOnSeller {
-			totalSettledSellerAmount += productTx.Fee.SellerNetAmount - productTx.Fee.PlatformFee
-		} else {
-			totalSettledSellerAmount += productTx.Fee.SellerNetAmount
-		}
+		// SellerNetAmount is always the seller's real share (platform fee tracked separately)
+		totalSettledSellerAmount += productTx.Fee.SellerNetAmount
 		totalSettledPlatformAmount += productTx.Fee.PlatformFee
 		totalDokuFee += csvRow.Fee
 
@@ -1009,23 +1044,50 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			continue
 		}
 
-		// Seller: PENDING → AVAILABLE (seller_net_amount for this transaction)
-		if productTx.Fee.SellerNetAmount > 0 {
+		feeDelta := item.FeeAdjustment
+		sellerSettleAmount := productTx.Fee.SellerNetAmount
+		platformSettleAmount := productTx.Fee.PlatformFee
+
+		if feeDelta > 0 {
+			switch productTx.Fee.FeeModel {
+			case domain.FeeModelGatewayOnCustomer:
+				// Platform absorbs: reduce platform settlement amount
+				platformSettleAmount = productTx.Fee.PlatformFee - feeDelta
+			case domain.FeeModelGatewayOnSeller:
+				// Seller absorbs: reduce seller settlement amount
+				sellerSettleAmount = productTx.Fee.SellerNetAmount - feeDelta
+			}
+		}
+
+		// Seller: PENDING → AVAILABLE
+		if sellerSettleAmount > 0 {
 			allSettlementEntries = append(allSettlementEntries,
-				domain.NewSettlementEntriesForAccount(settlementJournal.UUID, productTx.UUID, item.SellerAccountID, productTx.Fee.SellerNetAmount)...,
+				domain.NewSettlementEntriesForAccount(settlementJournal.UUID, productTx.UUID, item.SellerAccountID, sellerSettleAmount)...,
+			)
+		}
+		// Seller adjustments
+		if feeDelta > 0 && productTx.Fee.FeeModel == domain.FeeModelGatewayOnSeller {
+			// Write-off: clear remaining seller PENDING (feeDelta absorbed)
+			allSettlementEntries = append(allSettlementEntries,
+				domain.NewFeeAdjustmentWriteOffEntry(settlementJournal.UUID, productTx.UUID, item.SellerAccountID, feeDelta),
+			)
+		} else if feeDelta < 0 {
+			// Surplus: credit seller AVAILABLE directly (both fee models)
+			allSettlementEntries = append(allSettlementEntries,
+				domain.NewFeeAdjustmentCreditEntry(settlementJournal.UUID, productTx.UUID, item.SellerAccountID, -feeDelta),
 			)
 		}
 
-		// Platform: PENDING → AVAILABLE (platform_fee for this transaction)
-		if productTx.Fee.PlatformFee > 0 && platformAccount != nil {
+		// Platform: PENDING → AVAILABLE
+		if platformSettleAmount > 0 && platformAccount != nil {
 			allSettlementEntries = append(allSettlementEntries,
-				domain.NewSettlementEntriesForAccount(settlementJournal.UUID, productTx.UUID, platformAccount.UUID, productTx.Fee.PlatformFee)...,
+				domain.NewSettlementEntriesForAccount(settlementJournal.UUID, productTx.UUID, platformAccount.UUID, platformSettleAmount)...,
 			)
 
 			// TODO: Execute DOKU intra-sub-account transfer from seller's sub-account to platform sub-account
 			// This should be done AFTER reconciliation transaction commits successfully
 			// Transfer details:
-			//   - Amount: productTx.Fee.PlatformFee
+			//   - Amount: platformSettleAmount
 			//   - From: sellerAccount.DokuSubAccountID
 			//   - To: platformAccount.DokuSubAccountID
 			//   - Use: dokuClient.TransferSubAccount() or equivalent API
@@ -1033,8 +1095,14 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 			// If transfer fails: log error, leave platform_fee_transferred = false for retry
 			// Retry mechanism: separate background job queries GetSettledWithoutPlatformFeeTransfer()
 		}
+		// Platform write-off: clear remaining platform PENDING (GATEWAY_ON_CUSTOMER, feeDelta absorbed)
+		if feeDelta > 0 && productTx.Fee.FeeModel == domain.FeeModelGatewayOnCustomer && platformAccount != nil {
+			allSettlementEntries = append(allSettlementEntries,
+				domain.NewFeeAdjustmentWriteOffEntry(settlementJournal.UUID, productTx.UUID, platformAccount.UUID, feeDelta),
+			)
+		}
 
-		// DOKU expense: clear PENDING (doku_fee for this transaction)
+		// DOKU expense: clear PENDING (always ExpectedDokuFee — actual delta absorbed above)
 		if productTx.Fee.DokuFee > 0 && dokuAccount != nil {
 			allSettlementEntries = append(allSettlementEntries,
 				domain.NewDokuFeeSettlementEntry(settlementJournal.UUID, productTx.UUID, dokuAccount.UUID, productTx.Fee.DokuFee),

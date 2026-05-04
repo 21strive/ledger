@@ -1,6 +1,6 @@
-# Architecture Diagrams
+# Docs
 
-This folder contains high-level architecture diagrams for the Ledger system. These diagrams visualize the key workflows: Payment Execution, Settlement Reconciliation, and Withdrawal Disbursement.
+This folder contains high-level architecture diagrams and technical documentation for the Ledger system.
 
 ## Table of Contents
 
@@ -17,9 +17,14 @@ This folder contains high-level architecture diagrams for the Ledger system. The
     - Visualizes the user withdrawal process using the **Safe Balance Strategy**.
     - Shows immediate balance debits (Expected) and rollback on failure.
 
-## Diagram Maintenance
+4. **Fee Mismatch Reconciliation** ([`104-fee-mismatch-reconciliation.md`](./104-fee-mismatch-reconciliation.md))
+    - Explains how fee discrepancies between `ExpectedDokuFee` and `ActualDokuFee` are handled.
+    - Covers adjustment rules for both fee models (`GATEWAY_ON_CUSTOMER`, `GATEWAY_ON_SELLER`).
+    - Documents the `FEE_ADJUSTMENT` ledger entry type and its terminal nature.
 
-These diagrams are maintained in Markdown using Mermaid JS. To edit:
+## Maintenance
+
+Diagrams are maintained in Markdown using Mermaid JS. To edit:
 1. Open the `.md` file in VS Code.
 2. Use a Markdown preview extension that supports Mermaid (e.g., `Markdown Preview Mermaid Support`).
 3. Update the text-based diagram definition.

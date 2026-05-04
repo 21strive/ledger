@@ -29,6 +29,7 @@ const (
 	EntryTypeSettlementNet      EntryType = "SETTLEMENT_NET"   // Add net to available balance
 	EntryTypeSettlement         EntryType = "SETTLEMENT"       // Generic settlement
 	EntryTypeReconciliation     EntryType = "RECONCILIATION"
+	EntryTypeFeeAdjustment      EntryType = "FEE_ADJUSTMENT"
 )
 
 // SourceType describes the business origin (which table generated this entry).
@@ -219,6 +220,58 @@ func NewDokuFeeSettlementEntry(
 		Amount:        -dokuFee,
 		BalanceBucket: BalanceBucketPending,
 		EntryType:     EntryTypeSettlement,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
+	}
+	redifu.InitRecord(entry)
+	return entry
+}
+
+// NewFeeAdjustmentWriteOffEntry creates a PENDING debit (write-off) for the absorbing party
+// when ActualDokuFee > ExpectedDokuFee.
+//
+//	account  -amount  PENDING  FEE_ADJUSTMENT  (terminal — no AVAILABLE counterpart)
+//
+// Used for:
+//   - Platform account (GATEWAY_ON_CUSTOMER): platform absorbs the delta
+//   - Seller account (GATEWAY_ON_SELLER): seller absorbs the delta
+func NewFeeAdjustmentWriteOffEntry(
+	journalUUID string,
+	productTransactionID string,
+	accountID string,
+	amount int64,
+) *LedgerEntry {
+	entry := &LedgerEntry{
+		JournalUUID:   journalUUID,
+		AccountUUID:   accountID,
+		Amount:        -amount,
+		BalanceBucket: BalanceBucketPending,
+		EntryType:     EntryTypeFeeAdjustment,
+		SourceType:    SourceTypeProductTransaction,
+		SourceID:      productTransactionID,
+	}
+	redifu.InitRecord(entry)
+	return entry
+}
+
+// NewFeeAdjustmentCreditEntry creates an AVAILABLE credit (surplus) for the seller
+// when ActualDokuFee < ExpectedDokuFee.
+//
+//	seller account  +amount  AVAILABLE  FEE_ADJUSTMENT  (terminal — no PENDING source)
+//
+// The surplus comes from DOKU charging less than expected; credited directly to seller.
+func NewFeeAdjustmentCreditEntry(
+	journalUUID string,
+	productTransactionID string,
+	accountID string,
+	amount int64,
+) *LedgerEntry {
+	entry := &LedgerEntry{
+		JournalUUID:   journalUUID,
+		AccountUUID:   accountID,
+		Amount:        amount,
+		BalanceBucket: BalanceBucketAvailable,
+		EntryType:     EntryTypeFeeAdjustment,
 		SourceType:    SourceTypeProductTransaction,
 		SourceID:      productTransactionID,
 	}

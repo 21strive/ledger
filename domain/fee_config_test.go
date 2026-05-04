@@ -328,23 +328,22 @@ func TestFeeCalculator_GetFeeBreakdownWithModel(t *testing.T) {
 		assert.Equal(t, int64(10000), breakdown.SellerPrice)
 		assert.Equal(t, int64(1000), breakdown.PlatformFee)
 		assert.Equal(t, int64(247), breakdown.DokuFee)
-		assert.Equal(t, int64(11000), breakdown.TotalCharged)    // Customer pays: 10000 + 1000 (no gateway fee)
-		assert.Equal(t, int64(10753), breakdown.SellerNetAmount) // Total paid by DOKU: 11000 - 247 (seller+platform combined)
+		assert.Equal(t, int64(11000), breakdown.TotalCharged)   // Customer pays: 10000 + 1000 (no gateway fee)
+		assert.Equal(t, int64(9753), breakdown.SellerNetAmount) // Seller bears DOKU fee: 10000 - 247
 		assert.Equal(t, domain.FeeModelGatewayOnSeller, breakdown.FeeModel)
 		assert.Equal(t, domain.CurrencyIDR, breakdown.Currency)
 
 		// Verify CSV reconciliation would work:
 		// PayToMerchant from DOKU = totalCharged - dokuFee = 11000 - 247 = 10753
-		// This should equal SellerNetAmount (which now includes both seller and platform)
+		// This should equal SellerNetAmount + PlatformFee
 		payToMerchant := breakdown.TotalCharged - breakdown.DokuFee
-		assert.Equal(t, breakdown.SellerNetAmount, payToMerchant, "SellerNetAmount should equal PAY TO MERCHANT from CSV")
+		assert.Equal(t, breakdown.SellerNetAmount+breakdown.PlatformFee, payToMerchant, "SellerNetAmount + PlatformFee should equal PAY TO MERCHANT from CSV")
 
-		// Actual distributions:
-		// - Seller actually gets: SellerNetAmount - PlatformFee = 10753 - 1000 = 9753
+		// Distributions:
+		// - Seller gets: SellerNetAmount = 9753
 		// - Platform gets: PlatformFee = 1000
 		// - DOKU gets: DokuFee = 247
-		sellerActual := breakdown.SellerNetAmount - breakdown.PlatformFee
-		assert.Equal(t, int64(9753), sellerActual)
+		assert.Equal(t, int64(9753), breakdown.SellerNetAmount)
 	})
 
 	t.Run("validates seller net amount calculation", func(t *testing.T) {
@@ -354,8 +353,8 @@ func TestFeeCalculator_GetFeeBreakdownWithModel(t *testing.T) {
 		// GATEWAY_ON_CUSTOMER: SellerNetAmount = SellerPrice (seller gets 100% of their price)
 		assert.Equal(t, breakdownCustomer.SellerPrice, breakdownCustomer.SellerNetAmount)
 
-		// GATEWAY_ON_SELLER: SellerNetAmount = TotalCharged - DokuFee (combined seller+platform after DOKU fee)
-		expectedNet := breakdownSeller.TotalCharged - breakdownSeller.DokuFee
+		// GATEWAY_ON_SELLER: SellerNetAmount = SellerPrice - DokuFee (seller bears DOKU fee, platform tracked separately)
+		expectedNet := breakdownSeller.SellerPrice - breakdownSeller.DokuFee
 		assert.Equal(t, expectedNet, breakdownSeller.SellerNetAmount)
 	})
 
@@ -404,18 +403,19 @@ func TestFeeCalculator_RealWorldScenario(t *testing.T) {
 		assert.Equal(t, int64(1000), breakdown.PlatformFee)
 		assert.Equal(t, int64(4995), breakdown.DokuFee)
 		assert.Equal(t, int64(51000), breakdown.TotalCharged, "Should match CSV AMOUNT")
-		assert.Equal(t, int64(46005), breakdown.SellerNetAmount, "Should match CSV PAY TO MERCHANT")
+		assert.Equal(t, int64(45005), breakdown.SellerNetAmount, "Seller bears DOKU fee: 50000 - 4995")
 
 		// Verify reconciliation matching logic
+		// CSV PAY TO MERCHANT = TotalCharged - DokuFee = 51000 - 4995 = 46005
+		// This equals SellerNetAmount + PlatformFee = 45005 + 1000 = 46005
 		csvPayToMerchant := int64(46005)
-		assert.Equal(t, csvPayToMerchant, breakdown.SellerNetAmount, "SellerNetAmount should equal CSV PAY TO MERCHANT for direct matching")
+		assert.Equal(t, csvPayToMerchant, breakdown.SellerNetAmount+breakdown.PlatformFee, "SellerNetAmount + PlatformFee should equal CSV PAY TO MERCHANT")
 
-		// Verify actual distributions after platform fee
-		sellerActualAmount := breakdown.SellerNetAmount - breakdown.PlatformFee
-		assert.Equal(t, int64(45005), sellerActualAmount, "Seller should actually receive 45005 after platform fee")
+		// Seller's actual payout is SellerNetAmount directly
+		assert.Equal(t, int64(45005), breakdown.SellerNetAmount, "Seller receives 45005 (price minus DOKU fee)")
 
 		// Total check: seller + platform + doku = total charged
-		total := sellerActualAmount + breakdown.PlatformFee + breakdown.DokuFee
+		total := breakdown.SellerNetAmount + breakdown.PlatformFee + breakdown.DokuFee
 		assert.Equal(t, breakdown.TotalCharged, total, "All amounts should sum to total charged")
 	})
 }

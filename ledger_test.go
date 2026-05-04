@@ -729,12 +729,12 @@ NO,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER N
 // TestProcessReconciliation_AmountDiscrepancy tests amount mismatch detection
 func TestProcessReconciliation_AmountDiscrepancy(t *testing.T) {
 	t.Run("csv amount matches expected", func(t *testing.T) {
-		// GATEWAY_ON_SELLER: sellerNetAmount = totalCharged - dokuFee
+		// GATEWAY_ON_SELLER: sellerNetAmount = sellerPrice - dokuFee (seller bears DOKU fee)
 		fee, err := domain.NewFeeBreakdown(50000, 1000, 4995, domain.CurrencyIDR, domain.FeeModelGatewayOnSeller)
 		require.NoError(t, err)
 
-		// Expected: 51000 - 4995 = 46005
-		assert.Equal(t, int64(46005), fee.SellerNetAmount)
+		// Expected: 50000 - 4995 = 45005
+		assert.Equal(t, int64(45005), fee.SellerNetAmount)
 
 		// Create settlement item
 		item, err := domain.NewSettlementItem(
@@ -1106,7 +1106,7 @@ func TestFeeCalculationAlone(t *testing.T) {
 			dokuFee:              4995,
 			feeModel:             domain.FeeModelGatewayOnSeller,
 			expectedTotalCharged: 51000, // 50000 + 1000 (no gateway fee shown to customer)
-			expectedSellerNet:    46005, // 51000 - 4995 (total to SAC: seller + platform - DOKU fee)
+			expectedSellerNet:    45005, // 50000 - 4995 (seller bears DOKU fee, platform tracked separately)
 		},
 	}
 
@@ -1147,17 +1147,23 @@ func TestProcessReconciliation_EndToEnd(t *testing.T) {
 		tx2 := createTestProductTransaction("INV-002", seller2.UUID, fee2)
 		_ = fakes.ProductTransaction().Save(ctx, tx2)
 
-		// Add pending balances (46005 each)
+		// Add pending balances — GATEWAY_ON_SELLER: Seller=45005 (SellerPrice-DokuFee), Platform=1000 each
 		j1 := domain.NewJournal(domain.EventTypePaymentSuccess, domain.SourceTypeProductTransaction, tx1.UUID, map[string]any{"desc": "p1"})
 		_ = fakes.Journal().Save(ctx, j1)
-		p1 := &domain.LedgerEntry{JournalUUID: j1.UUID, AccountUUID: seller1.UUID, Amount: 46005, BalanceBucket: domain.BalanceBucketPending, EntryType: domain.EntryTypeProductPayment, SourceType: domain.SourceTypeProductTransaction, SourceID: tx1.UUID}
+		p1 := &domain.LedgerEntry{JournalUUID: j1.UUID, AccountUUID: seller1.UUID, Amount: 45005, BalanceBucket: domain.BalanceBucketPending, EntryType: domain.EntryTypeProductPayment, SourceType: domain.SourceTypeProductTransaction, SourceID: tx1.UUID}
 		redifu.InitRecord(p1)
 		_ = fakes.LedgerEntry().Save(ctx, p1)
+		pp1 := &domain.LedgerEntry{JournalUUID: j1.UUID, AccountUUID: platform.UUID, Amount: 1000, BalanceBucket: domain.BalanceBucketPending, EntryType: domain.EntryTypePlatformCommission, SourceType: domain.SourceTypeProductTransaction, SourceID: tx1.UUID}
+		redifu.InitRecord(pp1)
+		_ = fakes.LedgerEntry().Save(ctx, pp1)
 		j2 := domain.NewJournal(domain.EventTypePaymentSuccess, domain.SourceTypeProductTransaction, tx2.UUID, map[string]any{"desc": "p2"})
 		_ = fakes.Journal().Save(ctx, j2)
-		p2 := &domain.LedgerEntry{JournalUUID: j2.UUID, AccountUUID: seller2.UUID, Amount: 46005, BalanceBucket: domain.BalanceBucketPending, EntryType: domain.EntryTypeProductPayment, SourceType: domain.SourceTypeProductTransaction, SourceID: tx2.UUID}
+		p2 := &domain.LedgerEntry{JournalUUID: j2.UUID, AccountUUID: seller2.UUID, Amount: 45005, BalanceBucket: domain.BalanceBucketPending, EntryType: domain.EntryTypeProductPayment, SourceType: domain.SourceTypeProductTransaction, SourceID: tx2.UUID}
 		redifu.InitRecord(p2)
 		_ = fakes.LedgerEntry().Save(ctx, p2)
+		pp2 := &domain.LedgerEntry{JournalUUID: j2.UUID, AccountUUID: platform.UUID, Amount: 1000, BalanceBucket: domain.BalanceBucketPending, EntryType: domain.EntryTypePlatformCommission, SourceType: domain.SourceTypeProductTransaction, SourceID: tx2.UUID}
+		redifu.InitRecord(pp2)
+		_ = fakes.LedgerEntry().Save(ctx, pp2)
 
 		// CSV with proper format
 		csv := "Total Amount Purchase,102000\nTotal Fee,9990\nTotal Purchase,2\nTotal Amount Refund,0\nTotal Refund,0\nTotal Settlement Amount,92010\nTotal Discount,0\nTotal Transaction,2\nBatch ID,BATCH-001\n\nNO,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER NAME,REPORT CODE,AMOUNT,RECON CODE,FEE,DISCOUNT,PAY TO MERCHANT,PAY OUT DATE,TRANSACTION TYPE,PROMO CODE,SAC\n1,Seller 1,QRIS,12-03-2026,INV-001,John,ACCEPTED,51000,SUCCESS,4995,0,46005,13-03-2026,Purchase,,SAC-001\n2,Seller 2,QRIS,12-03-2026,INV-002,Jane,ACCEPTED,51000,SUCCESS,4995,0,46005,13-03-2026,Purchase,,SAC-002"
@@ -1183,10 +1189,13 @@ func TestProcessReconciliation_EndToEnd(t *testing.T) {
 		// Verify balances moved from pending to available
 		s1Pend, s1Avail, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller1.UUID)
 		assert.Equal(t, int64(0), s1Pend, "Seller 1 pending should be 0")
-		assert.Equal(t, int64(46005), s1Avail, "Seller 1 available should be 46005")
+		assert.Equal(t, int64(45005), s1Avail, "Seller 1 available should be 45005 (SellerPrice - DokuFee)")
 		s2Pend, s2Avail, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller2.UUID)
 		assert.Equal(t, int64(0), s2Pend, "Seller 2 pending should be 0")
-		assert.Equal(t, int64(46005), s2Avail, "Seller 2 available should be 46005")
+		assert.Equal(t, int64(45005), s2Avail, "Seller 2 available should be 45005 (SellerPrice - DokuFee)")
+		platPend, platAvail, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(0), platPend, "Platform pending should be 0")
+		assert.Equal(t, int64(2000), platAvail, "Platform available should be 2000 (2 x PlatformFee)")
 
 		t.Log("✅ End-to-end reconciliation test passed!")
 	})

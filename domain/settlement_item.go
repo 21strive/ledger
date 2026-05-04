@@ -25,8 +25,9 @@ type SettlementItem struct {
 	RawCSVData             map[string]string // Original CSV row data
 
 	// Reconciliation fields (populated when matched)
-	ExpectedNetAmount int64 // SellerPrice + PlatformFee from ProductTransaction
+	ExpectedNetAmount int64 // SellerNetAmount + PlatformFee from ProductTransaction
 	AmountDiscrepancy int64 // PayToMerchant - ExpectedNetAmount (should be 0 if matched correctly)
+	FeeAdjustment     int64 // feeDelta = ActualDokuFee - ExpectedDokuFee (0 if no mismatch)
 }
 
 // SettlementItemRepository defines data access for settlement items
@@ -97,8 +98,9 @@ func (si *SettlementItem) MatchToTransaction(productTx *ProductTransaction) erro
 		// Customer pays DOKU fee, so PayToMerchant = SellerNetAmount + PlatformFee
 		si.ExpectedNetAmount = productTx.Fee.SellerNetAmount + productTx.Fee.PlatformFee
 	case FeeModelGatewayOnSeller:
-		// Seller pays DOKU fee, SellerNetAmount already includes both seller and platform portions
-		si.ExpectedNetAmount = productTx.Fee.SellerNetAmount
+		// Seller pays DOKU fee; SellerNetAmount is seller's real share only (platform tracked separately)
+		// PayToMerchant from CSV = SellerNetAmount + PlatformFee
+		si.ExpectedNetAmount = productTx.Fee.SellerNetAmount + productTx.Fee.PlatformFee
 	default:
 		// Default to customer pays all (backward compatibility)
 		si.ExpectedNetAmount = productTx.Fee.SellerNetAmount + productTx.Fee.PlatformFee
