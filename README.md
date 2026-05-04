@@ -1,4 +1,4 @@
-<pre style="white-space: pre-wrap; overflow-x: hidden;">
+<pre style="white-space: pre-wrap; overflow-x: hidden; background: transparent;">
 █████████████           █████████                
 ████████████          ███████████                
 ██████████          █████████████                
