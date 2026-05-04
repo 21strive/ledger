@@ -1,18 +1,21 @@
+<div align="center">
 <pre style="white-space: pre-wrap; overflow-x: hidden; background: transparent;">
-█████████████           █████████                
-████████████          ███████████                
-██████████          █████████████                
-███████           ███████████████                
-█████████████████████████████████                
-████████████████         ████████                
-██████████████           ████████                
-███████████              ████████                
-█████████                ████████                
+                █████████████           █████████                
+                ████████████          ███████████                
+                ██████████          █████████████                
+                ███████           ███████████████                
+                █████████████████████████████████                
+                ████████████████         ████████                
+                ██████████████           ████████                
+                ███████████              ████████                
+                █████████                ████████                
 
-<div style="font-size: large">Ledger</div>
-Financial ledger package for recording product transactions, tracking seller balances, and reconciling settlements.
 </pre>
+</div>
 
+# Ledger
+
+Financial ledger package for recording product transactions, tracking seller balances, and reconciling settlements.
 
 > **Payment Gateway:** This package is tightly coupled with [DOKU](https://github.com/21strive/doku) as the sole payment gateway. `LedgerClient` requires a `DokuUseCaseInterface` at construction time. Account creation, balance inquiry, bank account validation, and seller withdrawals all call DOKU APIs directly. Swapping to another gateway requires changes to `ledger.go` and the `domain/settlement_csv.go` parser.
 
