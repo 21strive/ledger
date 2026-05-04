@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -1198,5 +1199,618 @@ func TestProcessReconciliation_EndToEnd(t *testing.T) {
 		assert.Equal(t, int64(2000), platAvail, "Platform available should be 2000 (2 x PlatformFee)")
 
 		t.Log("✅ End-to-end reconciliation test passed!")
+	})
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FEE MISMATCH RECONCILIATION TESTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// setupFeeMismatchTest creates accounts, a completed product transaction, and the
+// corresponding PENDING ledger entries (simulating Phase 2 / payment webhook).
+// Returns the LedgerClient and the repositories for balance assertions.
+func setupFeeMismatchTest(
+	t *testing.T,
+	fee *domain.FeeBreakdown,
+	sellerPendingAmount, platformPendingAmount, dokuPendingAmount int64,
+	sellerSAC string,
+) (client *LedgerClient, fakes *FakeRepositoryProvider, seller, platform, doku *domain.Account, tx *domain.ProductTransaction) {
+	t.Helper()
+	fakes = NewFakeRepositoryProvider()
+	ctx := context.Background()
+
+	platform = createTestAccount(domain.OwnerTypePlatform, "platform", "PLATFORM-SAC")
+	_ = fakes.Account().Save(ctx, platform)
+	doku = createTestAccount(domain.OwnerTypePaymentGateway, "doku", "DOKU-SAC")
+	_ = fakes.Account().Save(ctx, doku)
+	seller = createTestAccount(domain.OwnerTypeSeller, "seller-1", sellerSAC)
+	_ = fakes.Account().Save(ctx, seller)
+
+	tx = createTestProductTransaction("INV-FEE-TEST", seller.UUID, fee)
+	_ = fakes.ProductTransaction().Save(ctx, tx)
+
+	// Simulate Phase 2 PENDING entries from payment webhook
+	j := domain.NewJournal(domain.EventTypePaymentSuccess, domain.SourceTypeProductTransaction, tx.UUID, nil)
+	_ = fakes.Journal().Save(ctx, j)
+
+	addPending := func(accountID string, amount int64, entryType domain.EntryType) {
+		e := &domain.LedgerEntry{
+			JournalUUID:   j.UUID,
+			AccountUUID:   accountID,
+			Amount:        amount,
+			BalanceBucket: domain.BalanceBucketPending,
+			EntryType:     entryType,
+			SourceType:    domain.SourceTypeProductTransaction,
+			SourceID:      tx.UUID,
+		}
+		redifu.InitRecord(e)
+		_ = fakes.LedgerEntry().Save(ctx, e)
+	}
+	if sellerPendingAmount > 0 {
+		addPending(seller.UUID, sellerPendingAmount, domain.EntryTypeProductPayment)
+	}
+	if platformPendingAmount > 0 {
+		addPending(platform.UUID, platformPendingAmount, domain.EntryTypePlatformCommission)
+	}
+	if dokuPendingAmount > 0 {
+		addPending(doku.UUID, dokuPendingAmount, domain.EntryTypeProcessorFee)
+	}
+
+	client = &LedgerClient{
+		repoProvider: fakes,
+		txProvider:   NewFakeTransactionProvider(fakes),
+		logger:       testLogger(),
+	}
+	return
+}
+
+// buildFeeMismatchCSV builds a minimal single-row DOKU settlement CSV.
+func buildFeeMismatchCSV(invoiceNumber string, totalAmount, fee, payToMerchant int64, sac string) string {
+	return fmt.Sprintf(
+		"Total Amount Purchase,%d\nTotal Fee,%d\nTotal Purchase,1\nTotal Amount Refund,0\nTotal Refund,0\nTotal Settlement Amount,%d\nTotal Discount,0\nTotal Transaction,1\nBatch ID,BATCH-FEE-TEST\n\n"+
+			"NO,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER NAME,REPORT CODE,AMOUNT,RECON CODE,FEE,DISCOUNT,PAY TO MERCHANT,PAY OUT DATE,TRANSACTION TYPE,PROMO CODE,SAC\n"+
+			"1,Test Seller,QRIS,12-03-2026,%s,Customer,ACCEPTED,%d,SUCCESS,%d,0,%d,13-03-2026,Purchase,,%s",
+		totalAmount, fee, payToMerchant-fee,
+		invoiceNumber, totalAmount, fee, payToMerchant, sac,
+	)
+}
+
+// runFeeMismatchReconciliation executes ProcessReconciliation with the given CSV string.
+func runFeeMismatchReconciliation(t *testing.T, client *LedgerClient, csv string) *ReconciliationResponse {
+	t.Helper()
+	req := &ReconciliationRequest{
+		CSVReader:      strings.NewReader(csv),
+		ReportFileName: "fee-mismatch-test.csv",
+		UploadedBy:     "test-admin",
+		SettlementDate: time.Now(),
+	}
+	resp, err := client.ProcessReconciliation(context.Background(), req)
+	require.NoError(t, err)
+	return resp
+}
+
+// hasDiscrepancyOfType checks whether the response contains at least one discrepancy of the given type.
+func hasDiscrepancyOfType(resp *ReconciliationResponse, discrepancyType string) bool {
+	for _, d := range resp.Discrepancies {
+		if d.Type == discrepancyType {
+			return true
+		}
+	}
+	return false
+}
+
+// TestProcessReconciliation_RealCSV runs reconciliation against a real DOKU settlement CSV
+// with 4 transactions across 3 sellers.
+//
+// CSV rows (fixed across all subtests):
+//
+//	1  INV-20260502142631-EZUULO  QRIS    Amount=103272 ActualFee=2272 PTM=101000 SAC-5729
+//	2  INV-20260503071202-AMV53W  QRIS    Amount=39000  ActualFee=858  PTM=38142  SAC-6797
+//	3  INV-20260502030023-6QCSJM  VA BCA  Amount=705994 ActualFee=4995 PTM=700999 SAC-6004
+//	4  INV-20260503073825-P4Q2VM  VA BCA  Amount=39000  ActualFee=4995 PTM=34005  SAC-6797
+//
+// Fee model per seller:
+//   - SAC-5729 (row 1) : GATEWAY_ON_CUSTOMER, PlatformFee=1000
+//   - SAC-6797 (rows 2,4): GATEWAY_ON_SELLER,  PlatformFee=0 (subscription — no platform fee)
+//   - SAC-6004 (row 3) : GATEWAY_ON_CUSTOMER, PlatformFee=1000
+func TestProcessReconciliation_RealCSV(t *testing.T) {
+	const realCSV = `Total Amount Purchase_,887266
+Total Fee_,13120
+Total Purchase_,4
+Total Amount Refund_,0
+Total Refund_,0
+Total Settlement Amount_,874146
+Total Discount_,0
+Total Transactions_,4
+Batch ID_,B-BSN-0203-1761932477260-SBS-8298-20251109155312120-20260502101505879
+
+NO,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER NAME,REPORT CODE,AMOUNT,RECON CODE,FEE,DISCOUNT,PAY TO MERCHANT,PAY OUT DATE,TRANSACTION TYPE,PROMO CODE,SUB ACCOUNT
+1,Bernino Falya,QRIS,02-05-2026,INV-20260502142631-EZUULO,Bank BCA,INV-20260502142631-EZUULO,103272,TW2026050236,2272,0,101000,04-05-2026,Purchase,,SAC-5729-1777731990867
+2,Bernino Falya,QRIS,03-05-2026,INV-20260503071202-AMV53W,Bank BCA,INV-20260503071202-AMV53W,39000,TW2026050389,858,0,38142,04-05-2026,Purchase,,SAC-6797-1767941771817
+3,Bernino Falya,Virtual Account BCA,02-05-2026,INV-20260502030023-6QCSJM,Est rerum reiciendis,1900800000264326,705994,1900800000264326,4995,0,700999,04-05-2026,Purchase,,SAC-6004-1772309804461
+4,Bernino Falya,Virtual Account BCA,03-05-2026,INV-20260503073825-P4Q2VM,Fahar Ahnaf Azis,1900800000264481,39000,1900800000264481,4995,0,34005,04-05-2026,Purchase,,SAC-6797-1767941771817`
+
+	type txSpec struct {
+		invoice     string
+		sellerPrice int64
+		platformFee int64
+		dokuFee     int64 // ExpectedDokuFee recorded at payment time
+		feeModel    domain.FeeModel
+		sac         string
+	}
+
+	// setupFakes builds fresh fakes for each subtest using the provided specs.
+	setupFakes := func(t *testing.T, specs []txSpec) (
+		fakes *FakeRepositoryProvider,
+		sacToSeller map[string]*domain.Account,
+		platform, doku *domain.Account,
+	) {
+		t.Helper()
+		fakes = NewFakeRepositoryProvider()
+		ctx := context.Background()
+
+		platform = createTestAccount(domain.OwnerTypePlatform, "platform", "PLATFORM-SAC")
+		_ = fakes.Account().Save(ctx, platform)
+		doku = createTestAccount(domain.OwnerTypePaymentGateway, "doku", "DOKU-SAC")
+		_ = fakes.Account().Save(ctx, doku)
+
+		sacToSeller = make(map[string]*domain.Account)
+		for _, s := range specs {
+			if _, exists := sacToSeller[s.sac]; !exists {
+				seller := createTestAccount(domain.OwnerTypeSeller, "owner-"+s.sac, s.sac)
+				_ = fakes.Account().Save(ctx, seller)
+				sacToSeller[s.sac] = seller
+			}
+		}
+
+		for _, s := range specs {
+			seller := sacToSeller[s.sac]
+			fee, err := domain.NewFeeBreakdown(s.sellerPrice, s.platformFee, s.dokuFee, domain.CurrencyIDR, s.feeModel)
+			require.NoError(t, err)
+
+			tx := createTestProductTransaction(s.invoice, seller.UUID, fee)
+			_ = fakes.ProductTransaction().Save(ctx, tx)
+
+			j := domain.NewJournal(domain.EventTypePaymentSuccess, domain.SourceTypeProductTransaction, tx.UUID, nil)
+			_ = fakes.Journal().Save(ctx, j)
+
+			add := func(accountID string, amount int64, entryType domain.EntryType) {
+				e := &domain.LedgerEntry{
+					JournalUUID: j.UUID, AccountUUID: accountID, Amount: amount,
+					BalanceBucket: domain.BalanceBucketPending, EntryType: entryType,
+					SourceType: domain.SourceTypeProductTransaction, SourceID: tx.UUID,
+				}
+				redifu.InitRecord(e)
+				_ = fakes.LedgerEntry().Save(ctx, e)
+			}
+			// fee.SellerNetAmount is correct for both models:
+			//   GATEWAY_ON_CUSTOMER: SellerNetAmount = SellerPrice
+			//   GATEWAY_ON_SELLER:   SellerNetAmount = SellerPrice - ExpectedDokuFee
+			add(seller.UUID, fee.SellerNetAmount, domain.EntryTypeProductPayment)
+			if s.platformFee > 0 {
+				add(platform.UUID, s.platformFee, domain.EntryTypePlatformCommission)
+			}
+			add(doku.UUID, s.dokuFee, domain.EntryTypeProcessorFee)
+		}
+		return
+	}
+
+	runRecon := func(t *testing.T, fakes *FakeRepositoryProvider) *ReconciliationResponse {
+		t.Helper()
+		client := &LedgerClient{
+			repoProvider: fakes,
+			txProvider:   NewFakeTransactionProvider(fakes),
+			logger:       testLogger(),
+		}
+		resp, err := client.ProcessReconciliation(context.Background(), &ReconciliationRequest{
+			CSVReader:      strings.NewReader(realCSV),
+			ReportFileName: "settlement-20260504.csv",
+			UploadedBy:     "admin",
+			SettlementDate: time.Now(),
+		})
+		require.NoError(t, err)
+		return resp
+	}
+
+	logResults := func(t *testing.T, resp *ReconciliationResponse, fakes *FakeRepositoryProvider, sacToSeller map[string]*domain.Account, platform, doku *domain.Account) {
+		t.Helper()
+		ctx := context.Background()
+		t.Logf("Matched=%d Unmatched=%d", resp.Transactions.Matched, resp.Transactions.Unmatched)
+		for _, d := range resp.Discrepancies {
+			t.Logf("  Discrepancy [%s] %s amount=%d", d.Type, d.InvoiceNumber, d.Amount)
+		}
+		for sac, seller := range sacToSeller {
+			p, a, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller.UUID)
+			t.Logf("  Seller %s  PENDING=%d AVAILABLE=%d", sac, p, a)
+		}
+		platP, platA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		dokuP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		t.Logf("  Platform PENDING=%d AVAILABLE=%d", platP, platA)
+		t.Logf("  DOKU     PENDING=%d", dokuP)
+	}
+
+	// Baseline rows that don't vary across subtests (row 3).
+	// Rows 2 and 4 (SAC-6797) vary per subtest — defined inside each t.Run.
+	row1NoMismatch := txSpec{"INV-20260502142631-EZUULO", 100000, 1000, 2272, domain.FeeModelGatewayOnCustomer, "SAC-5729-1777731990867"}
+	row3NoMismatch := txSpec{"INV-20260502030023-6QCSJM", 699999, 1000, 4995, domain.FeeModelGatewayOnCustomer, "SAC-6004-1772309804461"}
+
+	// SAC-6797 rows (subscription, GATEWAY_ON_SELLER, no platform fee):
+	//   SellerPrice = Amount (39000), PlatformFee = 0
+	//   GATEWAY_ON_SELLER: SellerNetAmount = SellerPrice - ExpectedDokuFee
+	//   TotalCharged = SellerPrice + PlatformFee = 39000 (what customer pays; DOKU fee NOT added to customer)
+	//   ExpectedNetAmount = SellerNetAmount + 0 = SellerNetAmount
+	//
+	//   No-mismatch (ExpectedDokuFee == ActualDokuFee from CSV):
+	//     Row 2: ExpectedDokuFee=858,  SellerNetAmount=38142, ExpectedNetAmount=38142=PTM ✓
+	//     Row 4: ExpectedDokuFee=4995, SellerNetAmount=34005, ExpectedNetAmount=34005=PTM ✓
+	row2NoMismatch := txSpec{"INV-20260503071202-AMV53W", 39000, 0, 858, domain.FeeModelGatewayOnSeller, "SAC-6797-1767941771817"}
+	row4NoMismatch := txSpec{"INV-20260503073825-P4Q2VM", 39000, 0, 4995, domain.FeeModelGatewayOnSeller, "SAC-6797-1767941771817"}
+
+	t.Run("no fee mismatch — all 4 rows exact match", func(t *testing.T) {
+		// All ExpectedDokuFee == ActualDokuFee → feeDelta=0, no adjustments
+		//
+		// SAC-5729: SellerNet=100000 (GATEWAY_ON_CUSTOMER)
+		// SAC-6797: SellerNet=38142+34005=72147 (GATEWAY_ON_SELLER, no platform fee)
+		// SAC-6004: SellerNet=699999 (GATEWAY_ON_CUSTOMER)
+		// Platform: rows 1+3 only → 2×1000=2000
+		specs := []txSpec{row1NoMismatch, row2NoMismatch, row3NoMismatch, row4NoMismatch}
+
+		fakes, sacToSeller, platform, doku := setupFakes(t, specs)
+		resp := runRecon(t, fakes)
+		logResults(t, resp, fakes, sacToSeller, platform, doku)
+
+		ctx := context.Background()
+		assert.Equal(t, 4, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.Empty(t, resp.Discrepancies)
+
+		_, a5729, _ := fakes.LedgerEntry().GetAllBalances(ctx, sacToSeller["SAC-5729-1777731990867"].UUID)
+		assert.Equal(t, int64(100000), a5729, "SAC-5729 AVAILABLE")
+		_, a6797, _ := fakes.LedgerEntry().GetAllBalances(ctx, sacToSeller["SAC-6797-1767941771817"].UUID)
+		assert.Equal(t, int64(72147), a6797, "SAC-6797 AVAILABLE: 38142+34005")
+		_, a6004, _ := fakes.LedgerEntry().GetAllBalances(ctx, sacToSeller["SAC-6004-1772309804461"].UUID)
+		assert.Equal(t, int64(699999), a6004, "SAC-6004 AVAILABLE")
+		_, platA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(2000), platA, "Platform AVAILABLE: rows 1+3 only (2×1000)")
+		dokuP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dokuP)
+	})
+
+	t.Run("row 1 feeDelta > 0 (SAC-5729 GATEWAY_ON_CUSTOMER) — platform absorbs delta", func(t *testing.T) {
+		// Row 1: ExpectedDokuFee=2000, ActualDokuFee=2272 → feeDelta=+272
+		// SellerPrice = 103272 - 1000 - 2000 = 100272
+		// adjustedPlatformFee = 1000 - 272 = 728
+		//
+		// Phase 2 PENDING: Seller=100272, Platform=1000, DOKU=2000
+		// Phase 3 entries:
+		//   Seller  -100272 PENDING  SETTLEMENT_CLEAR
+		//   Seller  +100272 AVAILABLE SETTLEMENT_NET
+		//   Platform  -728  PENDING  SETTLEMENT_CLEAR
+		//   Platform  +728  AVAILABLE SETTLEMENT_NET
+		//   Platform  -272  PENDING  FEE_ADJUSTMENT (write-off)
+		//   DOKU    -2000   PENDING  SETTLEMENT
+		row1 := txSpec{"INV-20260502142631-EZUULO", 100272, 1000, 2000, domain.FeeModelGatewayOnCustomer, "SAC-5729-1777731990867"}
+		specs := []txSpec{row1, row2NoMismatch, row3NoMismatch, row4NoMismatch}
+
+		fakes, sacToSeller, platform, doku := setupFakes(t, specs)
+		resp := runRecon(t, fakes)
+		logResults(t, resp, fakes, sacToSeller, platform, doku)
+
+		ctx := context.Background()
+		assert.Equal(t, 4, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"))
+
+		_, a5729, _ := fakes.LedgerEntry().GetAllBalances(ctx, sacToSeller["SAC-5729-1777731990867"].UUID)
+		assert.Equal(t, int64(100272), a5729, "SAC-5729: seller net unchanged (customer bore extra fee)")
+		_, platA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		// Row 1: 728 (adjusted) + row 3: 1000 = 1728
+		assert.Equal(t, int64(1728), platA, "Platform: 728 (row1 adjusted) + 1000 (row3)")
+		dokuP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dokuP)
+	})
+
+	t.Run("row 1 feeDelta < 0 (SAC-5729 GATEWAY_ON_CUSTOMER) — surplus credited to seller", func(t *testing.T) {
+		// Row 1: ExpectedDokuFee=2500, ActualDokuFee=2272 → feeDelta=-228
+		// SellerPrice = 103272 - 1000 - 2500 = 99772
+		// Seller surplus = 228 → AVAILABLE = 99772+228 = 100000
+		//
+		// Phase 2 PENDING: Seller=99772, Platform=1000, DOKU=2500
+		// Phase 3 entries:
+		//   Seller  -99772 PENDING  SETTLEMENT_CLEAR
+		//   Seller  +99772 AVAILABLE SETTLEMENT_NET
+		//   Seller  +228   AVAILABLE FEE_ADJUSTMENT (direct credit)
+		//   Platform -1000 PENDING  SETTLEMENT_CLEAR
+		//   Platform +1000 AVAILABLE SETTLEMENT_NET
+		//   DOKU    -2500  PENDING  SETTLEMENT (always ExpectedDokuFee)
+		row1 := txSpec{"INV-20260502142631-EZUULO", 99772, 1000, 2500, domain.FeeModelGatewayOnCustomer, "SAC-5729-1777731990867"}
+		specs := []txSpec{row1, row2NoMismatch, row3NoMismatch, row4NoMismatch}
+
+		fakes, sacToSeller, platform, doku := setupFakes(t, specs)
+		resp := runRecon(t, fakes)
+		logResults(t, resp, fakes, sacToSeller, platform, doku)
+
+		ctx := context.Background()
+		assert.Equal(t, 4, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"))
+
+		_, a5729, _ := fakes.LedgerEntry().GetAllBalances(ctx, sacToSeller["SAC-5729-1777731990867"].UUID)
+		assert.Equal(t, int64(100000), a5729, "SAC-5729: 99772 + 228 surplus = 100000")
+		_, platA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(2000), platA, "Platform: rows 1+3 unchanged (2×1000)")
+		dokuP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dokuP)
+	})
+
+	t.Run("rows 2+4 feeDelta > 0 (SAC-6797 GATEWAY_ON_SELLER) — seller absorbs delta", func(t *testing.T) {
+		// Row 2: ExpectedDokuFee=600,  ActualDokuFee=858  → feeDelta=+258
+		//   SellerPrice=39000, SellerNetAmount=38400, adjustedSellerNet=38142
+		//   Phase 2 PENDING: Seller=38400, DOKU=600
+		//   Phase 3: Seller CLEAR -38142, Seller NET +38142, Seller FEE_ADJ -258 PENDING
+		//
+		// Row 4: ExpectedDokuFee=4000, ActualDokuFee=4995 → feeDelta=+995
+		//   SellerPrice=39000, SellerNetAmount=35000, adjustedSellerNet=34005
+		//   Phase 2 PENDING: Seller=35000, DOKU=4000
+		//   Phase 3: Seller CLEAR -34005, Seller NET +34005, Seller FEE_ADJ -995 PENDING
+		//
+		// SAC-6797 AVAILABLE = 38142+34005 = 72147 (same as no-mismatch — seller price fixed)
+		row2 := txSpec{"INV-20260503071202-AMV53W", 39000, 0, 600, domain.FeeModelGatewayOnSeller, "SAC-6797-1767941771817"}
+		row4 := txSpec{"INV-20260503073825-P4Q2VM", 39000, 0, 4000, domain.FeeModelGatewayOnSeller, "SAC-6797-1767941771817"}
+		specs := []txSpec{row1NoMismatch, row2, row3NoMismatch, row4}
+
+		fakes, sacToSeller, platform, doku := setupFakes(t, specs)
+		resp := runRecon(t, fakes)
+		logResults(t, resp, fakes, sacToSeller, platform, doku)
+
+		ctx := context.Background()
+		assert.Equal(t, 4, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"))
+
+		_, a6797, _ := fakes.LedgerEntry().GetAllBalances(ctx, sacToSeller["SAC-6797-1767941771817"].UUID)
+		// Seller always ends up with SellerPrice - ActualDokuFee regardless of expected:
+		// Row 2: 39000-858=38142, Row 4: 39000-4995=34005 → total=72147
+		assert.Equal(t, int64(72147), a6797, "SAC-6797: 38142+34005 (seller absorbs feeDelta)")
+		_, platA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(2000), platA, "Platform: rows 1+3 only (rows 2+4 no platform fee)")
+		dokuP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dokuP)
+	})
+
+	t.Run("rows 2+4 feeDelta < 0 (SAC-6797 GATEWAY_ON_SELLER) — surplus credited to seller", func(t *testing.T) {
+		// Row 2: ExpectedDokuFee=1000, ActualDokuFee=858  → feeDelta=-142
+		//   SellerPrice=39000, SellerNetAmount=38000, surplus=142 → AVAILABLE=38142
+		//   Phase 2 PENDING: Seller=38000, DOKU=1000
+		//   Phase 3: Seller CLEAR -38000, Seller NET +38000, Seller FEE_ADJ +142 AVAILABLE
+		//
+		// Row 4: ExpectedDokuFee=5500, ActualDokuFee=4995 → feeDelta=-505
+		//   SellerPrice=39000, SellerNetAmount=33500, surplus=505 → AVAILABLE=34005
+		//   Phase 2 PENDING: Seller=33500, DOKU=5500
+		//   Phase 3: Seller CLEAR -33500, Seller NET +33500, Seller FEE_ADJ +505 AVAILABLE
+		//
+		// SAC-6797 AVAILABLE = 38142+34005 = 72147
+		row2 := txSpec{"INV-20260503071202-AMV53W", 39000, 0, 1000, domain.FeeModelGatewayOnSeller, "SAC-6797-1767941771817"}
+		row4 := txSpec{"INV-20260503073825-P4Q2VM", 39000, 0, 5500, domain.FeeModelGatewayOnSeller, "SAC-6797-1767941771817"}
+		specs := []txSpec{row1NoMismatch, row2, row3NoMismatch, row4}
+
+		fakes, sacToSeller, platform, doku := setupFakes(t, specs)
+		resp := runRecon(t, fakes)
+		logResults(t, resp, fakes, sacToSeller, platform, doku)
+
+		ctx := context.Background()
+		assert.Equal(t, 4, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"))
+
+		_, a6797, _ := fakes.LedgerEntry().GetAllBalances(ctx, sacToSeller["SAC-6797-1767941771817"].UUID)
+		// Row 2: 38000 + 142 = 38142, Row 4: 33500 + 505 = 34005 → total=72147
+		assert.Equal(t, int64(72147), a6797, "SAC-6797: surplus credited directly to AVAILABLE")
+		_, platA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(2000), platA, "Platform: rows 1+3 only")
+		dokuP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dokuP)
+	})
+}
+
+// TestProcessReconciliation_FeeMismatch covers all six fee-mismatch reconciliation scenarios:
+//
+//	GATEWAY_ON_CUSTOMER: feeDelta > 0 (reconcilable), feeDelta > 0 (BLOCK), feeDelta < 0
+//	GATEWAY_ON_SELLER  : feeDelta > 0 (reconcilable), feeDelta > 0 (BLOCK), feeDelta < 0
+func TestProcessReconciliation_FeeMismatch(t *testing.T) {
+
+	t.Run("GATEWAY_ON_CUSTOMER feeDelta > 0 reconcilable — platform absorbs delta", func(t *testing.T) {
+		// SellerPrice=100000, PlatformFee=5000, ExpectedDokuFee=3000
+		// TotalCharged=108000, SellerNetAmount=100000
+		// ActualDokuFee=4000 → feeDelta=+1000 → adjustedPlatformFee=4000
+		fee, err := domain.NewFeeBreakdown(100000, 5000, 3000, domain.CurrencyIDR, domain.FeeModelGatewayOnCustomer)
+		require.NoError(t, err)
+
+		// Phase 2 PENDING: Seller=100000, Platform=5000, DOKU=3000
+		client, fakes, seller, platform, doku, _ := setupFeeMismatchTest(t, fee, 100000, 5000, 3000, "SAC-SELLER")
+
+		// CSV: ActualDokuFee=4000, PayToMerchant=108000-4000=104000
+		csv := buildFeeMismatchCSV("INV-FEE-TEST", 108000, 4000, 104000, "SAC-SELLER")
+		resp := runFeeMismatchReconciliation(t, client, csv)
+
+		ctx := context.Background()
+
+		// Response: 1 matched, no unmatched
+		assert.Equal(t, 1, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"), "should record FEE_ADJUSTMENT_APPLIED")
+
+		// Seller: full SellerNetAmount available, PENDING cleared
+		sP, sA, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller.UUID)
+		assert.Equal(t, int64(0), sP, "seller PENDING should be 0")
+		assert.Equal(t, int64(100000), sA, "seller AVAILABLE should be 100000 (unchanged)")
+
+		// Platform: adjustedPlatformFee = 5000 - 1000 = 4000 available; PENDING cleared
+		plP, plA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(0), plP, "platform PENDING should be 0")
+		assert.Equal(t, int64(4000), plA, "platform AVAILABLE should be 4000 (PlatformFee - feeDelta)")
+
+		// DOKU: PENDING cleared (always by ExpectedDokuFee=3000)
+		dkP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dkP, "DOKU PENDING should be 0")
+	})
+
+	t.Run("GATEWAY_ON_CUSTOMER feeDelta > 0 BLOCK — feeDelta exceeds PlatformFee", func(t *testing.T) {
+		// PlatformFee=500, ExpectedDokuFee=3000
+		// ActualDokuFee=4000 → feeDelta=+1000 → adjustedPlatformFee=-500 → BLOCK
+		fee, err := domain.NewFeeBreakdown(100000, 500, 3000, domain.CurrencyIDR, domain.FeeModelGatewayOnCustomer)
+		require.NoError(t, err)
+
+		client, fakes, seller, platform, _, _ := setupFeeMismatchTest(t, fee, 100000, 500, 3000, "SAC-SELLER")
+
+		// CSV: ActualDokuFee=4000 (feeDelta=+1000 > PlatformFee=500)
+		csv := buildFeeMismatchCSV("INV-FEE-TEST", 103500, 4000, 99500, "SAC-SELLER")
+		resp := runFeeMismatchReconciliation(t, client, csv)
+
+		ctx := context.Background()
+
+		// Transaction should NOT be settled (unmatched)
+		assert.Equal(t, 0, resp.Transactions.Matched)
+		assert.Equal(t, 1, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_MISMATCH_IRRECONCILABLE"), "should record FEE_MISMATCH_IRRECONCILABLE")
+
+		// No settlement entries written — balances unchanged from Phase 2
+		sP, sA, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller.UUID)
+		assert.Equal(t, int64(100000), sP, "seller PENDING should remain (not settled)")
+		assert.Equal(t, int64(0), sA)
+
+		plP, plA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(500), plP, "platform PENDING should remain (not settled)")
+		assert.Equal(t, int64(0), plA)
+	})
+
+	t.Run("GATEWAY_ON_CUSTOMER feeDelta < 0 — surplus credited to seller", func(t *testing.T) {
+		// ExpectedDokuFee=3000, ActualDokuFee=2000 → feeDelta=-1000
+		// Seller AVAILABLE = SellerNetAmount + surplus = 100000 + 1000 = 101000
+		fee, err := domain.NewFeeBreakdown(100000, 5000, 3000, domain.CurrencyIDR, domain.FeeModelGatewayOnCustomer)
+		require.NoError(t, err)
+
+		client, fakes, seller, platform, doku, _ := setupFeeMismatchTest(t, fee, 100000, 5000, 3000, "SAC-SELLER")
+
+		// CSV: ActualDokuFee=2000, PayToMerchant=108000-2000=106000
+		csv := buildFeeMismatchCSV("INV-FEE-TEST", 108000, 2000, 106000, "SAC-SELLER")
+		resp := runFeeMismatchReconciliation(t, client, csv)
+
+		ctx := context.Background()
+
+		assert.Equal(t, 1, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"))
+
+		// Seller: SellerNetAmount (from PENDING) + 1000 surplus = 101000 available
+		sP, sA, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller.UUID)
+		assert.Equal(t, int64(0), sP)
+		assert.Equal(t, int64(101000), sA, "seller AVAILABLE should be 100000 + 1000 surplus")
+
+		// Platform: unchanged — 5000 available
+		plP, plA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(0), plP)
+		assert.Equal(t, int64(5000), plA, "platform AVAILABLE should be 5000 (unchanged)")
+
+		// DOKU: PENDING cleared by ExpectedDokuFee=3000
+		dkP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dkP)
+	})
+
+	t.Run("GATEWAY_ON_SELLER feeDelta > 0 reconcilable — seller absorbs delta", func(t *testing.T) {
+		// SellerPrice=100000, PlatformFee=5000, ExpectedDokuFee=3000
+		// TotalCharged=105000, SellerNetAmount=97000 (=SellerPrice-DokuFee)
+		// ActualDokuFee=4000 → feeDelta=+1000 → adjustedSellerNet=96000
+		fee, err := domain.NewFeeBreakdown(100000, 5000, 3000, domain.CurrencyIDR, domain.FeeModelGatewayOnSeller)
+		require.NoError(t, err)
+		require.Equal(t, int64(97000), fee.SellerNetAmount)
+
+		// Phase 2 PENDING: Seller=97000, Platform=5000, DOKU=3000
+		client, fakes, seller, platform, doku, _ := setupFeeMismatchTest(t, fee, 97000, 5000, 3000, "SAC-SELLER")
+
+		// CSV: TotalCharged=105000, ActualDokuFee=4000, PayToMerchant=101000
+		csv := buildFeeMismatchCSV("INV-FEE-TEST", 105000, 4000, 101000, "SAC-SELLER")
+		resp := runFeeMismatchReconciliation(t, client, csv)
+
+		ctx := context.Background()
+
+		assert.Equal(t, 1, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"))
+
+		// Seller: adjustedSellerNet = 97000 - 1000 = 96000 available; PENDING cleared
+		sP, sA, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller.UUID)
+		assert.Equal(t, int64(0), sP, "seller PENDING should be 0")
+		assert.Equal(t, int64(96000), sA, "seller AVAILABLE should be 96000 (SellerNetAmount - feeDelta)")
+
+		// Platform: unchanged — 5000 available
+		plP, plA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(0), plP)
+		assert.Equal(t, int64(5000), plA, "platform AVAILABLE should be 5000 (unchanged)")
+
+		// DOKU: PENDING cleared by ExpectedDokuFee=3000
+		dkP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dkP)
+	})
+
+	t.Run("GATEWAY_ON_SELLER feeDelta > 0 BLOCK — feeDelta exceeds SellerNetAmount", func(t *testing.T) {
+		// SellerPrice=100000, ExpectedDokuFee=3000, SellerNetAmount=97000
+		// ActualDokuFee=101000 → feeDelta=+98000 → adjustedSellerNet=-1000 → BLOCK
+		fee, err := domain.NewFeeBreakdown(100000, 5000, 3000, domain.CurrencyIDR, domain.FeeModelGatewayOnSeller)
+		require.NoError(t, err)
+
+		client, fakes, seller, platform, _, _ := setupFeeMismatchTest(t, fee, 97000, 5000, 3000, "SAC-SELLER")
+
+		// CSV: ActualDokuFee=101000 (feeDelta=+98000 > SellerNetAmount=97000)
+		csv := buildFeeMismatchCSV("INV-FEE-TEST", 105000, 101000, 4000, "SAC-SELLER")
+		resp := runFeeMismatchReconciliation(t, client, csv)
+
+		ctx := context.Background()
+
+		assert.Equal(t, 0, resp.Transactions.Matched)
+		assert.Equal(t, 1, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_MISMATCH_IRRECONCILABLE"))
+
+		// No settlement entries — balances unchanged from Phase 2
+		sP, sA, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller.UUID)
+		assert.Equal(t, int64(97000), sP, "seller PENDING should remain (not settled)")
+		assert.Equal(t, int64(0), sA)
+
+		plP, plA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(5000), plP, "platform PENDING should remain (not settled)")
+		assert.Equal(t, int64(0), plA)
+	})
+
+	t.Run("GATEWAY_ON_SELLER feeDelta < 0 — surplus credited to seller", func(t *testing.T) {
+		// ExpectedDokuFee=3000, ActualDokuFee=2000 → feeDelta=-1000
+		// Seller AVAILABLE = SellerNetAmount + surplus = 97000 + 1000 = 98000
+		fee, err := domain.NewFeeBreakdown(100000, 5000, 3000, domain.CurrencyIDR, domain.FeeModelGatewayOnSeller)
+		require.NoError(t, err)
+
+		client, fakes, seller, platform, doku, _ := setupFeeMismatchTest(t, fee, 97000, 5000, 3000, "SAC-SELLER")
+
+		// CSV: TotalCharged=105000, ActualDokuFee=2000, PayToMerchant=103000
+		csv := buildFeeMismatchCSV("INV-FEE-TEST", 105000, 2000, 103000, "SAC-SELLER")
+		resp := runFeeMismatchReconciliation(t, client, csv)
+
+		ctx := context.Background()
+
+		assert.Equal(t, 1, resp.Transactions.Matched)
+		assert.Equal(t, 0, resp.Transactions.Unmatched)
+		assert.True(t, hasDiscrepancyOfType(resp, "FEE_ADJUSTMENT_APPLIED"))
+
+		// Seller: 97000 from PENDING + 1000 surplus = 98000 available
+		sP, sA, _ := fakes.LedgerEntry().GetAllBalances(ctx, seller.UUID)
+		assert.Equal(t, int64(0), sP)
+		assert.Equal(t, int64(98000), sA, "seller AVAILABLE should be 97000 + 1000 surplus")
+
+		// Platform: unchanged — 5000 available
+		plP, plA, _ := fakes.LedgerEntry().GetAllBalances(ctx, platform.UUID)
+		assert.Equal(t, int64(0), plP)
+		assert.Equal(t, int64(5000), plA)
+
+		// DOKU: PENDING cleared by ExpectedDokuFee=3000
+		dkP, _, _ := fakes.LedgerEntry().GetAllBalances(ctx, doku.UUID)
+		assert.Equal(t, int64(0), dkP)
 	})
 }
