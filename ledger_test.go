@@ -264,6 +264,10 @@ func (f *FakeProductTransactionRepository) UpdateStatus(ctx context.Context, id 
 	return nil
 }
 
+func (f *FakeProductTransactionRepository) SaveTransferRequestID(ctx context.Context, id string, requestID string) error {
+	return nil
+}
+
 func (f *FakeProductTransactionRepository) MarkPlatformFeeTransferred(ctx context.Context, id string) error {
 	return nil
 }

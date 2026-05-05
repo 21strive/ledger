@@ -114,6 +114,7 @@ func run(args []string) error {
 		getenv("DOKU_CLIENT_ID", getenv("DOKU_API_CLIENT_ID", "")),
 		getenv("DOKU_SECRET_KEY", getenv("DOKU_API_SECRET_KEY", "")),
 		getenv("DOKU_PRIVATE_KEY", ""),
+		getenv("DOKU_ENV", "sandbox") == "production",
 	)
 
 	client := analytics.NewLedgerAnalyticsClient(db, redisClient, logger, dokuClient)

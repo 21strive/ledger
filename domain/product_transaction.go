@@ -60,6 +60,7 @@ type ProductTransaction struct {
 	SettledAt                *time.Time     // When appeared in settlement CSV
 	PlatformFeeTransferred   bool           // Whether platform fee has been transferred to platform sub-account
 	PlatformFeeTransferredAt *time.Time     // When platform fee was successfully transferred via DOKU API
+	TransferRequestID        string         // DOKU request-id used for platform fee transfer (for idempotent retries)
 }
 
 // ProductTransactionRepository defines data access for product transactions
@@ -77,6 +78,7 @@ type ProductTransactionRepository interface {
 	GetBySellerAccountIDWithCursor(ctx context.Context, sellerAccountID string, cursor string, pageSize int, sortOrder string) ([]*ProductTransaction, error)
 	Save(ctx context.Context, tx *ProductTransaction) error
 	UpdateStatus(ctx context.Context, id string, status TransactionStatus, timestamp time.Time) error
+	SaveTransferRequestID(ctx context.Context, id string, requestID string) error
 	MarkPlatformFeeTransferred(ctx context.Context, id string) error
 	GetSettledWithoutPlatformFeeTransfer(ctx context.Context, limit int) ([]*ProductTransaction, error)
 }

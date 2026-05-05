@@ -99,7 +99,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 			SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 			       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 			       status, created_at, updated_at, completed_at, settled_at,
-			       platform_fee_transferred, platform_fee_transferred_at, metadata
+			       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 			FROM product_transactions
 			WHERE seller_account_id = $1
 			ORDER BY created_at %s
@@ -200,14 +200,15 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 			uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 			seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 			status, created_at, updated_at, completed_at, settled_at,
-			platform_fee_transferred, platform_fee_transferred_at, metadata
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+			platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
 			settled_at = EXCLUDED.settled_at,
 			platform_fee_transferred = EXCLUDED.platform_fee_transferred,
 			platform_fee_transferred_at = EXCLUDED.platform_fee_transferred_at,
+			transfer_request_id = EXCLUDED.transfer_request_id,
 			metadata = EXCLUDED.metadata
 	`
 
@@ -238,6 +239,7 @@ func (r *PostgresProductTransactionRepository) Save(ctx context.Context, tx *dom
 		settledAt,
 		tx.PlatformFeeTransferred,
 		platformFeeTransferredAt,
+		toNullString(tx.TransferRequestID),
 		string(metadataJSON),
 	)
 	if err != nil {
@@ -347,6 +349,7 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		SettledAt                sql.NullTime
 		PlatformFeeTransferred   bool
 		PlatformFeeTransferredAt sql.NullTime
+		TransferRequestID        sql.NullString
 		Metadata                 []byte
 	}
 
@@ -372,6 +375,7 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		&row.SettledAt,
 		&row.PlatformFeeTransferred,
 		&row.PlatformFeeTransferredAt,
+		&row.TransferRequestID,
 		&row.Metadata,
 	)
 	if err != nil {
@@ -421,6 +425,7 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 		SettledAt:                settledAt,
 		PlatformFeeTransferred:   row.PlatformFeeTransferred,
 		PlatformFeeTransferredAt: platformFeeTransferredAt,
+		TransferRequestID:        row.TransferRequestID.String,
 	}
 	redifu.InitRecord(tx)
 	// Override auto-generated values with database values
@@ -429,6 +434,33 @@ func (r *PostgresProductTransactionRepository) scanRow(rows *sql.Rows) (*domain.
 	tx.CreatedAt = row.CreatedAt
 	tx.UpdatedAt = row.UpdatedAt
 	return tx, nil
+}
+
+// SaveTransferRequestID persists the DOKU request-id that will be used for the platform fee transfer.
+// Must be called before invoking the DOKU transfer API so the id is available for idempotent retries.
+func (r *PostgresProductTransactionRepository) SaveTransferRequestID(ctx context.Context, id string, requestID string) error {
+	query := `
+		UPDATE product_transactions
+		SET transfer_request_id = $1,
+		    updated_at = NOW()
+		WHERE uuid = $2
+	`
+
+	result, err := r.db.ExecContext(ctx, query, requestID, id)
+	if err != nil {
+		return ErrFailedInsertSQL.WithError(err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return ErrFailedQuerySQL.WithError(err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }
 
 // MarkPlatformFeeTransferred marks a transaction as having its platform fee successfully transferred

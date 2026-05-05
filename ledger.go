@@ -17,6 +17,7 @@ import (
 	"github.com/21strive/ledger/repo"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/google/uuid"
 )
 
 // LedgerClient is the entry point for all ledger operations.
@@ -1027,6 +1028,15 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		},
 	)
 
+	// pendingFeeTransfer holds data needed to execute a platform fee transfer after the DB commit.
+	type pendingFeeTransfer struct {
+		productTxUUID   string
+		invoiceNumber   string
+		sellerAccountID string
+		amount          int64
+	}
+	pendingFeeTransfers := make([]pendingFeeTransfer, 0)
+
 	// Build settlement ledger entries for EACH matched product transaction (using cached data)
 	allSettlementEntries := make([]*domain.LedgerEntry, 0)
 
@@ -1084,16 +1094,12 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 				domain.NewSettlementEntriesForAccount(settlementJournal.UUID, productTx.UUID, platformAccount.UUID, platformSettleAmount)...,
 			)
 
-			// TODO: Execute DOKU intra-sub-account transfer from seller's sub-account to platform sub-account
-			// This should be done AFTER reconciliation transaction commits successfully
-			// Transfer details:
-			//   - Amount: platformSettleAmount
-			//   - From: sellerAccount.DokuSubAccountID
-			//   - To: platformAccount.DokuSubAccountID
-			//   - Use: dokuClient.TransferSubAccount() or equivalent API
-			// After successful transfer: tx.ProductTransaction().MarkPlatformFeeTransferred(ctx, productTx.UUID)
-			// If transfer fails: log error, leave platform_fee_transferred = false for retry
-			// Retry mechanism: separate background job queries GetSettledWithoutPlatformFeeTransfer()
+			pendingFeeTransfers = append(pendingFeeTransfers, pendingFeeTransfer{
+				productTxUUID:   productTx.UUID,
+				invoiceNumber:   productTx.InvoiceNumber,
+				sellerAccountID: item.SellerAccountID,
+				amount:          platformSettleAmount,
+			})
 		}
 		// Platform write-off: clear remaining platform PENDING (GATEWAY_ON_CUSTOMER, feeDelta absorbed)
 		if feeDelta > 0 && productTx.Fee.FeeModel == domain.FeeModelGatewayOnCustomer && platformAccount != nil {
@@ -1177,6 +1183,67 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		// Transaction failed and rolled back completely (including batch record)
 		// Return error to allow retry without UNIQUE constraint violation
 		return nil, err
+	}
+
+	// Execute platform fee transfers (inline, best-effort — failures are retried by ProcessPlatformFeeTransfer)
+	for _, pft := range pendingFeeTransfers {
+		sellerAccount, err := c.repoProvider.Account().GetByID(ctx, pft.sellerAccountID)
+		if err != nil || sellerAccount.DokuSubAccountID == "" {
+			c.logger.WarnContext(ctx, "Platform fee transfer skipped - seller account unavailable",
+				"product_tx_id", pft.productTxUUID,
+				"seller_account_id", pft.sellerAccountID,
+				"error", err,
+			)
+			continue
+		}
+
+		requestID := uuid.NewString()
+		if err := c.repoProvider.ProductTransaction().SaveTransferRequestID(ctx, pft.productTxUUID, requestID); err != nil {
+			c.logger.WarnContext(ctx, "Platform fee transfer skipped - failed to save request ID",
+				"product_tx_id", pft.productTxUUID,
+				"error", err,
+			)
+			continue
+		}
+
+		transferReq := requests.DokuTransferSubAccountRequest{}
+		transferReq.Transfer.Origin = sellerAccount.DokuSubAccountID
+		transferReq.Transfer.Destination = platformAccount.DokuSubAccountID
+		transferReq.Transfer.Amount = int(pft.amount)
+		transferReq.Transfer.InvoiceNumber = pft.invoiceNumber
+
+		_, dokuErr := c.dokuClient.TransferSubAccount(requestID, transferReq)
+		if dokuErr != nil {
+			c.logger.WarnContext(ctx, "Platform fee transfer failed - will retry via background job",
+				"product_tx_id", pft.productTxUUID,
+				"invoice_number", pft.invoiceNumber,
+				"from_sac", sellerAccount.DokuSubAccountID,
+				"to_sac", platformAccount.DokuSubAccountID,
+				"amount", pft.amount,
+				"error", dokuErr.Message,
+			)
+			continue
+		}
+
+		if err := c.repoProvider.ProductTransaction().MarkPlatformFeeTransferred(ctx, pft.productTxUUID); err != nil {
+			c.logger.ErrorContext(ctx, "CRITICAL: DOKU transfer succeeded but DB update failed - requires manual reconciliation",
+				"product_tx_id", pft.productTxUUID,
+				"invoice_number", pft.invoiceNumber,
+				"from_sac", sellerAccount.DokuSubAccountID,
+				"to_sac", platformAccount.DokuSubAccountID,
+				"amount", pft.amount,
+				"error", err,
+			)
+			continue
+		}
+
+		c.logger.InfoContext(ctx, "Platform fee transferred successfully",
+			"product_tx_id", pft.productTxUUID,
+			"invoice_number", pft.invoiceNumber,
+			"from_sac", sellerAccount.DokuSubAccountID,
+			"to_sac", platformAccount.DokuSubAccountID,
+			"amount", pft.amount,
+		)
 	}
 
 	// Derive post-settlement balances for the response (platform account)
@@ -1673,90 +1740,89 @@ func (c *LedgerClient) ProcessPlatformFeeTransfer(ctx context.Context, batchSize
 			continue
 		}
 
-		// TODO: Call DOKU intra-sub-account transfer API
-		// Example (pseudo-code, adjust based on actual DOKU client interface):
-		// transferReq := &requests.DokuTransferSubAccountRequest{
-		//     FromSubAccountID: sellerAccount.DokuSubAccountID,
-		//     ToSubAccountID:   platformAccount.DokuSubAccountID,
-		//     Amount:           int(tx.Fee.PlatformFee),
-		//     Currency:         string(tx.Fee.Currency),
-		//     ReferenceID:      tx.UUID,
-		// }
-		// transferResp, dokuErr := c.dokuClient.TransferSubAccount(transferReq)
-		//
-		// if dokuErr != nil {
-		//     errMsg := fmt.Sprintf("DOKU transfer API failed: %v", dokuErr)
-		//     c.logger.ErrorContext(ctx, "Platform fee transfer failed - DOKU API error",
-		//         "transaction_id", tx.UUID,
-		//         "invoice_number", tx.InvoiceNumber,
-		//         "platform_fee", tx.Fee.PlatformFee,
-		//         "from_sac", sellerAccount.DokuSubAccountID,
-		//         "to_sac", platformAccount.DokuSubAccountID,
-		//         "error", dokuErr,
-		//     )
-		//     result.Failed++
-		//     result.Errors = append(result.Errors, PlatformFeeTransferError{
-		//         TransactionID: tx.UUID,
-		//         InvoiceNumber: tx.InvoiceNumber,
-		//         PlatformFee:   tx.Fee.PlatformFee,
-		//         ErrorMessage:  errMsg,
-		//     })
-		//     continue
-		// }
+		// Ensure transfer_request_id exists before calling DOKU (enables idempotent retries)
+		requestID := tx.TransferRequestID
+		if requestID == "" {
+			requestID = uuid.NewString()
+			if err := c.repoProvider.ProductTransaction().SaveTransferRequestID(ctx, tx.UUID, requestID); err != nil {
+				errMsg := fmt.Sprintf("failed to save transfer request ID: %v", err)
+				c.logger.ErrorContext(ctx, "Platform fee transfer failed - could not persist request ID",
+					"transaction_id", tx.UUID,
+					"invoice_number", tx.InvoiceNumber,
+					"error", err,
+				)
+				result.Failed++
+				result.Errors = append(result.Errors, PlatformFeeTransferError{
+					TransactionID: tx.UUID,
+					InvoiceNumber: tx.InvoiceNumber,
+					PlatformFee:   tx.Fee.PlatformFee,
+					ErrorMessage:  errMsg,
+				})
+				continue
+			}
+		}
 
-		// TEMPORARY: Log what would be transferred (remove after implementing DOKU API call)
-		c.logger.InfoContext(ctx, "TODO: Execute DOKU transfer (currently skipped for testing)",
+		transferReq := requests.DokuTransferSubAccountRequest{}
+		transferReq.Transfer.Origin = sellerAccount.DokuSubAccountID
+		transferReq.Transfer.Destination = platformAccount.DokuSubAccountID
+		transferReq.Transfer.Amount = int(tx.Fee.PlatformFee)
+		transferReq.Transfer.InvoiceNumber = tx.InvoiceNumber
+
+		_, dokuErr := c.dokuClient.TransferSubAccount(requestID, transferReq)
+		if dokuErr != nil {
+			errMsg := fmt.Sprintf("DOKU transfer API failed: %v", dokuErr.Message)
+			c.logger.ErrorContext(ctx, "Platform fee transfer failed - DOKU API error",
+				"transaction_id", tx.UUID,
+				"invoice_number", tx.InvoiceNumber,
+				"platform_fee", tx.Fee.PlatformFee,
+				"from_sac", sellerAccount.DokuSubAccountID,
+				"to_sac", platformAccount.DokuSubAccountID,
+				"error", dokuErr.Message,
+			)
+			result.Failed++
+			result.Errors = append(result.Errors, PlatformFeeTransferError{
+				TransactionID: tx.UUID,
+				InvoiceNumber: tx.InvoiceNumber,
+				PlatformFee:   tx.Fee.PlatformFee,
+				ErrorMessage:  errMsg,
+			})
+			continue
+		}
+
+		if err := c.repoProvider.ProductTransaction().MarkPlatformFeeTransferred(ctx, tx.UUID); err != nil {
+			c.logger.ErrorContext(ctx, "CRITICAL: DOKU transfer succeeded but DB update failed - requires manual reconciliation",
+				"transaction_id", tx.UUID,
+				"invoice_number", tx.InvoiceNumber,
+				"platform_fee", tx.Fee.PlatformFee,
+				"from_sac", sellerAccount.DokuSubAccountID,
+				"to_sac", platformAccount.DokuSubAccountID,
+				"db_error", err,
+			)
+			result.Failed++
+			result.Errors = append(result.Errors, PlatformFeeTransferError{
+				TransactionID: tx.UUID,
+				InvoiceNumber: tx.InvoiceNumber,
+				PlatformFee:   tx.Fee.PlatformFee,
+				ErrorMessage:  fmt.Sprintf("DOKU succeeded but DB update failed: %v", err),
+			})
+			continue
+		}
+
+		c.logger.InfoContext(ctx, "Platform fee transferred successfully",
 			"transaction_id", tx.UUID,
 			"invoice_number", tx.InvoiceNumber,
+			"platform_fee", tx.Fee.PlatformFee,
 			"from_sac", sellerAccount.DokuSubAccountID,
 			"to_sac", platformAccount.DokuSubAccountID,
-			"amount", tx.Fee.PlatformFee,
-			"currency", tx.Fee.Currency,
 		)
-
-		// TEMPORARY: Skip actual processing until DOKU API is implemented
-		// After implementing the DOKU API call above:
-		// 1. Remove the 'continue' statement below
-		// 2. Uncomment the DB update code
-		// 3. Uncomment the success logging
-		continue
-
-		// DOKU transfer succeeded - mark transaction as transferred
-		// if err := c.repoProvider.ProductTransaction().MarkPlatformFeeTransferred(ctx, tx.UUID); err != nil {
-		// 	c.logger.ErrorContext(ctx, "CRITICAL: DOKU transfer succeeded but DB update failed - requires manual reconciliation",
-		// 		"transaction_id", tx.UUID,
-		// 		"invoice_number", tx.InvoiceNumber,
-		// 		"platform_fee", tx.Fee.PlatformFee,
-		// 		"from_sac", sellerAccount.DokuSubAccountID,
-		// 		"to_sac", platformAccount.DokuSubAccountID,
-		// 		"db_error", err,
-		// 	)
-		// 	result.Failed++
-		// 	result.Errors = append(result.Errors, PlatformFeeTransferError{
-		// 		TransactionID: tx.UUID,
-		// 		InvoiceNumber: tx.InvoiceNumber,
-		// 		PlatformFee:   tx.Fee.PlatformFee,
-		// 		ErrorMessage:  fmt.Sprintf("DOKU succeeded but DB update failed: %v", err),
-		// 	})
-		// 	continue
-		// }
-
-		// Success!
-		// c.logger.InfoContext(ctx, "Platform fee transferred successfully",
-		// 	"transaction_id", tx.UUID,
-		// 	"invoice_number", tx.InvoiceNumber,
-		// 	"platform_fee", tx.Fee.PlatformFee,
-		// 	"from_sac", sellerAccount.DokuSubAccountID,
-		// 	"to_sac", platformAccount.DokuSubAccountID,
-		// )
-		// result.Succeeded++
-		// result.Transfers = append(result.Transfers, PlatformFeeTransferSuccess{
-		// 	TransactionID:  tx.UUID,
-		// 	InvoiceNumber:  tx.InvoiceNumber,
-		// 	PlatformFee:    tx.Fee.PlatformFee,
-		// 	FromSubAccount: sellerAccount.DokuSubAccountID,
-		// 	ToSubAccount:   platformAccount.DokuSubAccountID,
-		// })
+		result.Succeeded++
+		result.Transfers = append(result.Transfers, PlatformFeeTransferSuccess{
+			TransactionID:  tx.UUID,
+			InvoiceNumber:  tx.InvoiceNumber,
+			PlatformFee:    tx.Fee.PlatformFee,
+			FromSubAccount: sellerAccount.DokuSubAccountID,
+			ToSubAccount:   platformAccount.DokuSubAccountID,
+		})
 	}
 
 	c.logger.InfoContext(ctx, "Platform fee transfer batch completed",
