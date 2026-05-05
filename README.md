@@ -15,7 +15,9 @@
 
 # Ledger
 
-Financial ledger package built exclusively for [DOKU](https://github.com/21strive/doku) as the payment gateway. Records product transactions, tracks seller balances, and reconciles DOKU settlement CSVs.
+**Plug-and-play merchant payment layer, powered by DOKU.**
+
+Accept payments via QRIS, Virtual Account, and more — with built-in balance tracking, settlement reconciliation, and disbursement. No manual ledger wiring required.
 
 > **This package is built for DOKU and DOKU only.** Account creation, balance inquiry, bank account validation, withdrawals, and settlement reconciliation are all implemented against DOKU APIs and CSV formats. It is not designed to be payment-gateway-agnostic.
 
@@ -28,6 +30,11 @@ Financial ledger package built exclusively for [DOKU](https://github.com/21striv
 - Reconciles DOKU settlement CSVs — matches CSV rows to product transactions, applies fee adjustments, and moves balances from `PENDING` → `AVAILABLE`
 - Handles seller withdrawals via DOKU sub-account payout
 - Transfers platform fees to the platform sub-account after settlement
+
+## What it does NOT do
+
+- **No top-up / balance loading** — seller balances only grow through settled product transactions. There is no API to credit a seller's balance directly.
+- **No payment gateway abstraction** — all payment, sub-account, and disbursement operations are wired to DOKU APIs only.
 
 ---
 
@@ -78,43 +85,168 @@ dokuClient := usecases.NewDokuUseCase(...)
 client := ledger.NewLedgerClient(db, dokuClient, logger, awsConfig)
 ```
 
-### Core operations
+### Account management
 
 ```go
-// Create a seller account (registers sub-account with DOKU)
+// Register a seller account (also provisions a DOKU sub-account)
 account, err := client.CreateAccount(ctx, sellerID, email, name, domain.CurrencyIDR)
 
-// Record a product sale (call after DOKU payment webhook)
-tx := domain.NewProductTransaction(buyerID, sellerID, productID, productType, invoiceNumber, fee, metadata)
-tx.MarkCompleted()
+// Look up by seller ID
+account, err := client.GetAccountBySellerID(ctx, sellerID)
+```
 
-// Get seller balance
+### Generating payments
+
+`GeneratePayment` creates a product payment between a buyer and a seller. It calculates fees, calls the DOKU payment API, and saves a `ProductTransaction` + `PaymentRequest` atomically.
+
+```go
+resp, err := client.GeneratePayment(ctx, &ledger.GeneratePaymentRequest{
+    SellerAccountID: "seller-uuid",
+    BuyerAccountID:  "buyer-uuid",
+    BuyerName:       "Jane Doe",
+    BuyerEmail:      "jane@example.com",
+    ProductID:       "prod-123",
+    ProductType:     "PHOTO",
+    SellerPrice:     100000,       // in smallest currency unit (e.g. IDR cents)
+    Currency:        "IDR",
+    PaymentChannel:  "QRIS",
+    FeeModel:        ledger.FeeModelGatewayOnCustomer,
+    Metadata:        map[string]any{"title": "Sunset Photo"},
+})
+// resp.PaymentURL   — redirect buyer here to complete payment
+// resp.TotalCharged — what buyer will pay
+// resp.SellerNetAmount — what seller will receive after settlement
+```
+
+Two convenience wrappers set the fee model explicitly:
+
+```go
+// Customer pays all fees (seller receives 100% of SellerPrice)
+resp, err := client.GeneratePaymentGatewayOnCustomer(ctx, req)
+
+// Seller absorbs the gateway fee (customer pays SellerPrice + PlatformFee only)
+resp, err := client.GeneratePaymentGatewayOnSeller(ctx, req)
+```
+
+### Subscription payments
+
+`GenerateSubscriptionPayment` creates a platform subscription payment. There is no seller — the platform receives all net proceeds. The buyer selects the payment channel via the DOKU Checkout page.
+
+```go
+resp, err := client.GenerateSubscriptionPayment(ctx, &ledger.GenerateSubscriptionPaymentRequest{
+    BuyerAccountID:    "buyer-uuid",
+    BuyerName:         "Jane Doe",
+    BuyerEmail:        "jane@example.com",
+    ProductID:         "plan-pro",
+    SubscriptionPrice: 99000,
+    Currency:          "IDR",
+    Metadata:          map[string]any{"plan": "pro", "duration_days": 30},
+})
+// Fee model is always GATEWAY_ON_SELLER: buyer pays SubscriptionPrice, platform absorbs DOKU fee.
+```
+
+### Handling payment webhooks
+
+After a buyer completes payment, DOKU sends a notification. Pass the raw request to `HandlePaymentSuccess` — it validates the notification, marks the `ProductTransaction` as completed, and writes the `PENDING` ledger entries for the seller, platform, and DOKU accounts.
+
+```go
+err := client.HandlePaymentSuccess(ctx, dokuNotificationRequest)
+```
+
+### Fee calculation (dry-run)
+
+Preview the full fee breakdown before creating a payment:
+
+```go
+// With explicit fee model
+resp, err := client.CalculateFeesWithModel(ctx, 100000, "QRIS", "IDR", domain.FeeModelGatewayOnCustomer)
+// resp.FeeBreakdown      — full breakdown (SellerPrice, PlatformFee, DokuFee, TotalCharged, SellerNetAmount)
+// resp.CheapestPaymentChannel — channel with the lowest DOKU fee for the same seller price
+
+// List all supported payment channels and their fee config
+configs, err := client.GetPaymentChannelFeeConfigs(ctx)
+```
+
+### Merchant balance management
+
+Seller balances are derived entirely from ledger entries — never stored as a mutable field. There are two balance buckets:
+
+| Bucket | When it grows | When it shrinks |
+|---|---|---|
+| `PENDING` | After `HandlePaymentSuccess` | After `ProcessReconciliation` |
+| `AVAILABLE` | After `ProcessReconciliation` | After `Withdraw` |
+
+> **There is no top-up.** The only way to increase a seller's balance is through a completed + settled product sale.
+
+```go
+// Read merchant balance
 balance, err := client.GetAllBalancesBySellerID(ctx, sellerID)
-// balance.Pending   — captured, awaiting settlement CSV
-// balance.Available — settled, withdrawable
+// balance.PendingBalance   — captured, awaiting settlement CSV
+// balance.AvailableBalance — settled, withdrawable
 
-// Process DOKU settlement CSV (moves PENDING → AVAILABLE)
+// View pending and settled transactions
+earnings, err := client.GetEarnings(ctx, sellerID, cursor, 20, "DESC")
+```
+
+### Settlement reconciliation
+
+Settlement is triggered by uploading the DOKU settlement CSV. The reconciliation moves balances from `PENDING` → `AVAILABLE` for every matched seller.
+
+```go
 resp, err := client.ProcessReconciliation(ctx, &ledger.ReconciliationRequest{
     CSVReader:      file,
     ReportFileName: "settlement-20260504.csv",
     UploadedBy:     "admin@company.com",
     SettlementDate: time.Now(),
 })
+```
 
-// Seller withdrawal
+### Withdrawal
+
+```go
+// Validate destination bank account first
+valid, err := client.ValidateBankAccount(ctx, &ledger.ValidateBankAccountRequest{
+    BankCode:      "BCA",
+    AccountNumber: "1234567890",
+})
+
+// Disburse from AVAILABLE balance to external bank
 resp, err := client.Withdraw(ctx, sellerID, &ledger.WithdrawRequest{
+    AccountID:     account.UUID,
     Amount:        500000,
     BankCode:      "BCA",
     AccountNumber: "1234567890",
     AccountName:   "John Doe",
 })
+
+// Paginated disbursement history
+history, err := client.GetDisbursements(ctx, sellerID, cursor, 20, "DESC")
+```
+
+### Seller KYC verification
+
+```go
+// Get pre-signed S3 URLs for photo uploads (valid for 15 minutes)
+ktpURL, err    := client.GetPhotoKTPPresignedURL(ctx, sellerID, bucketName, "image/jpeg")
+selfieURL, err := client.GetPhotoKYCSelfiePresignedURL(ctx, sellerID, bucketName, "image/jpeg")
+
+// After buyer uploads, submit verification
+verification, err := client.SubmitVerification(ctx, bucketName, ledger.SubmitVerificationRequest{
+    AccountUUID:    account.UUID,
+    SellerID:       sellerID,
+    IdentityID:     "3271012345678901",
+    Fullname:       "John Doe",
+    BirthDate:      time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC),
+    KTPPhotoExt:    "jpeg",
+    SelfiePhotoExt: "jpeg",
+})
 ```
 
 ---
 
-## Settlement & Reconciliation
+## Settlement & Reconciliation internals
 
-Settlement is triggered by uploading the DOKU settlement CSV. The reconciliation process:
+The reconciliation process:
 
 1. Parses the CSV (DOKU-specific format with 9 metadata rows + data rows)
 2. Matches each CSV row to a `ProductTransaction` by invoice number
