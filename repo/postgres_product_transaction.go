@@ -26,7 +26,7 @@ func (r *PostgresProductTransactionRepository) GetByID(ctx context.Context, id s
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE uuid = $1
 	`
@@ -39,7 +39,7 @@ func (r *PostgresProductTransactionRepository) GetByInvoiceNumber(ctx context.Co
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE invoice_number = $1
 	`
@@ -53,7 +53,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountID(ctx context.
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
 		ORDER BY created_at DESC
@@ -69,7 +69,7 @@ func (r *PostgresProductTransactionRepository) GetByBuyerAccountID(ctx context.C
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE buyer_account_id = $1
 		ORDER BY created_at DESC
@@ -114,7 +114,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 				       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 				       status, created_at, updated_at, completed_at, settled_at,
-				       platform_fee_transferred, platform_fee_transferred_at, metadata
+				       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 				FROM product_transactions
 				WHERE seller_account_id = $1 
 				  AND (created_at < (SELECT created_at FROM product_transactions WHERE randid = $2)
@@ -127,7 +127,7 @@ func (r *PostgresProductTransactionRepository) GetBySellerAccountIDWithCursor(ct
 				SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 				       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 				       status, created_at, updated_at, completed_at, settled_at,
-				       platform_fee_transferred, platform_fee_transferred_at, metadata
+				       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 				FROM product_transactions
 				WHERE seller_account_id = $1 
 				  AND (created_at > (SELECT created_at FROM product_transactions WHERE randid = $2)
@@ -147,7 +147,7 @@ func (r *PostgresProductTransactionRepository) GetPendingBySellerAccountID(ctx c
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'PENDING'
 		ORDER BY created_at DESC
@@ -161,7 +161,7 @@ func (r *PostgresProductTransactionRepository) GetCompletedNotSettled(ctx contex
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1 AND status = 'COMPLETED'
 		ORDER BY created_at ASC
@@ -175,7 +175,7 @@ func (r *PostgresProductTransactionRepository) GetAllBySellerID(ctx context.Cont
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE seller_account_id = $1
 		ORDER BY created_at DESC
@@ -498,7 +498,7 @@ func (r *PostgresProductTransactionRepository) GetSettledWithoutPlatformFeeTrans
 		SELECT uuid, randid, buyer_account_id, seller_account_id, product_id, product_type, invoice_number,
 		       seller_price, platform_fee, doku_fee, total_charged, seller_net_amount, fee_model, currency,
 		       status, created_at, updated_at, completed_at, settled_at,
-		       platform_fee_transferred, platform_fee_transferred_at, metadata
+		       platform_fee_transferred, platform_fee_transferred_at, transfer_request_id, metadata
 		FROM product_transactions
 		WHERE status = 'SETTLED' 
 		  AND platform_fee_transferred = false 
