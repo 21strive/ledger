@@ -100,10 +100,17 @@ SELECT
   COUNT(*) AS total_accounts,
   COALESCE(SUM(available_balance), 0) AS total_available,
   COALESCE(SUM(pending_balance), 0) AS total_pending,
-  COUNT(*) FILTER (WHERE available_balance > 0 OR pending_balance > 0) AS active_accounts,
   COALESCE(SUM(total_deposit_amount), 0) AS total_user_earnings,
   COALESCE(SUM(total_withdrawal_amount), 0) AS total_user_withdrawn
 FROM ledger_accounts WHERE owner_type = 'SELLER'
+		`
+
+		queryActiveTransactions := `
+SELECT
+	COUNT(*) AS active_transactions_count
+FROM product_transactions
+WHERE COALESCE(completed_at, settled_at, created_at) >= DATE_TRUNC('year', $1::timestamptz)
+	AND COALESCE(completed_at, settled_at, created_at) <= $1::timestamptz
 		`
 
 		var platformPending, platformAvailable int64
@@ -112,10 +119,16 @@ FROM ledger_accounts WHERE owner_type = 'SELLER'
 			return fmt.Errorf("failed to query platform from ledgerDB: %w", err)
 		}
 
-		var totalAccounts, totalAvailable, totalPending, activeAccounts, totalEarnings, totalWithdrawn int64
-		err = c.ledgerDB.QueryRowContext(ctx, querySellers).Scan(&totalAccounts, &totalAvailable, &totalPending, &activeAccounts, &totalEarnings, &totalWithdrawn)
+		var totalAccounts, totalAvailable, totalPending, totalEarnings, totalWithdrawn int64
+		err = c.ledgerDB.QueryRowContext(ctx, querySellers).Scan(&totalAccounts, &totalAvailable, &totalPending, &totalEarnings, &totalWithdrawn)
 		if err != nil && err.Error() != "sql: no rows in result set" {
 			return fmt.Errorf("failed to query sellers from ledgerDB: %w", err)
+		}
+
+		var activeTransactionsCount int64
+		err = c.ledgerDB.QueryRowContext(ctx, queryActiveTransactions, batchEnd).Scan(&activeTransactionsCount)
+		if err != nil && err.Error() != "sql: no rows in result set" {
+			return fmt.Errorf("failed to query active transactions from ledgerDB: %w", err)
 		}
 
 		// Phase 2: Build platform balance data
@@ -165,24 +178,24 @@ ON CONFLICT (date_key) DO UPDATE SET
 		dateKeyInt := dateKey.Year()*10000 + int(dateKey.Month())*100 + 1
 
 		_, err = c.ledgerAnalyticsDB.ExecContext(ctx, insertQuery,
-			uuid.New().String(), // $1 - uuid
-			uuid.New().String(), // $2 - randid
-			dateKeyInt,          // $3 - date_key
-			finalConvenience,    // $4
-			finalSubscription,   // $5
-			finalGateway,        // $6
-			totalRevenue,        // $7
-			platformPending,     // $8
-			platformAvailable,   // $9
-			platformTotal,       // $10
-			totalAccounts,       // $11
-			totalAvailable,      // $12
-			totalPending,        // $13
-			totalEarnings,       // $14
-			totalWithdrawn,      // $15
-			int64(0),            // $16 - settlement_completed_count
-			activeAccounts,      // $17 - active_transactions_count
-			recalculateMode,     // $18 - for conditional update logic
+			uuid.New().String(),     // $1 - uuid
+			uuid.New().String(),     // $2 - randid
+			dateKeyInt,              // $3 - date_key
+			finalConvenience,        // $4
+			finalSubscription,       // $5
+			finalGateway,            // $6
+			totalRevenue,            // $7
+			platformPending,         // $8
+			platformAvailable,       // $9
+			platformTotal,           // $10
+			totalAccounts,           // $11
+			totalAvailable,          // $12
+			totalPending,            // $13
+			totalEarnings,           // $14
+			totalWithdrawn,          // $15
+			int64(0),                // $16 - settlement_completed_count
+			activeTransactionsCount, // $17 - active_transactions_count
+			recalculateMode,         // $18 - for conditional update logic
 		)
 		if err != nil {
 			return fmt.Errorf("failed to upsert fact_platform_balance: %w", err)
