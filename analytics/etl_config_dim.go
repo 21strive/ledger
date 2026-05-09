@@ -32,13 +32,6 @@ func (c *LedgerAnalyticsClient) RunDimPaymentChannelETL(ctx context.Context, opt
 			return err
 		}
 
-		tx, err := c.ledgerAnalyticsDB.BeginTx(ctx, nil)
-		if err != nil {
-			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
-			return err
-		}
-		defer tx.Rollback()
-
 		type paymentChannelRow struct {
 			channel string
 		}
@@ -54,7 +47,7 @@ func (c *LedgerAnalyticsClient) RunDimPaymentChannelETL(ctx context.Context, opt
 			)
 		`
 
-		rows, err := tx.QueryContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
+		rows, err := c.ledgerDB.QueryContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to query fee_configs: %w", err)
@@ -81,6 +74,13 @@ func (c *LedgerAnalyticsClient) RunDimPaymentChannelETL(ctx context.Context, opt
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to close payment_channel rows: %w", err)
 		}
+
+		tx, err := c.ledgerAnalyticsDB.BeginTx(ctx, nil)
+		if err != nil {
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return err
+		}
+		defer tx.Rollback()
 
 		processedCount := 0
 		for _, row := range channelRows {
