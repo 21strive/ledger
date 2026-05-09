@@ -119,7 +119,7 @@ func (c *LedgerAnalyticsClient) ensureDimDate(ctx context.Context, opts ETLOptio
 	todayKey := int(today.Year()*10000 + int(today.Month())*100 + today.Day())
 
 	var exists int
-	err := c.db.QueryRowContext(ctx, "SELECT count(*) FROM dim_date WHERE date_key = $1", todayKey).Scan(&exists)
+	err := c.ledgerAnalyticsDB.QueryRowContext(ctx, "SELECT count(*) FROM dim_date WHERE date_key = $1", todayKey).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (c *LedgerAnalyticsClient) upsertDimDate(ctx context.Context, d time.Time) 
 			updated_at = EXCLUDED.updated_at,
 			date = EXCLUDED.date
 	`
-	if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), key, normalized); err != nil {
+	if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), key, normalized); err != nil {
 		return fmt.Errorf("failed to upsert date %d: %w", key, err)
 	}
 	return nil
@@ -163,7 +163,7 @@ func (c *LedgerAnalyticsClient) ensureDimLedgerBucket(ctx context.Context) error
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (bucket_key) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), b); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), b); err != nil {
 			return err
 		}
 	}
@@ -178,7 +178,7 @@ func (c *LedgerAnalyticsClient) ensureDimLedgerEntryType(ctx context.Context) er
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (entry_type_key) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t); err != nil {
 			return err
 		}
 	}
@@ -193,7 +193,7 @@ func (c *LedgerAnalyticsClient) ensureDimAccountStatus(ctx context.Context) erro
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (status_key) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), s); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), s); err != nil {
 			return err
 		}
 	}
@@ -213,7 +213,7 @@ func (c *LedgerAnalyticsClient) ensureDimTransactionStatus(ctx context.Context) 
 			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (status_key) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), s, isTerminal); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), s, isTerminal); err != nil {
 			return err
 		}
 	}
@@ -228,7 +228,7 @@ func (c *LedgerAnalyticsClient) ensureDimProductType(ctx context.Context) error 
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (product_type_key) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t); err != nil {
 			return err
 		}
 	}
@@ -243,7 +243,7 @@ func (c *LedgerAnalyticsClient) ensureDimAccountOwnerType(ctx context.Context) e
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (owner_type_key) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t); err != nil {
 			return err
 		}
 	}
@@ -267,7 +267,7 @@ func (c *LedgerAnalyticsClient) ensureDimBank(ctx context.Context) error {
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (bank_code) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), bank.BICode, bank.Name, bank.SwiftCode); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), bank.BICode, bank.Name, bank.SwiftCode); err != nil {
 			return err
 		}
 	}
@@ -292,7 +292,7 @@ func (c *LedgerAnalyticsClient) ensureDimTransactionType(ctx context.Context) er
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			ON CONFLICT (transaction_type_key) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t.Key, t.Source, t.Channel, t.Category); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), t.Key, t.Source, t.Channel, t.Category); err != nil {
 			return err
 		}
 	}
@@ -307,7 +307,7 @@ func (c *LedgerAnalyticsClient) ensureDimSubscription(ctx context.Context) error
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (subscription_status) DO NOTHING
 		`
-		if _, err := c.db.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), s); err != nil {
+		if _, err := c.ledgerAnalyticsDB.ExecContext(ctx, query, uuid.New().String(), uuid.New().String(), time.Now(), time.Now(), s); err != nil {
 			return err
 		}
 	}

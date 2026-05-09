@@ -438,7 +438,7 @@ fact_platform_balance {
   -- Operations Metrics
   settlement_pending_count    INT      -- Transactions awaiting settlement (COMPLETED state)
   settlement_completed_count  INT      -- Transactions fully settled (SETTLED state)
-  active_transactions_count   INT      -- Volume metric (Last 30 days)
+  active_transactions_count   INT      -- Total transaction volume YTD
 }
 ```
 

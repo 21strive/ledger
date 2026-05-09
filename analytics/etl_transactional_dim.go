@@ -31,13 +31,6 @@ func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts E
 			return err
 		}
 
-		tx, err := c.db.BeginTx(ctx, nil)
-		if err != nil {
-			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
-			return err
-		}
-		defer tx.Rollback()
-
 		type bankUsage struct {
 			accountUUID string
 			bankCode    string
@@ -55,12 +48,12 @@ func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts E
 			WHERE (
 				(NOT $3 AND updated_at > $1 AND updated_at <= $2)
 				OR
-				($3 AND updated_at >= DATE_TRUNC('day', $1) AND updated_at <= $2)
+				($3 AND updated_at >= DATE_TRUNC('day', $1::timestamptz) AND updated_at <= $2)
 			)
 			GROUP BY account_uuid, bank_code, account_number, account_name
 		`
 
-		rows, err := tx.QueryContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
+		rows, err := c.ledgerDB.QueryContext(ctx, query, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to query disbursements: %w", err)
@@ -97,6 +90,14 @@ func (c *LedgerAnalyticsClient) RunDimBankAccountETL(ctx context.Context, opts E
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to close disbursement rows: %w", err)
 		}
+
+		tx, err := c.ledgerAnalyticsDB.BeginTx(ctx, nil)
+		if err != nil {
+			_ = rows.Close()
+			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
+			return err
+		}
+		defer tx.Rollback()
 
 		processedCount := 0
 		for _, u := range usages {

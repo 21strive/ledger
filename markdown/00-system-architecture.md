@@ -11,6 +11,11 @@ This ledger system is designed to track and manage financial transactions from t
 - Manage disbursements to user bank accounts ("KIRIM DOKU")
 - Provide real-time balance visibility (available + pending)
 
+## Analytics Docs
+
+- [Analytics API Index](06-analytics-api-index.md) for the dashboard route map and `LedgerAnalyticsClient` function inventory.
+- [Revenue Breakdown API](05-revenue-breakdown-api.md) for the revenue breakdown endpoint spec.
+
 ---
 
 ## Core Entities

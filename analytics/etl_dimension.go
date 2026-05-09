@@ -50,7 +50,7 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 
 		// 3. Execute ETL Logic (SCD Type 2)
 		// We'll wrap this in a transaction
-		tx, err := c.db.BeginTx(ctx, nil)
+		tx, err := c.ledgerAnalyticsDB.BeginTx(ctx, nil)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return err
@@ -65,7 +65,7 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 			dokuSubAccountID string
 		}
 
-		// Step 3a: Identify changed accounts
+		// Step 3a: Identify changed accounts from ledgerDB
 		// We fetch all accounts updated in the window (watermark, batchEnd]
 		queryChanged := `
 			SELECT uuid, owner_type, owner_id, currency, doku_subaccount_id
@@ -77,7 +77,7 @@ func (c *LedgerAnalyticsClient) RunDimAccountETL(ctx context.Context, opts ETLOp
 			)
 		`
 
-		rows, err := tx.QueryContext(ctx, queryChanged, lastWatermark, batchEnd, recalculateMode)
+		rows, err := c.ledgerDB.QueryContext(ctx, queryChanged, lastWatermark, batchEnd, recalculateMode)
 		if err != nil {
 			c.LogMicrobatchEnd(ctx, logID, StatusFailed, 0, err.Error())
 			return fmt.Errorf("failed to query changed accounts: %w", err)
