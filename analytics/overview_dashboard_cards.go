@@ -17,7 +17,6 @@ type OverviewDashboardCards struct {
 	SubscriptionFee         int64 `json:"subscription_fee"`
 	TotalUserEarnings       int64 `json:"total_user_earnings"`
 	TotalUserWithdrawn      int64 `json:"total_user_withdrawn"`
-	ActiveSubscriptions     int64 `json:"active_subscriptions"`
 	TotalActiveTransactions int64 `json:"total_active_transactions"`
 }
 
@@ -62,17 +61,6 @@ WITH platform_row AS (
     interval_type = 'DAILY'
     AND date_key BETWEEN TO_CHAR(MAKE_DATE($1, 1, 1), 'YYYYMMDD') :: INT
     AND TO_CHAR(MAKE_DATE($1, 12, 31), 'YYYYMMDD') :: INT
-),
-range_active_subscriptions AS (
-  SELECT
-    COUNT(*) :: INT AS active_subscriptions
-  FROM
-    product_transactions
-  WHERE
-    product_type = 'SUBSCRIPTION'
-    AND status IN ('COMPLETED', 'SETTLED')
-    AND COALESCE(settled_at, completed_at, created_at) >= MAKE_DATE($1, 1, 1)
-    AND COALESCE(settled_at, completed_at, created_at) < (MAKE_DATE($1, 12, 31) + INTERVAL '1 day')
 )
 SELECT
   p.platform_total_balance,
@@ -82,12 +70,10 @@ SELECT
   r.subscription_fee,
   p.total_user_earnings,
   p.total_user_withdrawn,
-  a.active_subscriptions,
   p.active_transactions_count AS total_active_transactions
 FROM
   platform_row p
-  CROSS JOIN range_revenue r
-  CROSS JOIN range_active_subscriptions a;`
+  CROSS JOIN range_revenue r;`
 
 	row := c.ledgerAnalyticsDB.QueryRowContext(ctx, query, year)
 
@@ -100,7 +86,6 @@ FROM
 		&result.SubscriptionFee,
 		&result.TotalUserEarnings,
 		&result.TotalUserWithdrawn,
-		&result.ActiveSubscriptions,
 		&result.TotalActiveTransactions,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
