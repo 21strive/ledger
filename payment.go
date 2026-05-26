@@ -568,8 +568,9 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 	return nil
 }
 
-// CalculateFees returns the fee breakdown without creating a transaction.
+// CalculateFeesForCustomer returns the fee breakdown without creating a transaction.
 // Useful for showing the buyer the total cost before purchase.
+// Uses GATEWAY_ON_CUSTOMER model: customer pays seller_price + platform_fee + gateway_fee.
 // The response also includes the payment channel with the lowest DOKU fee for the same seller price.
 //
 // platformFeeMultiplier controls platform fee behaviour:
@@ -578,7 +579,7 @@ func (c *LedgerClient) HandlePaymentSuccess(ctx context.Context, req *requests.D
 //   - >1 → platform fee multiplied by this value (e.g. installment with 2 due terms → 2)
 //
 // Gateway/DOKU fee is never multiplied regardless of the multiplier value.
-func (c *LedgerClient) CalculateFees(ctx context.Context, sellerPrice int64, paymentChannel string, currency string, feeModel domain.FeeModel, platformFeeMultiplier int) (*FeeCalculationResponse, error) {
+func (c *LedgerClient) CalculateFeesForCustomer(ctx context.Context, sellerPrice int64, paymentChannel string, currency string, platformFeeMultiplier int) (*FeeCalculationResponse, error) {
 	feeConfigs, err := c.repoProvider.FeeConfig().GetAllActive(ctx)
 	if err != nil {
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to load fee configurations", err)
@@ -587,7 +588,7 @@ func (c *LedgerClient) CalculateFees(ctx context.Context, sellerPrice int64, pay
 	feeCalc := domain.NewFeeCalculator(feeConfigs)
 	cur := domain.Currency(currency)
 	opts := domain.FeeBreakdownOptions{
-		FeeModel:              feeModel,
+		FeeModel:              domain.FeeModelGatewayOnCustomer,
 		SkipPlatformFee:       platformFeeMultiplier == 0,
 		PlatformFeeMultiplier: platformFeeMultiplier,
 	}
