@@ -158,10 +158,16 @@ err := client.HandlePaymentSuccess(ctx, dokuNotificationRequest)
 Preview the full fee breakdown before creating a payment:
 
 ```go
-// With explicit fee model
-resp, err := client.CalculateFeesWithModel(ctx, 100000, "QRIS", "IDR", domain.FeeModelGatewayOnCustomer)
+// Normal: multiplier=1, platform fee charged once
+resp, err := client.CalculateFees(ctx, 100000, "QRIS", "IDR", domain.FeeModelGatewayOnCustomer, 1)
 // resp.FeeBreakdown      — full breakdown (SellerPrice, PlatformFee, DokuFee, TotalCharged, SellerNetAmount)
 // resp.CheapestPaymentChannel — channel with the lowest DOKU fee for the same seller price
+
+// Skip platform fee: multiplier=0
+resp, err = client.CalculateFees(ctx, 100000, "QRIS", "IDR", domain.FeeModelGatewayOnCustomer, 0)
+
+// Multiply platform fee (e.g. 2 installment terms): multiplier=2
+resp, err = client.CalculateFees(ctx, 100000, "QRIS", "IDR", domain.FeeModelGatewayOnCustomer, 2)
 
 // List all supported payment channels and their fee config
 configs, err := client.GetPaymentChannelFeeConfigs(ctx)
