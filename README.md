@@ -82,7 +82,7 @@ import (
 )
 
 dokuClient := usecases.NewDokuUseCase(...)
-client := ledger.NewLedgerClient(db, dokuClient, logger, awsConfig)
+client := ledger.NewLedgerClient(db, dokuClient, logger)
 ```
 
 ### Account management
@@ -229,24 +229,16 @@ resp, err := client.Withdraw(ctx, sellerID, &ledger.WithdrawRequest{
 history, err := client.GetDisbursements(ctx, sellerID, cursor, 20, "DESC")
 ```
 
-### Seller KYC verification
+### Seller KYC verification — removed
 
-```go
-// Get pre-signed S3 URLs for photo uploads (valid for 15 minutes)
-ktpURL, err    := client.GetPhotoKTPPresignedURL(ctx, sellerID, bucketName, "image/jpeg")
-selfieURL, err := client.GetPhotoKYCSelfiePresignedURL(ctx, sellerID, bucketName, "image/jpeg")
+KYC belongs to the service that owns the user, not to the ledger. The upload
+helpers and `SubmitVerification` that used to live here were removed on
+2026-08-26, along with this package's dependency on the AWS SDK: nothing the
+ledger does touches object storage, so `NewLedgerClient` no longer asks for an
+`aws.Config`.
 
-// After buyer uploads, submit verification
-verification, err := client.SubmitVerification(ctx, bucketName, ledger.SubmitVerificationRequest{
-    AccountUUID:    account.UUID,
-    SellerID:       sellerID,
-    IdentityID:     "3271012345678901",
-    Fullname:       "John Doe",
-    BirthDate:      time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC),
-    KTPPhotoExt:    "jpeg",
-    SelfiePhotoExt: "jpeg",
-})
-```
+The `ledger_verifications` table and its repository (`repo.Verification()`) are
+still here, because the table exists and may hold rows. Nothing writes to it.
 
 ---
 
