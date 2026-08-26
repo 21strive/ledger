@@ -409,13 +409,35 @@ CREATE TABLE IF NOT EXISTS settlement_batches (
     metadata JSONB,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
-    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid),
-    UNIQUE(account_uuid, settlement_date)
+    FOREIGN KEY (account_uuid) REFERENCES ledger_accounts(uuid)
 );
 
 CREATE INDEX idx_settlement_batches_account_id ON settlement_batches(account_uuid);
 
 CREATE INDEX idx_settlement_batches_status ON settlement_batches(processing_status);
+
+-- (account_uuid, settlement_date) is a plain index, NOT a unique constraint.
+--
+-- This file previously declared UNIQUE(account_uuid, settlement_date), which no deployed
+-- database has ever had. Uniqueness there would be wrong as well as absent: settlement is
+-- tracked at the platform account, and DOKU can ship more than one batch bearing the same
+-- pay-out date, so a unique constraint would reject the second one as a schema violation
+-- instead of ingesting it. Identity for a batch comes from batch_id (see below), not date.
+CREATE INDEX idx_settlement_batches_date ON settlement_batches(account_uuid, settlement_date DESC);
+
+-- Settlement ingestion is idempotent, and these two indexes are what make it so.
+-- Full reasoning in database/migrations/013_settlement_batches_idempotency.sql.
+--
+-- report_file_name: the reconciler diffs the object keys it lists against this column on
+-- every tick. Not unique — the same DOKU file may be re-shipped under a new object key.
+CREATE INDEX idx_settlement_batches_report_file_name ON settlement_batches(report_file_name);
+
+-- batch_id: DOKU's own identifier for the batch, carried inside the CSV, and therefore the
+-- only key that survives a rename or a re-download. Unique because a second row means a
+-- second set of immutable ledger entries. Partial because rows predating migration 005 have
+-- no batch_id, and Postgres treats NULLs as distinct anyway.
+CREATE UNIQUE INDEX idx_settlement_batches_batch_id_unique ON settlement_batches(batch_id)
+    WHERE batch_id IS NOT NULL;
 
 -- Settlement item linking (individual CSV rows matched to transactions)
 CREATE TABLE IF NOT EXISTS settlement_items (

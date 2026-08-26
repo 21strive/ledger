@@ -8,6 +8,7 @@ import (
 
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/redifu"
+	"github.com/lib/pq"
 )
 
 type PostgresSettlementBatchRepository struct {
@@ -73,6 +74,66 @@ func (r *PostgresSettlementBatchRepository) GetByLedgerIDAndDate(ctx context.Con
 
 	row := r.db.QueryRowContext(ctx, query, ledgerID, settlementDate)
 	return r.scanSettlementBatch(row)
+}
+
+func (r *PostgresSettlementBatchRepository) GetByBatchID(ctx context.Context, batchID string) (*domain.SettlementBatch, error) {
+	// An empty batch_id never matches. Rows predating migration 005 carry NULL, and
+	// ProcessReconciliation rejects a CSV whose metadata has no Batch ID, so nothing
+	// this package writes is empty either. Answering ErrNotFound keeps the caller on
+	// the "not yet ingested" branch rather than letting an empty string wander into
+	// the query and match on some future schema where the column is NOT NULL.
+	if batchID == "" {
+		return nil, ErrNotFound
+	}
+
+	// Oldest first: duplicates are impossible once the unique index from migration
+	// 013 exists, but on a database that predates it the original ingest is the
+	// meaningful one to report back.
+	query := `
+		SELECT uuid, randid, account_uuid, report_file_name, settlement_date,
+		       batch_id, gross_amount, net_amount, doku_fee, currency,
+		       uploaded_by, uploaded_at, processed_at, processing_status,
+		       matched_count, unmatched_count, failure_reason, metadata, created_at, updated_at
+		FROM settlement_batches
+		WHERE batch_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`
+
+	row := r.db.QueryRowContext(ctx, query, batchID)
+	return r.scanSettlementBatch(row)
+}
+
+func (r *PostgresSettlementBatchRepository) FilterIngestedReportFiles(ctx context.Context, reportFileNames []string) (map[string]struct{}, error) {
+	ingested := make(map[string]struct{}, len(reportFileNames))
+
+	if len(reportFileNames) == 0 {
+		return ingested, nil
+	}
+
+	// Backed by idx_settlement_batches_report_file_name (migration 013). Without it
+	// this sequentially scans the whole table on every reconciler tick.
+	query := `SELECT report_file_name FROM settlement_batches WHERE report_file_name = ANY($1)`
+
+	rows, err := r.db.QueryContext(ctx, query, pq.Array(reportFileNames))
+	if err != nil {
+		return nil, ErrFailedQuerySQL.WithError(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, ErrFailedScanSQL.WithError(err)
+		}
+		ingested[name] = struct{}{}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, ErrFailedQuerySQL.WithError(err)
+	}
+
+	return ingested, nil
 }
 
 func (r *PostgresSettlementBatchRepository) Save(ctx context.Context, batch *domain.SettlementBatch) error {
