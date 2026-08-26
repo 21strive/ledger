@@ -4,14 +4,14 @@
 --
 -- HISTORY — READ THIS BEFORE APPLYING.
 --
--- Both indexes below already exist in the aturjadwal production database. They were created
--- there first, as migrations 022 and 023 of the aturjadwal-monoservice repository, back when
--- the reconciler answered "have I processed this file?" by querying settlement_batches
--- directly from that service. That was a domain leak: this package owns the table, so it
--- owns the schema that the table's guarantees rest on. This migration brings the indexes
--- home. It is written to be a no-op where they are already present (IF NOT EXISTS), and to
--- create them correctly where they are not — a fresh database, or any environment that never
--- ran the monoservice migrations.
+-- Both indexes below were first WRITTEN in the aturjadwal-monoservice repository, as its
+-- migrations 022 and 023, back when the reconciler answered "have I processed this file?"
+-- by querying settlement_batches directly from that service. That was a domain leak: this
+-- package owns the table, so it owns the schema that the table's guarantees rest on.
+--
+-- They were never applied from there. This migration is what actually created them, in
+-- production on 2026-08-26 and everywhere since. IF NOT EXISTS is belt-and-braces for
+-- environments where someone did run the monoservice copies by hand.
 --
 -- ---------------------------------------------------------------------------------------
 -- 1. idx_settlement_batches_report_file_name
