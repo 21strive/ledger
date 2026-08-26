@@ -15,8 +15,6 @@ import (
 	"github.com/21strive/ledger/domain"
 	"github.com/21strive/ledger/ledgererr"
 	"github.com/21strive/ledger/repo"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 )
 
@@ -29,10 +27,13 @@ type LedgerClient struct {
 	logger       *slog.Logger
 	repoProvider repo.RepositoryProvider
 	dokuClient   usecases.DokuUseCaseInterface
-	s3           *s3.Client
 }
 
-func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logger *slog.Logger, awsConfig aws.Config) *LedgerClient {
+// NewLedgerClient takes no object-storage handle: this package keeps ledgers, and
+// nothing it does touches a bucket. It used to accept an aws.Config purely to build
+// an S3 client for the seller KYC upload helpers, which have moved to the service
+// that owns KYC.
+func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logger *slog.Logger) *LedgerClient {
 	txProvider := repo.NewTransactionProvider(db)
 	repoProvider := repo.NewRepositoryProvider(db)
 
@@ -42,7 +43,6 @@ func NewLedgerClient(db *sql.DB, dokuClient usecases.DokuUseCaseInterface, logge
 		logger:       logger,
 		dokuClient:   dokuClient,
 		repoProvider: repoProvider,
-		s3:           s3.NewFromConfig(awsConfig),
 	}
 }
 
