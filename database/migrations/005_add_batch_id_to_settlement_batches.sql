@@ -6,7 +6,11 @@
 ALTER TABLE settlement_batches
 ADD COLUMN batch_id VARCHAR(255);
 
--- Optional: Add index if we need to query by batch_id in the future
--- CREATE INDEX idx_settlement_batches_batch_id ON settlement_batches(batch_id);
-
--- Note: batch_id is nullable to support existing records that were uploaded before this field was added
+-- Note: batch_id is nullable to support existing records that were uploaded before this field
+-- was added.
+--
+-- UPDATE (migration 013): batch_id is no longer just a recorded field — it is the idempotency
+-- key for settlement ingestion, and migration 013 puts a partial UNIQUE index on it. The rows
+-- this migration leaves NULL are exactly the ones that partial index excludes, so no backfill
+-- is needed. Do not add a plain (non-unique) index on batch_id here; 013 owns that column's
+-- access path.

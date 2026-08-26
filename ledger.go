@@ -667,14 +667,32 @@ type ReconciliationRequest struct {
 
 // ReconciliationResponse contains the result of reconciliation
 type ReconciliationResponse struct {
-	ReconciliationID string                  `json:"reconciliation_id"`
-	UploadedBy       string                  `json:"uploaded_by"`
-	UploadedAt       time.Time               `json:"uploaded_at"`
-	SettlementDate   string                  `json:"settlement_date"`
-	Transactions     ReconciliationTxSummary `json:"transactions"`
-	BalanceUpdates   ReconciliationBalances  `json:"balance_updates"`
-	Discrepancies    []DiscrepancySummary    `json:"discrepancies"`
-	Verification     ReconciliationVerify    `json:"verification"`
+	ReconciliationID string `json:"reconciliation_id"`
+	// AlreadyIngested reports that this CSV's batch_id was already booked and
+	// nothing was posted. It is a success, not an error: re-presenting a settlement
+	// file is the ordinary case for a caller that discovers files by listing object
+	// storage, and the answer it needs is "already done", not a failure.
+	//
+	// When it is true, only ReconciliationID, IngestedAs, UploadedBy, UploadedAt,
+	// SettlementDate and Transactions describe the ORIGINAL ingest; BalanceUpdates,
+	// Discrepancies and Verification are zero, because this call moved no money.
+	AlreadyIngested bool `json:"already_ingested,omitempty"`
+	// IngestedAs is the report_file_name the batch was originally ingested under,
+	// set only when AlreadyIngested is true.
+	//
+	// It is returned rather than a bare boolean so the caller can tell two very
+	// different situations apart: the SAME file presented again (benign, and worth
+	// no more than an info log), versus a DIFFERENT file carrying a batch_id that
+	// has already been booked — which is also what a DOKU correction would look
+	// like, and must not be swallowed quietly.
+	IngestedAs     string                  `json:"ingested_as,omitempty"`
+	UploadedBy     string                  `json:"uploaded_by"`
+	UploadedAt     time.Time               `json:"uploaded_at"`
+	SettlementDate string                  `json:"settlement_date"`
+	Transactions   ReconciliationTxSummary `json:"transactions"`
+	BalanceUpdates ReconciliationBalances  `json:"balance_updates"`
+	Discrepancies  []DiscrepancySummary    `json:"discrepancies"`
+	Verification   ReconciliationVerify    `json:"verification"`
 }
 
 // ReconciliationTxSummary contains transaction counts
@@ -715,6 +733,32 @@ type ReconciliationVerify struct {
 	SellersMatched     int    `json:"sellers_matched"`      // Number of sellers with exact balance match
 	SellersMismatched  int    `json:"sellers_mismatched"`   // Number of sellers with balance discrepancies
 	SellersNotVerified int    `json:"sellers_not_verified"` // Number of sellers without DOKU sub-accounts
+}
+
+// FilterIngestedReportFiles returns the subset of reportFileNames that this ledger
+// has already ingested as settlement batches.
+//
+// It exists for callers that discover settlement files by listing object storage:
+// they list, ask here which ones are already booked, and process the difference.
+// Asking the ledger is the point — "have I processed this file?" is a question
+// about ledger state, and answering it by reaching into settlement_batches from
+// outside this package couples that caller to a schema it does not own.
+//
+// The answer is a set rather than a slice because the caller's next move is
+// always a membership test, one per listed key.
+//
+// This is the cheap filter, not the safety net. It keys on report_file_name, which
+// a rename or a re-download under a new path defeats; the guarantee that a batch is
+// booked at most once comes from batch_id, enforced inside ProcessReconciliation
+// and by the unique index behind it. A caller may skip this entirely and simply
+// hand every file over — it would just do more parsing to reach the same outcome.
+func (c *LedgerClient) FilterIngestedReportFiles(ctx context.Context, reportFileNames []string) (map[string]struct{}, error) {
+	ingested, err := c.repoProvider.SettlementBatch().FilterIngestedReportFiles(ctx, reportFileNames)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to filter ingested report files", err)
+	}
+
+	return ingested, nil
 }
 
 // ProcessReconciliation processes a DOKU settlement CSV and writes immutable
@@ -789,6 +833,48 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		"total_settlement", csvMetadata.TotalSettlement,
 		"total_transactions", csvMetadata.TotalTransactions,
 	)
+
+	// Idempotency check — the normal brake.
+	//
+	// A batch_id already present in settlement_batches has been booked, and the
+	// ledger entries behind it are immutable. Processing it a second time would
+	// double-post: there is no undo, only compensating entries and an audit.
+	//
+	// This runs after the parse (batch_id lives in the CSV metadata, so there is no
+	// cheaper way to learn it) but before anything is written, so a repeat costs one
+	// parse and one indexed lookup and touches nothing.
+	//
+	// It does not replace the unique index from migration 013. Check-then-insert is
+	// a race between two concurrent callers, and it only protects the path that
+	// remembers to check. The index is the emergency brake; this exists so the
+	// ordinary repeat is a describable answer instead of a constraint violation
+	// indistinguishable from the database being down.
+	existingBatch, err := c.repoProvider.SettlementBatch().GetByBatchID(ctx, csvMetadata.BatchID)
+	if err != nil && !ledgererr.IsAppError(err, repo.ErrNotFound) {
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to look up settlement batch by batch_id", err)
+	}
+	if existingBatch != nil {
+		c.logger.InfoContext(ctx, "Settlement batch already ingested - nothing posted",
+			"batch_id", csvMetadata.BatchID,
+			"ingested_as", existingBatch.ReportFileName,
+			"presented_as", req.ReportFileName,
+			"reconciliation_id", existingBatch.UUID,
+		)
+
+		return &ReconciliationResponse{
+			ReconciliationID: existingBatch.UUID,
+			AlreadyIngested:  true,
+			IngestedAs:       existingBatch.ReportFileName,
+			UploadedBy:       existingBatch.UploadedBy,
+			UploadedAt:       existingBatch.UploadedAt,
+			SettlementDate:   existingBatch.SettlementDate.Format("2006-01-02"),
+			Transactions: ReconciliationTxSummary{
+				Total:     existingBatch.MatchedCount + existingBatch.UnmatchedCount,
+				Matched:   existingBatch.MatchedCount,
+				Unmatched: existingBatch.UnmatchedCount,
+			},
+		}, nil
+	}
 
 	settlementDate := req.SettlementDate
 	if settlementDate.IsZero() && len(csvRows) > 0 {

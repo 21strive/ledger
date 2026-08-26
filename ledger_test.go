@@ -315,6 +315,31 @@ func (f *FakeSettlementBatchRepository) GetByLedgerIDAndDate(ctx context.Context
 	return nil, nil
 }
 
+func (f *FakeSettlementBatchRepository) GetByBatchID(ctx context.Context, batchID string) (*domain.SettlementBatch, error) {
+	if batchID == "" {
+		return nil, repo.ErrNotFound
+	}
+	for _, batch := range f.batches {
+		if batch.BatchID == batchID {
+			return batch, nil
+		}
+	}
+	return nil, repo.ErrNotFound
+}
+
+func (f *FakeSettlementBatchRepository) FilterIngestedReportFiles(ctx context.Context, reportFileNames []string) (map[string]struct{}, error) {
+	ingested := make(map[string]struct{}, len(reportFileNames))
+	for _, name := range reportFileNames {
+		for _, batch := range f.batches {
+			if batch.ReportFileName == name {
+				ingested[name] = struct{}{}
+				break
+			}
+		}
+	}
+	return ingested, nil
+}
+
 func (f *FakeSettlementBatchRepository) UpdateStatus(ctx context.Context, id string, status domain.SettlementBatchStatus, processedAt *time.Time, failureReason string) error {
 	if batch, ok := f.batches[id]; ok {
 		batch.ProcessingStatus = status
@@ -666,6 +691,160 @@ NO,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER N
 			}
 		})
 	}
+}
+
+// settlementCSVWithBatchID builds a minimal but structurally valid DOKU settlement
+// CSV carrying the given Batch ID. The metadata block is nine "Label_,Value" rows in
+// the order parseMetadata expects, and dates are DD-MM-YYYY to match the parser's
+// default layout — ProcessReconciliation constructs its parser with an empty format
+// string, which falls back to exactly that.
+func settlementCSVWithBatchID(batchID string) string {
+	return `Total Amount Purchase_,51000
+Total Fee_,4995
+Total Purchase_,1
+Total Amount Refund_,0
+Total Refund_,0
+Total Settlement Amount_,46005
+Total Discount_,0
+Total Transactions_,1
+Batch ID_,` + batchID + `
+
+NO,MERCHANT NAME,PAYMENT CHANNEL NAME,TRANSACTION DATE,INVOICE NUMBER,CUSTOMER NAME,REPORT CODE,AMOUNT,RECON CODE,FEE,DISCOUNT,PAY TO MERCHANT,PAY OUT DATE,TRANSACTION TYPE,PROMO CODE,SUB ACCOUNT
+1,Test Seller,QRIS,05-03-2026,INV-001,John Doe,ACCEPTED,51000,SUCCESS,4995,0,46005,06-03-2026,Purchase,,SAC-001
+`
+}
+
+// newReconciliationTestClient wires a LedgerClient over in-memory fakes with the
+// platform and payment-gateway accounts already created, which is the minimum
+// ProcessReconciliation needs before it looks at the CSV at all.
+func newReconciliationTestClient() (*LedgerClient, *FakeRepositoryProvider) {
+	fakes := NewFakeRepositoryProvider()
+
+	platformAcc := createTestAccount(domain.OwnerTypePlatform, "platform", "PLATFORM-SAC")
+	_ = fakes.Account().Save(context.Background(), platformAcc)
+
+	paymentGatewayAcc := createTestAccount(domain.OwnerTypePaymentGateway, "doku", "DOKU-SAC")
+	_ = fakes.Account().Save(context.Background(), paymentGatewayAcc)
+
+	client := &LedgerClient{
+		repoProvider: fakes,
+		txProvider:   NewFakeTransactionProvider(fakes),
+		logger:       testLogger(),
+	}
+
+	return client, fakes
+}
+
+// TestProcessReconciliation_Idempotency covers the guarantee the settlement pipeline
+// rests on: a batch_id is booked at most once, no matter how many times, or under how
+// many names, its CSV is presented.
+func TestProcessReconciliation_Idempotency(t *testing.T) {
+	t.Run("same batch_id returns already ingested and posts nothing", func(t *testing.T) {
+		client, fakes := newReconciliationTestClient()
+
+		// A batch already booked under one name...
+		existing, err := domain.NewSettlementBatch(
+			"platform-account", "2026/03/settlement-original.csv", time.Now(), "System", domain.CurrencyIDR,
+		)
+		require.NoError(t, err)
+		existing.BatchID = "B-DOKU-ALREADY-BOOKED"
+		require.NoError(t, fakes.SettlementBatch().Save(context.Background(), existing))
+
+		// ...is presented a second time under a DIFFERENT object key, which is what a
+		// re-download or a re-ship looks like. report_file_name cannot catch that;
+		// batch_id is the whole reason this check keys on the CSV's own identity.
+		resp, err := client.ProcessReconciliation(context.Background(), &ReconciliationRequest{
+			CSVReader:      strings.NewReader(settlementCSVWithBatchID("B-DOKU-ALREADY-BOOKED")),
+			ReportFileName: "2026/03/settlement-reshipped.csv",
+			UploadedBy:     "System",
+		})
+
+		// Not an error: for a caller that discovers files by listing a bucket, meeting
+		// a file it has already booked is the ordinary case, not a failure.
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.True(t, resp.AlreadyIngested)
+		assert.Equal(t, "2026/03/settlement-original.csv", resp.IngestedAs,
+			"caller needs the original name to tell a benign re-ship from a possible DOKU correction")
+		assert.Equal(t, existing.UUID, resp.ReconciliationID)
+
+		// Nothing was posted. A second batch row would mean a second set of immutable
+		// ledger entries, which is the failure this whole mechanism exists to prevent.
+		assert.Len(t, fakes.settlementBatchRepo.batches, 1)
+		assert.Empty(t, resp.BalanceUpdates.Pending.Diff)
+		assert.Empty(t, resp.BalanceUpdates.Available.Diff)
+	})
+
+	t.Run("unknown batch_id proceeds past the guard", func(t *testing.T) {
+		client, fakes := newReconciliationTestClient()
+
+		existing, err := domain.NewSettlementBatch(
+			"platform-account", "2026/03/settlement-other.csv", time.Now(), "System", domain.CurrencyIDR,
+		)
+		require.NoError(t, err)
+		existing.BatchID = "B-DOKU-SOMETHING-ELSE"
+		require.NoError(t, fakes.SettlementBatch().Save(context.Background(), existing))
+
+		resp, _ := client.ProcessReconciliation(context.Background(), &ReconciliationRequest{
+			CSVReader:      strings.NewReader(settlementCSVWithBatchID("B-DOKU-BRAND-NEW")),
+			ReportFileName: "2026/03/settlement-new.csv",
+			UploadedBy:     "System",
+		})
+
+		// The unmatched invoice means this run has no transactions to settle, so it may
+		// still end in an error further down. What matters here is only that the guard
+		// did not claim it: an unrelated batch_id must never short-circuit a new file.
+		if resp != nil {
+			assert.False(t, resp.AlreadyIngested)
+			assert.Empty(t, resp.IngestedAs)
+		}
+	})
+
+	t.Run("empty batch_id is rejected before the guard", func(t *testing.T) {
+		client, _ := newReconciliationTestClient()
+
+		// A CSV with no Batch ID has no identity, so it can be neither recognised as a
+		// repeat nor safely booked. It is refused outright rather than treated as new —
+		// otherwise every such file would post again on every tick.
+		_, err := client.ProcessReconciliation(context.Background(), &ReconciliationRequest{
+			CSVReader:      strings.NewReader(settlementCSVWithBatchID("")),
+			ReportFileName: "2026/03/settlement-no-batch-id.csv",
+			UploadedBy:     "System",
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Batch ID")
+	})
+}
+
+// TestFilterIngestedReportFiles covers the tick's diff: the caller lists object storage
+// and needs to know which of those keys the ledger has already booked.
+func TestFilterIngestedReportFiles(t *testing.T) {
+	client, fakes := newReconciliationTestClient()
+
+	booked, err := domain.NewSettlementBatch(
+		"platform-account", "2026/03/settlement-done.csv", time.Now(), "System", domain.CurrencyIDR,
+	)
+	require.NoError(t, err)
+	booked.BatchID = "B-DOKU-DONE"
+	require.NoError(t, fakes.SettlementBatch().Save(context.Background(), booked))
+
+	ingested, err := client.FilterIngestedReportFiles(context.Background(), []string{
+		"2026/03/settlement-done.csv",
+		"2026/03/settlement-pending.csv",
+	})
+
+	require.NoError(t, err)
+	assert.Len(t, ingested, 1)
+	_, done := ingested["2026/03/settlement-done.csv"]
+	assert.True(t, done)
+	_, pending := ingested["2026/03/settlement-pending.csv"]
+	assert.False(t, pending, "an unlisted key is unprocessed work, and must not be filtered out")
+
+	// An empty listing is an ordinary tick on a quiet bucket, not an edge case.
+	empty, err := client.FilterIngestedReportFiles(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }
 
 // TestProcessReconciliation_TransactionMatching tests invoice matching logic

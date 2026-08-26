@@ -1,0 +1,83 @@
+-- Migration: 013_settlement_batches_idempotency.sql
+-- Purpose: the two indexes that make settlement ingestion idempotent.
+-- Date: 2026-08-26
+--
+-- HISTORY — READ THIS BEFORE APPLYING.
+--
+-- Both indexes below already exist in the aturjadwal production database. They were created
+-- there first, as migrations 022 and 023 of the aturjadwal-monoservice repository, back when
+-- the reconciler answered "have I processed this file?" by querying settlement_batches
+-- directly from that service. That was a domain leak: this package owns the table, so it
+-- owns the schema that the table's guarantees rest on. This migration brings the indexes
+-- home. It is written to be a no-op where they are already present (IF NOT EXISTS), and to
+-- create them correctly where they are not — a fresh database, or any environment that never
+-- ran the monoservice migrations.
+--
+-- ---------------------------------------------------------------------------------------
+-- 1. idx_settlement_batches_report_file_name
+-- ---------------------------------------------------------------------------------------
+-- The settlement reconciler lists an object-storage bucket every tick and asks which of
+-- those keys it has already ingested:
+--
+--   SELECT report_file_name FROM settlement_batches WHERE report_file_name = ANY($1)
+--
+-- The pre-existing indexes are on account_uuid, processing_status, and
+-- (account_uuid, settlement_date DESC) — none of which help that predicate, so the query
+-- sequentially scans the whole table on every tick, forever.
+--
+-- Deliberately NOT unique: the same DOKU file may legitimately be re-shipped under a new
+-- object key. Guarding against processing it twice is index 2's job, not this one's.
+--
+-- ---------------------------------------------------------------------------------------
+-- 2. idx_settlement_batches_batch_id_unique
+-- ---------------------------------------------------------------------------------------
+-- One DOKU settlement batch may be ingested at most once.
+--
+-- Without this index NOTHING prevents the same settlement file from being processed twice.
+-- The only unique keys on the table are uuid and randid, both generated fresh by
+-- redifu.InitRecord on every call, so every run inserts a new row no matter what it
+-- contains — and every row means a second set of immutable ledger entries.
+--
+-- batch_id is DOKU's own identifier for the batch, read from the settlement CSV's metadata
+-- header. It is the correct idempotency key because it survives the two things that defeat
+-- the object key: a rename, and a re-download under a different path.
+--
+-- WHY UNIQUE AND NOT JUST A CHECK IN CODE: ProcessReconciliation does check batch_id before
+-- it writes anything (the "normal brake" — a repeated file returns AlreadyIngested and posts
+-- nothing). But a check-then-insert is a race between two concurrent callers, and it only
+-- protects the code path that remembers to call it. This index is the emergency brake: it
+-- makes a duplicate impossible regardless of which caller inserts, whether the pre-check was
+-- skipped, or whether two workers run at once.
+--
+-- NULLs: Postgres treats NULLs as distinct in a unique index, so any number of rows that
+-- predate the batch_id column (see migration 005) coexist here without a backfill. The
+-- partial predicate makes that explicit and keeps the index to rows that carry an identity.
+--
+-- NOTE: creating this index fails if the table already holds two rows sharing a batch_id.
+-- Check before applying in an environment with existing data:
+--
+--   SELECT batch_id, COUNT(*), array_agg(uuid), array_agg(report_file_name)
+--   FROM settlement_batches
+--   WHERE batch_id IS NOT NULL
+--   GROUP BY batch_id
+--   HAVING COUNT(*) > 1;
+--
+-- If that returns rows, the fix is no longer a migration — duplicate batches mean duplicate
+-- ledger entries, which are immutable and must be corrected by compensating entries, not
+-- deletes. Resolve the audit before creating the index.
+--
+-- ---------------------------------------------------------------------------------------
+-- CONCURRENTLY keeps the table writable while each index builds. It cannot run inside a
+-- transaction block, so this file must NOT be wrapped in BEGIN/COMMIT, and Atlas must run it
+-- with transactions disabled for this file. A CONCURRENTLY build that fails leaves an
+-- INVALID index behind which must be dropped before retrying:
+--
+--   DROP INDEX CONCURRENTLY IF EXISTS idx_settlement_batches_report_file_name;
+--   DROP INDEX CONCURRENTLY IF EXISTS idx_settlement_batches_batch_id_unique;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_settlement_batches_report_file_name
+    ON settlement_batches (report_file_name);
+
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_settlement_batches_batch_id_unique
+    ON settlement_batches (batch_id)
+    WHERE batch_id IS NOT NULL;

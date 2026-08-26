@@ -46,6 +46,16 @@ type SettlementBatchRepository interface {
 	GetByID(ctx context.Context, id string) (*SettlementBatch, error)
 	GetByLedgerID(ctx context.Context, ledgerID string, page, pageSize int) ([]*SettlementBatch, error)
 	GetByLedgerIDAndDate(ctx context.Context, ledgerID string, settlementDate time.Time) (*SettlementBatch, error)
+	// GetByBatchID looks up a batch by DOKU's own identifier for it, read from the
+	// settlement CSV's metadata header. This is the idempotency lookup: batch_id
+	// survives the two things that defeat report_file_name, a rename and a
+	// re-download under a different path. Returns ErrNotFound when nothing matches.
+	GetByBatchID(ctx context.Context, batchID string) (*SettlementBatch, error)
+	// FilterIngestedReportFiles returns the subset of reportFileNames that already
+	// have a batch row. Callers that discover settlement files by listing object
+	// storage diff their listing against this; anything missing from the result is
+	// unprocessed work. An empty input returns an empty set without querying.
+	FilterIngestedReportFiles(ctx context.Context, reportFileNames []string) (map[string]struct{}, error)
 	Save(ctx context.Context, batch *SettlementBatch) error
 	UpdateStatus(ctx context.Context, id string, status SettlementBatchStatus, processedAt *time.Time, failureReason string) error
 }
