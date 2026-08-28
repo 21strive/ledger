@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
-	"regexp"
 	"time"
 
 	"github.com/21strive/doku/app/requests"
@@ -110,35 +108,35 @@ func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, emai
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to check existing account", err)
 	}
 
+	// DOKU constrains both fields (email max 40 chars, name alphabetic only, max 100).
+	// Neither is checked anywhere upstream, and this call sits inside the seller's first
+	// paid booking — the worst possible place to discover a 4xx from an unusual name.
+	sanitizedName := sanitizeSubAccountName(name)
+	if err := validateSubAccountEmail(email); err != nil {
+		return nil, err
+	}
+	if sanitizedName != name {
+		c.logger.InfoContext(ctx, "Sub-account name sanitized for DOKU", "owner_id", accountID, "original", name, "sanitized", sanitizedName)
+	}
+
 	// Provision DOKU sub-account
-	var dokuSubAccountID string
 	response, dokuErr := c.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
 		Email: email,
-		Name:  name,
+		Name:  sanitizedName,
 	})
 	c.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
 
+	// Any DOKU failure ends this, 409 included. A 409 means the email already owns a
+	// sub-account, and the SAC ID in that message is deliberately not reused: it may
+	// belong to a different user, and a sub-account holds money. The raw DOKU message
+	// reaches the log, so an admin can bind the account by hand after checking who owns
+	// it. See T6b/T6c in docs/doku-sac-api-compliance.md (aturjadwal-monoservice).
 	if dokuErr != nil {
-		if dokuErr.StatusCode == http.StatusConflict {
-			messageStr := fmt.Sprintf("%v", dokuErr.Message)
-			re := regexp.MustCompile(`account id:\s*(SAC-[\w-]+)`)
-			matches := re.FindStringSubmatch(messageStr)
-			if len(matches) > 1 {
-				dokuSubAccountID = matches[1]
-				c.logger.InfoContext(ctx, "Email already registered, using existing SAC ID", "sac_id", dokuSubAccountID, "email", email)
-			} else {
-				return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists,
-					"DOKU sub account already exists but could not extract SAC ID",
-					fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-			}
-		} else {
-			return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
-				"failed to create DOKU sub account",
-				fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-		}
-	} else {
-		dokuSubAccountID = response.ID.String
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
+			"failed to create DOKU sub account",
+			fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
 	}
+	dokuSubAccountID := response.ID.String
 
 	account := domain.NewSellerAccount(dokuSubAccountID, accountID, currency)
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
@@ -167,34 +165,23 @@ func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, 
 	}
 
 	// Provision DOKU sub-account
-	var dokuSubAccountID string
 	response, dokuErr := c.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
 		Email: email,
 		Name:  ownerID,
 	})
 	c.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
 
+	// Any DOKU failure ends this, 409 included. A 409 means the email already owns a
+	// sub-account, and the SAC ID in that message is deliberately not reused: it may
+	// belong to a different user, and a sub-account holds money. The raw DOKU message
+	// reaches the log, so an admin can bind the account by hand after checking who owns
+	// it. See T6b/T6c in docs/doku-sac-api-compliance.md (aturjadwal-monoservice).
 	if dokuErr != nil {
-		if dokuErr.StatusCode == http.StatusConflict {
-			messageStr := fmt.Sprintf("%v", dokuErr.Message)
-			re := regexp.MustCompile(`account id:\s*(SAC-[\w-]+)`)
-			matches := re.FindStringSubmatch(messageStr)
-			if len(matches) > 1 {
-				dokuSubAccountID = matches[1]
-				c.logger.InfoContext(ctx, "Email already registered, using existing SAC ID", "sac_id", dokuSubAccountID, "email", email)
-			} else {
-				return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists,
-					"DOKU sub account already exists but could not extract SAC ID",
-					fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-			}
-		} else {
-			return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
-				"failed to create DOKU sub account",
-				fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-		}
-	} else {
-		dokuSubAccountID = response.ID.String
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
+			"failed to create DOKU sub account",
+			fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
 	}
+	dokuSubAccountID := response.ID.String
 
 	account := domain.NewPlatformAccount(dokuSubAccountID, ownerID, currency)
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
@@ -1296,7 +1283,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		transferReq.Transfer.Origin = sellerAccount.DokuSubAccountID
 		transferReq.Transfer.Destination = platformAccount.DokuSubAccountID
 		transferReq.Transfer.Amount = int(pft.amount)
-		transferReq.Transfer.InvoiceNumber = pft.invoiceNumber
+		transferReq.Transfer.InvoiceNumber = platformFeeInvoiceNumber(pft.invoiceNumber)
 
 		_, dokuErr := c.dokuClient.TransferSubAccount(requestID, transferReq)
 		if dokuErr != nil {
@@ -1852,7 +1839,7 @@ func (c *LedgerClient) ProcessPlatformFeeTransfer(ctx context.Context, batchSize
 		transferReq.Transfer.Origin = sellerAccount.DokuSubAccountID
 		transferReq.Transfer.Destination = platformAccount.DokuSubAccountID
 		transferReq.Transfer.Amount = int(tx.Fee.PlatformFee)
-		transferReq.Transfer.InvoiceNumber = tx.InvoiceNumber
+		transferReq.Transfer.InvoiceNumber = platformFeeInvoiceNumber(tx.InvoiceNumber)
 
 		_, dokuErr := c.dokuClient.TransferSubAccount(requestID, transferReq)
 		if dokuErr != nil {
