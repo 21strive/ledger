@@ -70,6 +70,21 @@ func (r *PostgresAccountRepository) GetByID(ctx context.Context, id string) (*do
 	return scanAccount(row)
 }
 
+// GetByIDForUpdate takes a row lock on the account. Only meaningful inside a transaction:
+// outside one the lock is released the moment the statement finishes, which protects
+// nothing. See the interface doc for why the withdrawal path needs it.
+func (r *PostgresAccountRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Account, error) {
+	query := `
+		SELECT` + accountSelectColumns + `
+		FROM ledger_accounts
+		WHERE uuid = $1
+		FOR UPDATE
+	`
+
+	row := r.db.QueryRowContext(ctx, query, id)
+	return scanAccount(row)
+}
+
 func (r *PostgresAccountRepository) GetByOwner(ctx context.Context, ownerType domain.OwnerType, ownerID string) (*domain.Account, error) {
 	query := `
 		SELECT` + accountSelectColumns + `

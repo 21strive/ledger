@@ -25,11 +25,15 @@ const (
 	EntryTypePlatformCommission EntryType = "PLATFORM_COMMISSION"
 	EntryTypeProcessorFee       EntryType = "PROCESSOR_FEE"
 	EntryTypeDisbursement       EntryType = "DISBURSEMENT"
-	EntryTypeSettlementClear    EntryType = "SETTLEMENT_CLEAR" // Clear pending balance
-	EntryTypeSettlementNet      EntryType = "SETTLEMENT_NET"   // Add net to available balance
-	EntryTypeSettlement         EntryType = "SETTLEMENT"       // Generic settlement
-	EntryTypeReconciliation     EntryType = "RECONCILIATION"
-	EntryTypeFeeAdjustment      EntryType = "FEE_ADJUSTMENT"
+	// EntryTypeDisbursementReversal returns a reserved amount to the available balance
+	// when a payout definitively did not happen. ledger_entries is insert-only, so a
+	// reservation is undone by writing its opposite, never by deleting it.
+	EntryTypeDisbursementReversal EntryType = "DISBURSEMENT_REVERSAL"
+	EntryTypeSettlementClear      EntryType = "SETTLEMENT_CLEAR" // Clear pending balance
+	EntryTypeSettlementNet        EntryType = "SETTLEMENT_NET"   // Add net to available balance
+	EntryTypeSettlement           EntryType = "SETTLEMENT"       // Generic settlement
+	EntryTypeReconciliation       EntryType = "RECONCILIATION"
+	EntryTypeFeeAdjustment        EntryType = "FEE_ADJUSTMENT"
 )
 
 // SourceType describes the business origin (which table generated this entry).
@@ -297,6 +301,31 @@ func NewDisbursementEntry(
 		Amount:        -amount,
 		BalanceBucket: BalanceBucketAvailable,
 		EntryType:     EntryTypeDisbursement,
+		SourceType:    SourceTypeDisbursement,
+		SourceID:      disbursementID,
+	}
+	redifu.InitRecord(entry)
+	return entry
+}
+
+// NewDisbursementReversalEntry gives a reserved amount back to the available balance.
+//
+// Write this only when the payout is known not to have happened — DOKU rejected it, or
+// answered with a FAILED status. An unknown outcome (timeout, 5xx) must NOT be reversed:
+// the money may be on its way, and handing it back to the available balance is what lets
+// it be withdrawn a second time.
+func NewDisbursementReversalEntry(
+	journalUUID string,
+	disbursementID string,
+	accountID string,
+	amount int64,
+) *LedgerEntry {
+	entry := &LedgerEntry{
+		JournalUUID:   journalUUID,
+		AccountUUID:   accountID,
+		Amount:        amount,
+		BalanceBucket: BalanceBucketAvailable,
+		EntryType:     EntryTypeDisbursementReversal,
 		SourceType:    SourceTypeDisbursement,
 		SourceID:      disbursementID,
 	}

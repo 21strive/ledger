@@ -64,6 +64,14 @@ func NewPaymentGatewayAccount(dokuSubAccountID string, ownerID string, currency 
 
 type AccountRepository interface {
 	GetByID(ctx context.Context, id string) (*Account, error)
+
+	// GetByIDForUpdate reads the account under a row lock (SELECT ... FOR UPDATE) and
+	// must be called inside a transaction. Balances are derived by summing
+	// ledger_entries, so a plain read gives every concurrent caller the same answer
+	// until one of them commits — two withdrawals can both see enough balance and both
+	// pay out. Taking this lock first serialises them: the second waits for the first's
+	// entries to land, then reads a balance that includes them.
+	GetByIDForUpdate(ctx context.Context, id string) (*Account, error)
 	GetByOwner(ctx context.Context, ownerType OwnerType, ownerID string) (*Account, error)
 	GetByDokuSubAccountID(ctx context.Context, dokuSubAccountID string) (*Account, error)
 	GetBySellerID(ctx context.Context, sellerId string) (*Account, error)
