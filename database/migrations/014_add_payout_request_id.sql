@@ -1,0 +1,11 @@
+-- Migration: Add payout_request_id to disbursements
+-- Purpose: Store the DOKU Request-Id used for the payout, enabling idempotent retries.
+--          DOKU keys idempotency on Request-Id: replaying the same id returns the original
+--          response under a 409 instead of paying out a second time. The id is written
+--          together with the PENDING disbursement row, BEFORE DOKU is called, so a payout
+--          whose outcome we never learned (timeout, crash between the call and the commit)
+--          can still be replayed and resolved authoritatively.
+--
+--          Write-once: nothing may change this value after the row is created, or the
+--          protection it provides is lost.
+ALTER TABLE disbursements ADD COLUMN payout_request_id TEXT;

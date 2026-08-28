@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
-	"regexp"
 	"time"
 
+	dokumodels "github.com/21strive/doku/app/models"
 	"github.com/21strive/doku/app/requests"
 	"github.com/21strive/doku/app/usecases"
 	"github.com/21strive/ledger/domain"
@@ -110,35 +109,35 @@ func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, emai
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to check existing account", err)
 	}
 
+	// DOKU constrains both fields (email max 40 chars, name alphabetic only, max 100).
+	// Neither is checked anywhere upstream, and this call sits inside the seller's first
+	// paid booking — the worst possible place to discover a 4xx from an unusual name.
+	sanitizedName := sanitizeSubAccountName(name)
+	if err := validateSubAccountEmail(email); err != nil {
+		return nil, err
+	}
+	if sanitizedName != name {
+		c.logger.InfoContext(ctx, "Sub-account name sanitized for DOKU", "owner_id", accountID, "original", name, "sanitized", sanitizedName)
+	}
+
 	// Provision DOKU sub-account
-	var dokuSubAccountID string
 	response, dokuErr := c.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
 		Email: email,
-		Name:  name,
+		Name:  sanitizedName,
 	})
 	c.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
 
+	// Any DOKU failure ends this, 409 included. A 409 means the email already owns a
+	// sub-account, and the SAC ID in that message is deliberately not reused: it may
+	// belong to a different user, and a sub-account holds money. The raw DOKU message
+	// reaches the log, so an admin can bind the account by hand after checking who owns
+	// it. See T6b/T6c in docs/doku-sac-api-compliance.md (aturjadwal-monoservice).
 	if dokuErr != nil {
-		if dokuErr.StatusCode == http.StatusConflict {
-			messageStr := fmt.Sprintf("%v", dokuErr.Message)
-			re := regexp.MustCompile(`account id:\s*(SAC-[\w-]+)`)
-			matches := re.FindStringSubmatch(messageStr)
-			if len(matches) > 1 {
-				dokuSubAccountID = matches[1]
-				c.logger.InfoContext(ctx, "Email already registered, using existing SAC ID", "sac_id", dokuSubAccountID, "email", email)
-			} else {
-				return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists,
-					"DOKU sub account already exists but could not extract SAC ID",
-					fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-			}
-		} else {
-			return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
-				"failed to create DOKU sub account",
-				fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-		}
-	} else {
-		dokuSubAccountID = response.ID.String
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
+			"failed to create DOKU sub account",
+			fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
 	}
+	dokuSubAccountID := response.ID.String
 
 	account := domain.NewSellerAccount(dokuSubAccountID, accountID, currency)
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
@@ -167,34 +166,23 @@ func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, 
 	}
 
 	// Provision DOKU sub-account
-	var dokuSubAccountID string
 	response, dokuErr := c.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
 		Email: email,
 		Name:  ownerID,
 	})
 	c.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
 
+	// Any DOKU failure ends this, 409 included. A 409 means the email already owns a
+	// sub-account, and the SAC ID in that message is deliberately not reused: it may
+	// belong to a different user, and a sub-account holds money. The raw DOKU message
+	// reaches the log, so an admin can bind the account by hand after checking who owns
+	// it. See T6b/T6c in docs/doku-sac-api-compliance.md (aturjadwal-monoservice).
 	if dokuErr != nil {
-		if dokuErr.StatusCode == http.StatusConflict {
-			messageStr := fmt.Sprintf("%v", dokuErr.Message)
-			re := regexp.MustCompile(`account id:\s*(SAC-[\w-]+)`)
-			matches := re.FindStringSubmatch(messageStr)
-			if len(matches) > 1 {
-				dokuSubAccountID = matches[1]
-				c.logger.InfoContext(ctx, "Email already registered, using existing SAC ID", "sac_id", dokuSubAccountID, "email", email)
-			} else {
-				return nil, ledgererr.NewError(ledgererr.CodeSubaccountAlreadyExists,
-					"DOKU sub account already exists but could not extract SAC ID",
-					fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-			}
-		} else {
-			return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
-				"failed to create DOKU sub account",
-				fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-		}
-	} else {
-		dokuSubAccountID = response.ID.String
+		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
+			"failed to create DOKU sub account",
+			fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
 	}
+	dokuSubAccountID := response.ID.String
 
 	account := domain.NewPlatformAccount(dokuSubAccountID, ownerID, currency)
 	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
@@ -465,11 +453,23 @@ type WithdrawResponse struct {
 
 // Withdraw initiates a withdrawal from an account to an external bank account.
 // Flow:
-// 1. Look up Account by sellerID (owner_id)
-// 2. Derive available balance from ledger_entries — must cover the requested amount
-// 3. Call DOKU SendPayoutSubAccount FIRST (no DB writes yet)
-// 4. If DOKU fails: return error — nothing to rollback
-// 5. If DOKU succeeds: write Disbursement + LedgerEntry(-amount AVAILABLE) in ONE transaction
+//  1. Look up Account by sellerID (owner_id)
+//  2. Derive available balance from ledger_entries — must cover the requested amount
+//  3. Write the Disbursement as PENDING, carrying the DOKU Request-Id, BEFORE calling out
+//  4. Call DOKU SendPayoutSubAccount under that Request-Id
+//  5. Book the answer: LedgerEntry(-amount AVAILABLE) + journal in ONE transaction
+//
+// Step 3 used to come last, after DOKU had already been called. That ordering left a
+// window with no record at all: payout succeeds, process dies before the commit, and the
+// money is gone with nothing in our database naming it — while the balance still shows it
+// as available, so the next attempt pays it out again. Writing the row first turns that
+// into a recoverable state, because the Request-Id survives and RetryDisbursement can ask
+// DOKU what became of it.
+//
+// Still not solved here, and worth naming: the balance is checked but not reserved. Two
+// *different* withdrawal requests racing each other both pass the check and both pay out.
+// Idempotency answers "the same payout twice"; it does not answer "two payouts at once".
+// That needs a reservation entry at request time and is a separate change.
 func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *WithdrawRequest) (*WithdrawResponse, error) {
 	if req.AccountID == "" {
 		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "account_id is required", nil)
@@ -508,39 +508,6 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	// Generate disbursement ID upfront (used as DOKU invoice number)
 	disbursementID := domain.GenerateID()
 
-	c.logger.InfoContext(ctx, "Calling DOKU SendPayoutSubAccount",
-		"disbursement_id", disbursementID,
-		"account_id", account.UUID,
-		"doku_sub_account_id", account.DokuSubAccountID,
-		"amount", req.Amount,
-	)
-
-	dokuReq := requests.DokuSendPayoutSubAccountRequest{}
-	dokuReq.Account.ID = account.DokuSubAccountID
-	dokuReq.Payout.Amount = int(req.Amount)
-	dokuReq.Payout.InvoiceNumber = disbursementID
-	dokuReq.Beneficiary.BankCode = req.BankCode
-	dokuReq.Beneficiary.BankAccountNumber = req.AccountNumber
-	dokuReq.Beneficiary.BankAccountName = req.AccountName
-
-	dokuResp, dokuErr := c.dokuClient.SendPayoutSubAccount(dokuReq)
-	if dokuErr != nil {
-		c.logger.ErrorContext(ctx, "DOKU SendPayoutSubAccount failed",
-			"disbursement_id", disbursementID,
-			"error", dokuErr.Err,
-			"message", dokuErr.Message,
-			"status_code", dokuErr.StatusCode,
-		)
-		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError, "DOKU disbursement failed", fmt.Errorf("%v", dokuErr.Message))
-	}
-
-	c.logger.InfoContext(ctx, "DOKU disbursement response received",
-		"disbursement_id", disbursementID,
-		"doku_status", dokuResp.Payout.Status,
-		"doku_invoice", dokuResp.Payout.InvoiceNumber,
-	)
-
-	// Build domain objects
 	currency := domain.Currency(req.Currency)
 	if currency == "" {
 		currency = account.Currency
@@ -554,12 +521,100 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 
 	disbursement, err := domain.NewDisbursementWithID(disbursementID, account.UUID, req.Amount, currency, bankAccount, req.Description)
 	if err != nil {
-		c.logger.ErrorContext(ctx, "Failed to create disbursement entity after DOKU success",
-			"disbursement_id", disbursementID,
-			"error", err,
-		)
 		return nil, err
 	}
+
+	// Record the intent — and the Request-Id it will travel under — BEFORE any money
+	// moves. This is the whole point: if the payout succeeds and we then lose the
+	// process, the row and its id survive, and RetryDisbursement can ask DOKU what
+	// actually happened instead of paying a second time.
+	disbursement.PayoutRequestID = uuid.NewString()
+	if err := c.repoProvider.Disbursement().Save(ctx, disbursement); err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to record disbursement before payout", err)
+	}
+
+	return c.executePayout(ctx, account, disbursement)
+}
+
+// RetryDisbursement re-sends a payout that never reached a settled outcome, reusing the
+// Request-Id stored on the row. Because DOKU keys idempotency on that id, this is safe to
+// call even when the first attempt did succeed: DOKU replays its original answer under a
+// 409 rather than paying again, and the ledger is then written from that answer.
+//
+// This is the reason payout_request_id exists. Without a caller that reuses the id, storing
+// it protects nothing.
+//
+// COMPLETED and FAILED are terminal and are refused: the first has already been paid and
+// booked, the second is a definite refusal from DOKU. Only PENDING (sent, outcome unknown)
+// and PROCESSING (accepted, awaiting confirmation) may be replayed.
+func (c *LedgerClient) RetryDisbursement(ctx context.Context, disbursementID string) (*WithdrawResponse, error) {
+	disbursement, err := c.repoProvider.Disbursement().GetByID(ctx, disbursementID)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.ErrDisbursementNotFound.WithError(err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to load disbursement", err)
+	}
+
+	if !disbursement.IsPending() && !disbursement.IsProcessing() {
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidDisbursementStatus,
+			fmt.Sprintf("disbursement is %s and cannot be retried", disbursement.Status), nil)
+	}
+
+	// A row written before this feature existed has no id to replay. Minting one now would
+	// be worse than refusing: it would look like a protected retry while giving DOKU a key
+	// it has never seen, so a payout that already went out would go out again.
+	if disbursement.PayoutRequestID == "" {
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest,
+			"disbursement has no stored payout request id; it predates idempotent retries and must be settled by hand", nil)
+	}
+
+	account, err := c.repoProvider.Account().GetByID(ctx, disbursement.LedgerUUID)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account for disbursement retry", err)
+	}
+
+	c.logger.InfoContext(ctx, "Retrying disbursement with stored request id",
+		"disbursement_id", disbursement.UUID,
+		"status", disbursement.Status,
+		"payout_request_id", disbursement.PayoutRequestID,
+	)
+
+	return c.executePayout(ctx, account, disbursement)
+}
+
+// executePayout sends the payout to DOKU and books whatever comes back. It is shared by the
+// first attempt and by every replay, so both go out under the same Request-Id and are
+// settled by identical rules.
+//
+// The disbursement row already exists when this runs.
+func (c *LedgerClient) executePayout(ctx context.Context, account *domain.Account, disbursement *domain.Disbursement) (*WithdrawResponse, error) {
+	c.logger.InfoContext(ctx, "Calling DOKU SendPayoutSubAccount",
+		"disbursement_id", disbursement.UUID,
+		"account_id", account.UUID,
+		"doku_sub_account_id", account.DokuSubAccountID,
+		"amount", disbursement.Amount,
+		"payout_request_id", disbursement.PayoutRequestID,
+	)
+
+	dokuReq := requests.DokuSendPayoutSubAccountRequest{}
+	dokuReq.Account.ID = account.DokuSubAccountID
+	dokuReq.Payout.Amount = int(disbursement.Amount)
+	dokuReq.Payout.InvoiceNumber = disbursement.UUID
+	dokuReq.Beneficiary.BankCode = disbursement.BankAccount.BankCode
+	dokuReq.Beneficiary.BankAccountNumber = disbursement.BankAccount.AccountNumber
+	dokuReq.Beneficiary.BankAccountName = disbursement.BankAccount.AccountName
+
+	dokuResp, dokuErr := c.dokuClient.SendPayoutSubAccount(disbursement.PayoutRequestID, dokuReq)
+	if dokuErr != nil {
+		return nil, c.recordPayoutFailure(ctx, disbursement, dokuErr)
+	}
+
+	c.logger.InfoContext(ctx, "DOKU disbursement response received",
+		"disbursement_id", disbursement.UUID,
+		"doku_status", dokuResp.Payout.Status,
+		"doku_invoice", dokuResp.Payout.InvoiceNumber,
+	)
 
 	dokuStatus := dokuResp.Payout.Status
 	switch dokuStatus {
@@ -567,7 +622,7 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		_ = disbursement.MarkCompleted(dokuResp.Payout.InvoiceNumber)
 	case "FAILED", "REJECTED":
 		c.logger.WarnContext(ctx, "DOKU payout returned failed status",
-			"disbursement_id", disbursementID,
+			"disbursement_id", disbursement.UUID,
 			"doku_status", dokuStatus,
 			"doku_invoice", dokuResp.Payout.InvoiceNumber,
 		)
@@ -580,10 +635,10 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	disbursementJournal := domain.NewJournal(
 		domain.EventTypeDisbursement,
 		domain.SourceTypeDisbursement,
-		disbursementID,
+		disbursement.UUID,
 		map[string]any{
-			"amount":       req.Amount,
-			"bank_code":    req.BankCode,
+			"amount":       disbursement.Amount,
+			"bank_code":    disbursement.BankAccount.BankCode,
 			"doku_status":  dokuStatus,
 			"doku_invoice": dokuResp.Payout.InvoiceNumber,
 		},
@@ -592,11 +647,11 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	// Debit entry: -amount AVAILABLE (only when money is in flight or completed)
 	var debitEntry *domain.LedgerEntry
 	if !disbursement.IsFailed() {
-		debitEntry = domain.NewDisbursementEntry(disbursementJournal.UUID, disbursementID, account.UUID, req.Amount)
+		debitEntry = domain.NewDisbursementEntry(disbursementJournal.UUID, disbursement.UUID, account.UUID, disbursement.Amount)
 	}
 
 	// Persist disbursement record + journal + ledger entry atomically
-	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+	err := c.txProvider.Transact(ctx, func(tx repo.Tx) error {
 		// Save journal first
 		if err := tx.Journal().Save(ctx, disbursementJournal); err != nil {
 			return err
@@ -614,10 +669,10 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 
 		// If disbursement is COMPLETED, increment total_withdrawal_amount
 		if disbursement.IsCompleted() {
-			if err := tx.Account().IncrementWithdrawal(ctx, account.UUID, req.Amount); err != nil {
+			if err := tx.Account().IncrementWithdrawal(ctx, account.UUID, disbursement.Amount); err != nil {
 				c.logger.WarnContext(ctx, "Failed to increment withdrawal amount",
 					"account_id", account.UUID,
-					"amount", req.Amount,
+					"amount", disbursement.Amount,
 					"error", err,
 				)
 				return err
@@ -627,11 +682,14 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		return nil
 	})
 	if err != nil {
-		c.logger.ErrorContext(ctx, "CRITICAL: DOKU succeeded but DB save failed — requires manual reconciliation",
-			"disbursement_id", disbursementID,
+		// Recoverable now, unlike before: the row and its Request-Id were written ahead of
+		// the call, so RetryDisbursement can replay and book the same answer.
+		c.logger.ErrorContext(ctx, "CRITICAL: DOKU succeeded but DB save failed — retry with the stored request id",
+			"disbursement_id", disbursement.UUID,
+			"payout_request_id", disbursement.PayoutRequestID,
 			"doku_status", dokuStatus,
 			"doku_invoice", dokuResp.Payout.InvoiceNumber,
-			"amount", req.Amount,
+			"amount", disbursement.Amount,
 			"account_id", account.UUID,
 			"error", err,
 		)
@@ -641,16 +699,62 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 	c.logger.InfoContext(ctx, "Withdrawal completed",
 		"disbursement_id", disbursement.UUID,
 		"status", disbursement.Status,
-		"amount", req.Amount,
+		"amount", disbursement.Amount,
 	)
 
 	return &WithdrawResponse{
 		DisbursementID: disbursement.UUID,
 		Status:         string(disbursement.Status),
-		Amount:         req.Amount,
-		Currency:       string(currency),
+		Amount:         disbursement.Amount,
+		Currency:       string(disbursement.Currency),
 		Message:        fmt.Sprintf("Withdrawal %s", dokuStatus),
 	}, nil
+}
+
+// recordPayoutFailure decides what a DOKU error means for the row, and it turns on one
+// question: do we know the payout did not happen?
+//
+// A 4xx is DOKU refusing — invalid bank account, insufficient balance on their side. Nothing
+// left, so the disbursement becomes FAILED, which is terminal here.
+//
+// A timeout (status 0) or a 5xx says nothing about the money. The payout may be on its way.
+// Marking that FAILED would be a claim we cannot support, and worse, it would lock the row
+// out of any replay, because FAILED cannot transition to COMPLETED. Those stay PENDING with
+// their Request-Id intact, which is exactly the state RetryDisbursement is built for.
+func (c *LedgerClient) recordPayoutFailure(ctx context.Context, disbursement *domain.Disbursement, dokuErr *dokumodels.ErrorLog) error {
+	outcomeKnown := dokuErr.StatusCode >= 400 && dokuErr.StatusCode < 500
+
+	c.logger.ErrorContext(ctx, "DOKU SendPayoutSubAccount failed",
+		"disbursement_id", disbursement.UUID,
+		"payout_request_id", disbursement.PayoutRequestID,
+		"error", dokuErr.Err,
+		"message", dokuErr.Message,
+		"status_code", dokuErr.StatusCode,
+		"outcome_known", outcomeKnown,
+	)
+
+	if !outcomeKnown {
+		// Left in flight on purpose. Do not touch the row: PENDING plus a stored
+		// Request-Id is the only state from which the truth can still be recovered.
+		c.logger.WarnContext(ctx, "Payout outcome unknown — disbursement left in flight for replay",
+			"disbursement_id", disbursement.UUID,
+			"payout_request_id", disbursement.PayoutRequestID,
+		)
+		return ledgererr.NewError(ledgererr.CodeDokuAPIError,
+			"DOKU disbursement outcome unknown; it will be resolved by retrying with the stored request id",
+			fmt.Errorf("status code: %d, error: %v", dokuErr.StatusCode, dokuErr.Message))
+	}
+
+	if err := disbursement.MarkFailed(fmt.Sprintf("DOKU rejected the payout: %v", dokuErr.Message)); err == nil {
+		if saveErr := c.repoProvider.Disbursement().Save(ctx, disbursement); saveErr != nil {
+			c.logger.ErrorContext(ctx, "Failed to mark disbursement as failed after DOKU rejection",
+				"disbursement_id", disbursement.UUID,
+				"error", saveErr,
+			)
+		}
+	}
+
+	return ledgererr.NewError(ledgererr.CodeDokuAPIError, "DOKU disbursement failed", fmt.Errorf("%v", dokuErr.Message))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1296,7 +1400,7 @@ func (c *LedgerClient) ProcessReconciliation(ctx context.Context, req *Reconcili
 		transferReq.Transfer.Origin = sellerAccount.DokuSubAccountID
 		transferReq.Transfer.Destination = platformAccount.DokuSubAccountID
 		transferReq.Transfer.Amount = int(pft.amount)
-		transferReq.Transfer.InvoiceNumber = pft.invoiceNumber
+		transferReq.Transfer.InvoiceNumber = platformFeeInvoiceNumber(pft.invoiceNumber)
 
 		_, dokuErr := c.dokuClient.TransferSubAccount(requestID, transferReq)
 		if dokuErr != nil {
@@ -1852,7 +1956,7 @@ func (c *LedgerClient) ProcessPlatformFeeTransfer(ctx context.Context, batchSize
 		transferReq.Transfer.Origin = sellerAccount.DokuSubAccountID
 		transferReq.Transfer.Destination = platformAccount.DokuSubAccountID
 		transferReq.Transfer.Amount = int(tx.Fee.PlatformFee)
-		transferReq.Transfer.InvoiceNumber = tx.InvoiceNumber
+		transferReq.Transfer.InvoiceNumber = platformFeeInvoiceNumber(tx.InvoiceNumber)
 
 		_, dokuErr := c.dokuClient.TransferSubAccount(requestID, transferReq)
 		if dokuErr != nil {
