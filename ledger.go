@@ -454,22 +454,24 @@ type WithdrawResponse struct {
 // Withdraw initiates a withdrawal from an account to an external bank account.
 // Flow:
 //  1. Look up Account by sellerID (owner_id)
-//  2. Derive available balance from ledger_entries — must cover the requested amount
-//  3. Write the Disbursement as PENDING, carrying the DOKU Request-Id, BEFORE calling out
-//  4. Call DOKU SendPayoutSubAccount under that Request-Id
-//  5. Book the answer: LedgerEntry(-amount AVAILABLE) + journal in ONE transaction
+//  2. Reserve: under a row lock, check the available balance and — in the same
+//     transaction — write the journal, the PENDING Disbursement carrying the DOKU
+//     Request-Id, and the debit that holds the money
+//  3. Call DOKU SendPayoutSubAccount under that Request-Id
+//  4. Book the answer: complete it, or release the reservation if the payout is known
+//     not to have happened
 //
-// Step 3 used to come last, after DOKU had already been called. That ordering left a
-// window with no record at all: payout succeeds, process dies before the commit, and the
-// money is gone with nothing in our database naming it — while the balance still shows it
-// as available, so the next attempt pays it out again. Writing the row first turns that
-// into a recoverable state, because the Request-Id survives and RetryDisbursement can ask
-// DOKU what became of it.
+// Two things used to go wrong here, and they are different problems with different fixes.
 //
-// Still not solved here, and worth naming: the balance is checked but not reserved. Two
-// *different* withdrawal requests racing each other both pass the check and both pay out.
-// Idempotency answers "the same payout twice"; it does not answer "two payouts at once".
-// That needs a reservation entry at request time and is a separate change.
+// The DOKU call came first, before any DB write. Payout succeeds, process dies before the
+// commit, and the money is gone with only a log line naming it — and no stored Request-Id,
+// so it could never be asked about again, only judged by hand. Writing the row and its id
+// first makes that recoverable: see RetryDisbursement.
+//
+// And the balance was checked but never reserved, so two *different* withdrawals racing
+// each other both passed the check and both paid out. Idempotency does not help there —
+// each is a distinct payout with its own Request-Id. Only holding the money at request
+// time does, which is what step 2 is.
 func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *WithdrawRequest) (*WithdrawResponse, error) {
 	if req.AccountID == "" {
 		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "account_id is required", nil)
@@ -485,24 +487,6 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 			return nil, ledgererr.ErrLedgerNotFound.WithError(err)
 		}
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account", err)
-	}
-
-	// Derive available balance
-	_, available, err := c.repoProvider.LedgerEntry().GetAllBalances(ctx, account.UUID)
-	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to derive available balance", err)
-	}
-
-	if req.Amount > available {
-		c.logger.WarnContext(ctx, "Insufficient available balance for withdrawal",
-			"seller_id", sellerID,
-			"account_id", account.UUID,
-			"requested_amount", req.Amount,
-			"available_balance", available,
-		)
-		return nil, ledgererr.ErrInsufficientBalance.WithError(
-			fmt.Errorf("requested: %d, available: %d", req.Amount, available),
-		)
 	}
 
 	// Generate disbursement ID upfront (used as DOKU invoice number)
@@ -524,16 +508,83 @@ func (c *LedgerClient) Withdraw(ctx context.Context, sellerID string, req *Withd
 		return nil, err
 	}
 
-	// Record the intent — and the Request-Id it will travel under — BEFORE any money
-	// moves. This is the whole point: if the payout succeeds and we then lose the
-	// process, the row and its id survive, and RetryDisbursement can ask DOKU what
-	// actually happened instead of paying a second time.
+	// The Request-Id this payout will travel under, stored with the row so a retry can
+	// present the same one and get DOKU's original answer instead of a second payout.
 	disbursement.PayoutRequestID = uuid.NewString()
-	if err := c.repoProvider.Disbursement().Save(ctx, disbursement); err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to record disbursement before payout", err)
+
+	if err := c.reserveBalance(ctx, account, disbursement); err != nil {
+		return nil, err
 	}
 
 	return c.executePayout(ctx, account, disbursement)
+}
+
+// reserveBalance takes the money out of the available balance and records the intent,
+// atomically, before anything is sent to DOKU.
+//
+// The lock is the part that matters. Balances are derived by summing ledger_entries, so
+// without it two concurrent withdrawals both read the balance before either has written
+// its debit, both find it sufficient, and both pay out. Locking the account row first
+// makes the second one wait until the first's entries are committed, so it reads a
+// balance that already accounts for them.
+//
+// The balance check therefore lives inside this transaction. Checking outside and writing
+// inside would be the same race with extra steps.
+func (c *LedgerClient) reserveBalance(ctx context.Context, account *domain.Account, disbursement *domain.Disbursement) error {
+	err := c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		if _, err := tx.Account().GetByIDForUpdate(ctx, account.UUID); err != nil {
+			return ledgererr.NewError(ledgererr.CodeInternal, "failed to lock account for withdrawal", err)
+		}
+
+		_, available, err := tx.LedgerEntry().GetAllBalances(ctx, account.UUID)
+		if err != nil {
+			return ledgererr.NewError(ledgererr.CodeInternal, "failed to derive available balance", err)
+		}
+
+		if disbursement.Amount > available {
+			c.logger.WarnContext(ctx, "Insufficient available balance for withdrawal",
+				"account_id", account.UUID,
+				"requested_amount", disbursement.Amount,
+				"available_balance", available,
+			)
+			return ledgererr.ErrInsufficientBalance.WithError(
+				fmt.Errorf("requested: %d, available: %d", disbursement.Amount, available),
+			)
+		}
+
+		return c.writeReservation(ctx, tx, account, disbursement)
+	})
+	if err != nil {
+		// Insufficient balance is the caller's answer, not a database fault — pass it
+		// through as-is so the API keeps returning a 4xx for it.
+		if ledgererr.IsAppError(err, ledgererr.ErrInsufficientBalance) {
+			return err
+		}
+		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to reserve balance for withdrawal", err)
+	}
+	return nil
+}
+
+// writeReservation persists the journal, the PENDING disbursement and the debit that holds
+// the money. Caller owns the transaction and any locking.
+func (c *LedgerClient) writeReservation(ctx context.Context, tx repo.Tx, account *domain.Account, disbursement *domain.Disbursement) error {
+	journal := domain.NewJournal(
+		domain.EventTypeDisbursement,
+		domain.SourceTypeDisbursement,
+		disbursement.UUID,
+		map[string]any{
+			"amount":    disbursement.Amount,
+			"bank_code": disbursement.BankAccount.BankCode,
+			"stage":     "RESERVED",
+		},
+	)
+	if err := tx.Journal().Save(ctx, journal); err != nil {
+		return err
+	}
+	if err := tx.Disbursement().Save(ctx, disbursement); err != nil {
+		return err
+	}
+	return tx.LedgerEntry().Save(ctx, domain.NewDisbursementEntry(journal.UUID, disbursement.UUID, account.UUID, disbursement.Amount))
 }
 
 // RetryDisbursement re-sends a payout that never reached a settled outcome, reusing the
@@ -574,6 +625,14 @@ func (c *LedgerClient) RetryDisbursement(ctx context.Context, disbursementID str
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to get account for disbursement retry", err)
 	}
 
+	// A row created before balance reservation existed carries no debit. executePayout
+	// assumes one is already there and only ever writes reversals, so without this the
+	// disbursement would settle as COMPLETED having never been deducted — money that left
+	// the bank but never left the books.
+	if err := c.ensureReserved(ctx, account, disbursement); err != nil {
+		return nil, err
+	}
+
 	c.logger.InfoContext(ctx, "Retrying disbursement with stored request id",
 		"disbursement_id", disbursement.UUID,
 		"status", disbursement.Status,
@@ -581,6 +640,39 @@ func (c *LedgerClient) RetryDisbursement(ctx context.Context, disbursementID str
 	)
 
 	return c.executePayout(ctx, account, disbursement)
+}
+
+// ensureReserved backfills the reservation for a disbursement that predates it.
+//
+// Deliberately no balance check. The money was committed to this payout when it was
+// requested and may already be gone; refusing to record that would not bring it back, it
+// would only leave the books claiming a balance the seller does not have. If the entry
+// drives the available balance negative, that is the truth being stated, and it is logged
+// so someone looks.
+func (c *LedgerClient) ensureReserved(ctx context.Context, account *domain.Account, disbursement *domain.Disbursement) error {
+	entries, err := c.repoProvider.LedgerEntry().GetBySourceID(ctx, disbursement.UUID)
+	if err != nil {
+		return ledgererr.NewError(ledgererr.CodeInternal, "failed to check disbursement ledger entries", err)
+	}
+	for _, e := range entries {
+		if e.EntryType == domain.EntryTypeDisbursement {
+			return nil
+		}
+	}
+
+	c.logger.WarnContext(ctx, "Disbursement has no reservation entry — backfilling before retry",
+		"disbursement_id", disbursement.UUID,
+		"account_id", account.UUID,
+		"amount", disbursement.Amount,
+	)
+
+	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+		return c.writeReservation(ctx, tx, account, disbursement)
+	})
+	if err != nil {
+		return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to backfill disbursement reservation", err)
+	}
+	return nil
 }
 
 // executePayout sends the payout to DOKU and books whatever comes back. It is shared by the
@@ -616,7 +708,10 @@ func (c *LedgerClient) executePayout(ctx context.Context, account *domain.Accoun
 		"doku_invoice", dokuResp.Payout.InvoiceNumber,
 	)
 
+	// The debit is already in the ledger — it was written when the balance was reserved,
+	// before this call went out. So the only question left is whether to give it back.
 	dokuStatus := dokuResp.Payout.Status
+	reverse := false
 	switch dokuStatus {
 	case "SUCCESS":
 		_ = disbursement.MarkCompleted(dokuResp.Payout.InvoiceNumber)
@@ -627,12 +722,14 @@ func (c *LedgerClient) executePayout(ctx context.Context, account *domain.Accoun
 			"doku_invoice", dokuResp.Payout.InvoiceNumber,
 		)
 		_ = disbursement.MarkFailed(fmt.Sprintf("DOKU payout status: %s", dokuStatus))
+		// A status DOKU states outright is a known outcome: no money left, so the
+		// reservation is released.
+		reverse = true
 	default:
 		_ = disbursement.MarkProcessing(dokuResp.Payout.InvoiceNumber)
 	}
 
-	// Create journal for DISBURSEMENT event
-	disbursementJournal := domain.NewJournal(
+	settlementJournal := domain.NewJournal(
 		domain.EventTypeDisbursement,
 		domain.SourceTypeDisbursement,
 		disbursement.UUID,
@@ -641,28 +738,20 @@ func (c *LedgerClient) executePayout(ctx context.Context, account *domain.Accoun
 			"bank_code":    disbursement.BankAccount.BankCode,
 			"doku_status":  dokuStatus,
 			"doku_invoice": dokuResp.Payout.InvoiceNumber,
+			"stage":        "SETTLED",
 		},
 	)
 
-	// Debit entry: -amount AVAILABLE (only when money is in flight or completed)
-	var debitEntry *domain.LedgerEntry
-	if !disbursement.IsFailed() {
-		debitEntry = domain.NewDisbursementEntry(disbursementJournal.UUID, disbursement.UUID, account.UUID, disbursement.Amount)
-	}
-
-	// Persist disbursement record + journal + ledger entry atomically
 	err := c.txProvider.Transact(ctx, func(tx repo.Tx) error {
-		// Save journal first
-		if err := tx.Journal().Save(ctx, disbursementJournal); err != nil {
+		if err := tx.Journal().Save(ctx, settlementJournal); err != nil {
 			return err
 		}
 		if err := tx.Disbursement().Save(ctx, disbursement); err != nil {
 			return err
 		}
 
-		// Write debit entry only if disbursement is not failed (money in flight or completed)
-		if debitEntry != nil {
-			if err := tx.LedgerEntry().Save(ctx, debitEntry); err != nil {
+		if reverse {
+			if err := tx.LedgerEntry().Save(ctx, domain.NewDisbursementReversalEntry(settlementJournal.UUID, disbursement.UUID, account.UUID, disbursement.Amount)); err != nil {
 				return err
 			}
 		}
@@ -734,21 +823,51 @@ func (c *LedgerClient) recordPayoutFailure(ctx context.Context, disbursement *do
 	)
 
 	if !outcomeKnown {
-		// Left in flight on purpose. Do not touch the row: PENDING plus a stored
-		// Request-Id is the only state from which the truth can still be recovered.
-		c.logger.WarnContext(ctx, "Payout outcome unknown — disbursement left in flight for replay",
+		// Left in flight on purpose, and the reservation stays with it. The money may be
+		// on its way; handing it back to the available balance is precisely how it would
+		// be withdrawn a second time. PENDING plus a stored Request-Id is the only state
+		// from which the truth can still be recovered.
+		c.logger.WarnContext(ctx, "Payout outcome unknown — disbursement left in flight, balance stays reserved",
 			"disbursement_id", disbursement.UUID,
 			"payout_request_id", disbursement.PayoutRequestID,
+			"amount", disbursement.Amount,
 		)
 		return ledgererr.NewError(ledgererr.CodeDokuAPIError,
 			"DOKU disbursement outcome unknown; it will be resolved by retrying with the stored request id",
 			fmt.Errorf("status code: %d, error: %v", dokuErr.StatusCode, dokuErr.Message))
 	}
 
+	// Known refusal: no money left, so the reservation goes back to the available balance
+	// and the row reaches its terminal state.
 	if err := disbursement.MarkFailed(fmt.Sprintf("DOKU rejected the payout: %v", dokuErr.Message)); err == nil {
-		if saveErr := c.repoProvider.Disbursement().Save(ctx, disbursement); saveErr != nil {
-			c.logger.ErrorContext(ctx, "Failed to mark disbursement as failed after DOKU rejection",
+		reversalJournal := domain.NewJournal(
+			domain.EventTypeDisbursement,
+			domain.SourceTypeDisbursement,
+			disbursement.UUID,
+			map[string]any{
+				"amount":      disbursement.Amount,
+				"bank_code":   disbursement.BankAccount.BankCode,
+				"status_code": dokuErr.StatusCode,
+				"stage":       "REVERSED",
+			},
+		)
+
+		saveErr := c.txProvider.Transact(ctx, func(tx repo.Tx) error {
+			if err := tx.Journal().Save(ctx, reversalJournal); err != nil {
+				return err
+			}
+			if err := tx.Disbursement().Save(ctx, disbursement); err != nil {
+				return err
+			}
+			return tx.LedgerEntry().Save(ctx, domain.NewDisbursementReversalEntry(reversalJournal.UUID, disbursement.UUID, disbursement.LedgerUUID, disbursement.Amount))
+		})
+		if saveErr != nil {
+			// The seller's money is held by a reservation that no longer corresponds to
+			// anything. Loud, because only a human can put this right.
+			c.logger.ErrorContext(ctx, "CRITICAL: payout rejected but the reservation could not be released — balance is understated",
 				"disbursement_id", disbursement.UUID,
+				"account_id", disbursement.LedgerUUID,
+				"amount", disbursement.Amount,
 				"error", saveErr,
 			)
 		}

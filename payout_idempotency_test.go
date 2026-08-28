@@ -223,9 +223,11 @@ func TestWithdraw_UnknownOutcomeStaysInFlight(t *testing.T) {
 				assert.NotEmpty(t, d.PayoutRequestID)
 			}
 
-			// No money was booked out of the balance on an outcome we do not know.
-			assert.Zero(t, countDisbursementEntries(fakes),
-				"no debit may be booked for an outcome we do not know")
+			// The reservation stays put. The payout may be on its way, and returning
+			// the money to the available balance is how it would go out twice.
+			assert.Equal(t, 1, countDebits(fakes), "the reservation must be held, not released")
+			assert.Zero(t, countReversals(fakes),
+				"an unknown outcome must never release the reservation")
 		})
 	}
 }
@@ -233,7 +235,7 @@ func TestWithdraw_UnknownOutcomeStaysInFlight(t *testing.T) {
 // A 4xx is DOKU refusing outright. That one we do know, so it is terminal.
 func TestWithdraw_DefiniteRejectionIsTerminal(t *testing.T) {
 	doku := &fakePayoutClient{errorLog: &dokumodels.ErrorLog{StatusCode: http.StatusBadRequest, Message: "invalid bank account"}}
-	client, fakes, _ := newPayoutTestClient(t, doku, 100000)
+	client, fakes, account := newPayoutTestClient(t, doku, 100000)
 
 	_, err := client.Withdraw(context.Background(), "seller-1", withdrawRequest())
 	require.Error(t, err)
@@ -243,6 +245,11 @@ func TestWithdraw_DefiniteRejectionIsTerminal(t *testing.T) {
 		assert.Equal(t, domain.DisbursementStatusFailed, d.Status)
 		assert.Contains(t, d.FailureReason, "invalid bank account")
 	}
+
+	// Known refusal: the money never left, so the reservation is released and the seller
+	// can spend it again.
+	assert.Equal(t, 1, countReversals(fakes))
+	assert.Equal(t, int64(100000), availableBalance(fakes, account.UUID))
 }
 
 // The payoff: a replay presents the SAME Request-Id, which is what makes DOKU answer with
@@ -275,8 +282,9 @@ func TestRetryDisbursement_ReusesTheStoredRequestID(t *testing.T) {
 	assert.Equal(t, firstRequestID, doku.requestIDs[0])
 
 	assert.Equal(t, string(domain.DisbursementStatusCompleted), resp.Status)
-	assert.Equal(t, 1, countDisbursementEntries(fakes),
-		"the debit belongs in the ledger exactly once, written when the outcome became known")
+	assert.Equal(t, 1, countDebits(fakes),
+		"the debit belongs in the ledger exactly once — written at reservation, not again on retry")
+	assert.Zero(t, countReversals(fakes), "a payout that succeeded must not be given back")
 }
 
 func TestRetryDisbursement_RefusesTerminalAndUnprotectedRows(t *testing.T) {
@@ -314,14 +322,28 @@ func TestRetryDisbursement_RefusesTerminalAndUnprotectedRows(t *testing.T) {
 	}
 }
 
-// countDisbursementEntries counts the debit entries booked against disbursements, ignoring
-// the AVAILABLE balance seeded by the fixture.
-func countDisbursementEntries(fakes *FakeRepositoryProvider) int {
+// countDebits counts reservations (-amount), ignoring the AVAILABLE balance seeded by the
+// fixture. countReversals counts releases (+amount).
+func countDebits(fakes *FakeRepositoryProvider) int {
+	return countEntriesOfType(fakes, domain.EntryTypeDisbursement)
+}
+
+func countReversals(fakes *FakeRepositoryProvider) int {
+	return countEntriesOfType(fakes, domain.EntryTypeDisbursementReversal)
+}
+
+func countEntriesOfType(fakes *FakeRepositoryProvider, entryType domain.EntryType) int {
 	n := 0
 	for _, e := range fakes.ledgerEntryRepo.entries {
-		if e.SourceType == domain.SourceTypeDisbursement && e.EntryType == domain.EntryTypeDisbursement {
+		if e.SourceType == domain.SourceTypeDisbursement && e.EntryType == entryType {
 			n++
 		}
 	}
 	return n
+}
+
+// availableBalance derives what the seller can actually withdraw right now.
+func availableBalance(fakes *FakeRepositoryProvider, accountID string) int64 {
+	_, available, _ := fakes.LedgerEntry().GetAllBalances(context.Background(), accountID)
+	return available
 }

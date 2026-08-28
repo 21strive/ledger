@@ -26,6 +26,10 @@ type FakeAccountRepository struct {
 	byOwner  map[string]*domain.Account // key: "ownerType:ownerID"
 	byDoku   map[string]*domain.Account // key: dokuSubAccountID
 	bySeller map[string]*domain.Account // key: sellerID
+
+	// lockedForUpdate records every account the code took a row lock on, so a test can
+	// prove the withdrawal path locks before it reads the balance.
+	lockedForUpdate []string
 }
 
 func NewFakeAccountRepository() *FakeAccountRepository {
@@ -42,6 +46,14 @@ func (f *FakeAccountRepository) GetByID(ctx context.Context, id string) (*domain
 		return acc, nil
 	}
 	return nil, repo.ErrNotFound
+}
+
+// GetByIDForUpdate has no locking to do in memory; the fakes run one goroutine at a time.
+// It exists so the fake still satisfies the interface, and so tests can assert the
+// withdrawal path takes the lock at all.
+func (f *FakeAccountRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Account, error) {
+	f.lockedForUpdate = append(f.lockedForUpdate, id)
+	return f.GetByID(ctx, id)
 }
 
 func (f *FakeAccountRepository) GetByOwner(ctx context.Context, ownerType domain.OwnerType, ownerID string) (*domain.Account, error) {
@@ -182,7 +194,13 @@ func (f *FakeLedgerEntryRepository) GetByJournalID(ctx context.Context, journalI
 }
 
 func (f *FakeLedgerEntryRepository) GetBySourceID(ctx context.Context, sourceID string) ([]*domain.LedgerEntry, error) {
-	return nil, nil
+	var out []*domain.LedgerEntry
+	for _, e := range f.entries {
+		if e.SourceID == sourceID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 func (f *FakeLedgerEntryRepository) GetByAccountID(ctx context.Context, accountID string, limit, offset int) ([]*domain.LedgerEntry, error) {
