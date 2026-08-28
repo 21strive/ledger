@@ -184,6 +184,10 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     -- Whether platform fee has been transferred to platform sub-account
     platform_fee_transferred_at TIMESTAMP,
     -- When platform fee was successfully transferred via DOKU API
+    -- DOKU Request-Id for the platform fee transfer, reused on every retry so DOKU
+    -- replays its original answer instead of transferring twice. Added by migration 011;
+    -- it was missing here, which would have made the next Atlas diff drop it.
+    transfer_request_id TEXT,
     -- Product details (what was purchased)
     metadata JSONB -- Buyer name, product title, resolution, license type, etc.
 );
@@ -280,6 +284,9 @@ CREATE TABLE IF NOT EXISTS disbursements (
     description TEXT,
     external_transaction_id VARCHAR(100),
     failure_reason TEXT,
+    -- DOKU Request-Id for this payout, written before the call so a retry can replay it
+    -- rather than issue a second payout. Write-once (migration 014).
+    payout_request_id TEXT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     processed_at TIMESTAMP,

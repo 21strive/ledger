@@ -502,6 +502,7 @@ type FakeRepositoryProvider struct {
 	settlementItemRepo            *FakeSettlementItemRepository
 	journalRepo                   *FakeJournalRepository
 	reconciliationDiscrepancyRepo *FakeReconciliationDiscrepancyRepository
+	disbursementRepo              *FakeDisbursementRepository
 }
 
 // Ensure FakeRepositoryProvider implements repo.RepositoryProvider at compile time
@@ -519,6 +520,7 @@ func NewFakeRepositoryProvider() *FakeRepositoryProvider {
 		settlementItemRepo:            NewFakeSettlementItemRepository(),
 		journalRepo:                   NewFakeJournalRepository(),
 		reconciliationDiscrepancyRepo: NewFakeReconciliationDiscrepancyRepository(),
+		disbursementRepo:              NewFakeDisbursementRepository(),
 	}
 }
 
@@ -559,7 +561,7 @@ func (f *FakeRepositoryProvider) FeeConfig() domain.FeeConfigRepository {
 }
 
 func (f *FakeRepositoryProvider) Disbursement() domain.DisbursementRepository {
-	return nil // Not needed for reconciliation tests
+	return f.disbursementRepo
 }
 
 func (f *FakeRepositoryProvider) Verification() domain.VerificationRepository {

@@ -54,6 +54,11 @@ type Disbursement struct {
 	ExternalTransactionID string // DOKU transaction ID
 	FailureReason         string
 	ProcessedAt           *time.Time
+
+	// PayoutRequestID is the DOKU Request-Id this payout was, or will be, sent under.
+	// It is written with the row before DOKU is called and never changes afterwards:
+	// replaying the same id is what stops a retry from paying out a second time.
+	PayoutRequestID string
 }
 
 // DisbursementRepository defines data access for disbursements

@@ -22,7 +22,7 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 		SELECT uuid, randid, account_uuid, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
-		       created_at, updated_at, processed_at
+		       payout_request_id, created_at, updated_at, processed_at
 		FROM disbursements
 		WHERE uuid = $1
 	`
@@ -33,6 +33,7 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 	redifu.InitRecord(&d)
 	var externalTxID sql.NullString
 	var failureReason sql.NullString
+	var payoutRequestID sql.NullString
 	var description sql.NullString
 	var processedAt sql.NullTime
 
@@ -49,6 +50,7 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 		&description,
 		&externalTxID,
 		&failureReason,
+		&payoutRequestID,
 		&d.CreatedAt,
 		&d.UpdatedAt,
 		&processedAt,
@@ -68,6 +70,7 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 	}
 	if failureReason.Valid {
 		d.FailureReason = failureReason.String
+		d.PayoutRequestID = payoutRequestID.String
 	}
 	if processedAt.Valid {
 		d.ProcessedAt = &processedAt.Time
@@ -96,7 +99,7 @@ func (r *PostgresDisbursementRepository) GetByAccountIDWithCursor(ctx context.Co
 			SELECT uuid, randid, account_uuid, amount, currency, status,
 			       bank_code, account_number, account_name,
 			       description, external_transaction_id, failure_reason,
-			       created_at, updated_at, processed_at
+			       payout_request_id, created_at, updated_at, processed_at
 			FROM disbursements
 			WHERE account_uuid = $1
 			ORDER BY created_at ` + sortOrder + `
@@ -111,7 +114,7 @@ func (r *PostgresDisbursementRepository) GetByAccountIDWithCursor(ctx context.Co
 				SELECT uuid, randid, account_uuid, amount, currency, status,
 				       bank_code, account_number, account_name,
 				       description, external_transaction_id, failure_reason,
-				       created_at, updated_at, processed_at
+				       payout_request_id, created_at, updated_at, processed_at
 				FROM disbursements
 				WHERE account_uuid = $1 
 				  AND (created_at < (SELECT created_at FROM disbursements WHERE randid = $2)
@@ -124,7 +127,7 @@ func (r *PostgresDisbursementRepository) GetByAccountIDWithCursor(ctx context.Co
 				SELECT uuid, randid, account_uuid, amount, currency, status,
 				       bank_code, account_number, account_name,
 				       description, external_transaction_id, failure_reason,
-				       created_at, updated_at, processed_at
+				       payout_request_id, created_at, updated_at, processed_at
 				FROM disbursements
 				WHERE account_uuid = $1 
 				  AND (created_at > (SELECT created_at FROM disbursements WHERE randid = $2)
@@ -158,7 +161,7 @@ func (r *PostgresDisbursementRepository) GetByLedgerID(ctx context.Context, ledg
 		SELECT uuid, randid, account_uuid, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
-		       created_at, updated_at, processed_at
+		       payout_request_id, created_at, updated_at, processed_at
 		FROM disbursements
 		WHERE account_uuid = $1
 		ORDER BY created_at DESC
@@ -179,7 +182,7 @@ func (r *PostgresDisbursementRepository) GetPendingByLedgerID(ctx context.Contex
 		SELECT uuid, randid, account_uuid, amount, currency, status,
 		       bank_code, account_number, account_name,
 		       description, external_transaction_id, failure_reason,
-		       created_at, updated_at, processed_at
+		       payout_request_id, created_at, updated_at, processed_at
 		FROM disbursements
 		WHERE account_uuid = $1 AND status = $2
 		ORDER BY created_at ASC
@@ -194,14 +197,20 @@ func (r *PostgresDisbursementRepository) GetPendingByLedgerID(ctx context.Contex
 	return r.scanDisbursements(rows)
 }
 
+// Save inserts a disbursement, or updates the mutable parts of one that already exists.
+//
+// payout_request_id is deliberately absent from the DO UPDATE SET list: it is set once,
+// when the row is first written ahead of the DOKU call, and must survive every later save.
+// Overwriting it would hand a retry a fresh idempotency key, which is precisely the hole
+// this column was added to close.
 func (r *PostgresDisbursementRepository) Save(ctx context.Context, d *domain.Disbursement) error {
 	query := `
 		INSERT INTO disbursements (
 			uuid, randid, account_uuid, amount, currency, status,
 			bank_code, account_number, account_name,
 			description, external_transaction_id, failure_reason,
-			created_at, updated_at, processed_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			payout_request_id, created_at, updated_at, processed_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (uuid) DO UPDATE SET
 			status = EXCLUDED.status,
 			external_transaction_id = EXCLUDED.external_transaction_id,
@@ -225,6 +234,7 @@ func (r *PostgresDisbursementRepository) Save(ctx context.Context, d *domain.Dis
 		toNullString(d.Description),
 		toNullString(d.ExternalTransactionID),
 		toNullString(d.FailureReason),
+		toNullString(d.PayoutRequestID),
 		d.CreatedAt,
 		d.UpdatedAt,
 		toNullTime(d.ProcessedAt),
@@ -274,6 +284,7 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 		redifu.InitRecord(&d)
 		var externalTxID sql.NullString
 		var failureReason sql.NullString
+		var payoutRequestID sql.NullString
 		var description sql.NullString
 		var processedAt sql.NullTime
 
@@ -290,6 +301,7 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 			&description,
 			&externalTxID,
 			&failureReason,
+			&payoutRequestID,
 			&d.CreatedAt,
 			&d.UpdatedAt,
 			&processedAt,
@@ -306,6 +318,7 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 		}
 		if failureReason.Valid {
 			d.FailureReason = failureReason.String
+			d.PayoutRequestID = payoutRequestID.String
 		}
 		if processedAt.Valid {
 			d.ProcessedAt = &processedAt.Time
