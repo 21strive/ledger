@@ -269,12 +269,16 @@ Key tables: `accounts`, `product_transactions`, `ledger_entries`, `journals`, `s
 | Operation | DOKU API |
 |---|---|
 | `CreateAccount` | Create sub-account |
-| `CreatePlatformAccount` | Create sub-account |
 | `ValidateBankAccount` | Bank account inquiry + token |
 | `Withdraw` | Send payout to sub-account |
 | `ProcessPlatformFeeTransfer` | Transfer between sub-accounts |
 | `GetBalance` | Get sub-account balance |
 | `ProcessReconciliation` | Parses DOKU settlement CSV format |
+
+The **platform** account is not on that list, and that is deliberate. It is provisioned
+once per environment by hand — `scripts/doku-subaccount` in aturjadwal-monoservice, then an
+inserted `ledger_accounts` row — because a sub-account bound to the wrong email silently
+becomes the wrong place for every platform fee. This package only ever reads it.
 
 ---
 

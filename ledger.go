@@ -153,50 +153,21 @@ func (c *LedgerClient) CreateAccount(ctx context.Context, accountID string, emai
 	return &account, nil
 }
 
-// CreatePlatformAccount creates a PLATFORM-type account (no DOKU sub-account creation).
-func (c *LedgerClient) CreatePlatformAccount(ctx context.Context, email string, currency domain.Currency) (*domain.Account, error) {
-	ownerID := domain.OWNER_TYPE_PLATFORM
-	existing, err := c.repoProvider.Account().GetByOwner(ctx, domain.OwnerTypePlatform, ownerID)
-	if err == nil {
-		c.logger.InfoContext(ctx, "Platform account already exists, skipping creation", "owner_id", ownerID, "account_id", existing.UUID)
-		return existing, nil
-	}
-	if !ledgererr.IsAppError(err, repo.ErrNotFound) {
-		return nil, ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to check existing platform account", err)
-	}
-
-	// Provision DOKU sub-account
-	response, dokuErr := c.dokuClient.CreateAccount(&requests.DokuCreateSubAccountRequest{
-		Email: email,
-		Name:  ownerID,
-	})
-	c.logger.DebugContext(ctx, "DOKU CreateAccount response", "response", response, "error", dokuErr)
-
-	// Any DOKU failure ends this, 409 included. A 409 means the email already owns a
-	// sub-account, and the SAC ID in that message is deliberately not reused: it may
-	// belong to a different user, and a sub-account holds money. The raw DOKU message
-	// reaches the log, so an admin can bind the account by hand after checking who owns
-	// it. See T6b/T6c in docs/doku-sac-api-compliance.md (aturjadwal-monoservice).
-	if dokuErr != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeDokuAPIError,
-			"failed to create DOKU sub account",
-			fmt.Errorf("Status Code: %d, Error: %v: %v", dokuErr.StatusCode, dokuErr.Err, dokuErr.Message))
-	}
-	dokuSubAccountID := response.ID.String
-
-	account := domain.NewPlatformAccount(dokuSubAccountID, ownerID, currency)
-	err = c.txProvider.Transact(ctx, func(tx repo.Tx) error {
-		if err := tx.Account().Save(ctx, &account); err != nil {
-			return ledgererr.NewError(ledgererr.CodeDatabaseError, "failed to create platform account", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, ledgererr.NewError(ledgererr.CodeInternal, "transaction failed while creating platform account", err)
-	}
-
-	return &account, nil
-}
+// The platform account is deliberately not creatable from here. It used to be:
+// CreatePlatformAccount provisioned a DOKU sub-account under whatever email the caller
+// passed, and callers invoked it lazily from the booking path. That made the account that
+// collects every platform fee a side effect of somebody else's booking — and since DOKU
+// binds a sub-account to an email permanently, a caller with a stale constant would
+// quietly open a *second* sub-account and route the fees into one nobody watches, without
+// raising a single error.
+//
+// Provisioning is now a deliberate, once-per-environment act: run
+// scripts/doku-subaccount in aturjadwal-monoservice to create the sub-account at DOKU,
+// then insert the ledger_accounts row by hand (T6c runbook / T9 in
+// docs/doku-sac-api-compliance.md). Readers stay: GetPlatformAccount is what
+// ProcessPlatformFeeTransfer and the reconciliation path use, and both already refuse to
+// run when the account is missing or has no sub-account id — which is now a real safety
+// net rather than a formality.
 
 // CreatePaymentGatewayAccount creates a PAYMENT_GATEWAY-type account (singleton, no DOKU sub-account).
 func (c *LedgerClient) CreatePaymentGatewayAccount(ctx context.Context, currency domain.Currency) (*domain.Account, error) {
