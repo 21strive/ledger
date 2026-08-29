@@ -9,13 +9,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// SetupDummyData seeds a development database. platformEmail is no longer used: nothing
+// in this package provisions a DOKU sub-account for the platform any more (see the note
+// where CreatePlatformAccount used to live). The parameter is kept so existing callers
+// still compile.
 func (c *LedgerClient) SetupDummyData(platformEmail string, sellerEmail string) {
-	// Setup Platform Account
-	platformAccount, err := c.CreatePlatformAccount(context.Background(), platformEmail, domain.CurrencyIDR)
+	// Setup Platform Account.
+	//
+	// A real environment gets its platform account from scripts/doku-subaccount plus a
+	// hand-inserted row. Seeding cannot do that, so it settles for a local row with an
+	// empty sub-account id — enough for the dummy ledger entries below to balance, and
+	// unable to move money: ProcessPlatformFeeTransfer refuses outright on an empty
+	// DokuSubAccountID, so a seeded database announces itself instead of quietly
+	// transferring fees somewhere unintended.
+	platformAccount, err := c.repoProvider.Account().GetPlatformAccount(context.Background())
 	if err != nil {
-		c.logger.ErrorContext(context.Background(), "Failed to create platform account: skipping...", "error", err)
+		if !ledgererr.IsAppError(err, repo.ErrNotFound) {
+			c.logger.ErrorContext(context.Background(), "Failed to check platform account: aborting dummy setup", "error", err)
+			return
+		}
+		seeded := domain.NewPlatformAccount("", domain.OWNER_TYPE_PLATFORM, domain.CurrencyIDR)
+		if txErr := c.txProvider.Transact(context.Background(), func(tx repo.Tx) error {
+			return tx.Account().Save(context.Background(), &seeded)
+		}); txErr != nil {
+			c.logger.ErrorContext(context.Background(), "Failed to seed platform account: aborting dummy setup", "error", txErr)
+			return
+		}
+		platformAccount = &seeded
+		c.logger.InfoContext(context.Background(), "Seeded platform account without a DOKU sub-account", "account_id", platformAccount.Record.UUID)
 	} else {
-		c.logger.InfoContext(context.Background(), "Platform account created", "account_id", platformAccount.Record.UUID)
+		c.logger.InfoContext(context.Background(), "Platform account already exists", "account_id", platformAccount.Record.UUID)
 	}
 
 	// Setup DOKU Account
