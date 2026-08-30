@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	github.com/21strive/doku v0.0.0-20260828151241-ac76b11d9cd6
 	github.com/21strive/redifu v0.13.2
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
 	github.com/redis/go-redis/v9 v9.18.0

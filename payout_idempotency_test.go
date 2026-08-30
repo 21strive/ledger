@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"net/http"
+	"sort"
 	"testing"
 	"time"
 
@@ -64,6 +65,26 @@ func (f *FakeDisbursementRepository) GetByAccountIDWithCursor(ctx context.Contex
 
 func (f *FakeDisbursementRepository) GetPendingByLedgerID(ctx context.Context, ledgerID string) ([]*domain.Disbursement, error) {
 	return nil, nil
+}
+
+// GetPendingOlderThan mirrors the Postgres filter — PENDING, created before the cutoff,
+// oldest first — so a caller's sweep logic can be exercised without a database.
+func (f *FakeDisbursementRepository) GetPendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]*domain.Disbursement, error) {
+	var pending []*domain.Disbursement
+	for _, d := range f.disbursements {
+		if d.Status == domain.DisbursementStatusPending && d.CreatedAt.Before(cutoff) {
+			clone := *d
+			pending = append(pending, &clone)
+		}
+	}
+
+	sort.Slice(pending, func(i, j int) bool { return pending[i].CreatedAt.Before(pending[j].CreatedAt) })
+
+	if len(pending) > limit {
+		pending = pending[:limit]
+	}
+
+	return pending, nil
 }
 
 func (f *FakeDisbursementRepository) UpdateStatus(ctx context.Context, id string, status domain.DisbursementStatus, processedAt *time.Time, failureReason string) error {

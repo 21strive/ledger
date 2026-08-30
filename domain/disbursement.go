@@ -72,6 +72,12 @@ type DisbursementRepository interface {
 	GetByAccountIDWithCursor(ctx context.Context, accountID string, cursor string, pageSize int, sortOrder string) ([]*Disbursement, error)
 
 	GetPendingByLedgerID(ctx context.Context, ledgerID string) ([]*Disbursement, error)
+
+	// GetPendingOlderThan returns PENDING disbursements across every account, created
+	// before the cutoff, oldest first. It backs the operator sweep for payouts whose
+	// outcome was never learned.
+	GetPendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]*Disbursement, error)
+
 	Save(ctx context.Context, d *Disbursement) error
 	UpdateStatus(ctx context.Context, id string, status DisbursementStatus, processedAt *time.Time, failureReason string) error
 }

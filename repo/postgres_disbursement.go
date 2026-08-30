@@ -70,6 +70,13 @@ func (r *PostgresDisbursementRepository) GetByID(ctx context.Context, id string)
 	}
 	if failureReason.Valid {
 		d.FailureReason = failureReason.String
+	}
+	// Read on its own, not nested under failure_reason. The two columns are unrelated,
+	// and the row that most needs its request id — PENDING after a timeout, which
+	// recordPayoutFailure deliberately leaves untouched — carries no failure reason at
+	// all. While these were nested, RetryDisbursement saw an empty id on exactly those
+	// rows and refused them as predating idempotent retries.
+	if payoutRequestID.Valid {
 		d.PayoutRequestID = payoutRequestID.String
 	}
 	if processedAt.Valid {
@@ -189,6 +196,34 @@ func (r *PostgresDisbursementRepository) GetPendingByLedgerID(ctx context.Contex
 	`
 
 	rows, err := r.db.QueryContext(ctx, query, ledgerID, domain.DisbursementStatusPending)
+	if err != nil {
+		return nil, ErrFailedQuerySQL.WithError(err)
+	}
+	defer rows.Close()
+
+	return r.scanDisbursements(rows)
+}
+
+// GetPendingOlderThan returns PENDING disbursements created before the cutoff, oldest
+// first. It spans every account, which is what separates it from GetPendingByLedgerID:
+// the caller is looking for payouts whose outcome was never learned, and those are not
+// concentrated in any one seller.
+//
+// The cutoff exists because a disbursement is written PENDING before DOKU is called, so
+// a row created moments ago is not stuck — its first attempt is simply still in flight.
+func (r *PostgresDisbursementRepository) GetPendingOlderThan(ctx context.Context, cutoff time.Time, limit int) ([]*domain.Disbursement, error) {
+	query := `
+		SELECT uuid, randid, account_uuid, amount, currency, status,
+		       bank_code, account_number, account_name,
+		       description, external_transaction_id, failure_reason,
+		       payout_request_id, created_at, updated_at, processed_at
+		FROM disbursements
+		WHERE status = $1 AND created_at < $2
+		ORDER BY created_at ASC
+		LIMIT $3
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, domain.DisbursementStatusPending, cutoff, limit)
 	if err != nil {
 		return nil, ErrFailedQuerySQL.WithError(err)
 	}
@@ -318,6 +353,9 @@ func (r *PostgresDisbursementRepository) scanDisbursements(rows *sql.Rows) ([]*d
 		}
 		if failureReason.Valid {
 			d.FailureReason = failureReason.String
+		}
+		// See GetByID: payout_request_id is independent of failure_reason.
+		if payoutRequestID.Valid {
 			d.PayoutRequestID = payoutRequestID.String
 		}
 		if processedAt.Valid {

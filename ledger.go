@@ -578,6 +578,51 @@ func (c *LedgerClient) RetryDisbursement(ctx context.Context, disbursementID str
 		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to load disbursement", err)
 	}
 
+	return c.replay(ctx, disbursement)
+}
+
+// GetPendingDisbursement returns one disbursement by id, whatever its status.
+//
+// It exists so a caller deciding what to replay can say why a row is not eligible —
+// "it is already COMPLETED" — instead of guessing, and so that deciding never requires
+// SQL against the disbursements table from outside this package.
+func (c *LedgerClient) GetPendingDisbursement(ctx context.Context, disbursementID string) (*domain.Disbursement, error) {
+	disbursement, err := c.repoProvider.Disbursement().GetByID(ctx, disbursementID)
+	if err != nil {
+		if ledgererr.IsAppError(err, repo.ErrNotFound) {
+			return nil, ledgererr.ErrDisbursementNotFound.WithError(err)
+		}
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to load disbursement", err)
+	}
+
+	return disbursement, nil
+}
+
+// GetPendingDisbursements lists PENDING disbursements across every account, created
+// before the cutoff, oldest first.
+//
+// This is the ledger's answer to "which payouts never reached an outcome?". The question
+// is about ledger state, so it is answered here rather than by a caller running its own
+// SQL against a table this package owns.
+//
+// The cutoff is the caller's judgement about how long an in-flight payout may reasonably
+// take: a row is written PENDING before DOKU is called, so a young one is not stuck.
+func (c *LedgerClient) GetPendingDisbursements(ctx context.Context, cutoff time.Time, limit int) ([]*domain.Disbursement, error) {
+	if limit <= 0 {
+		return nil, ledgererr.NewError(ledgererr.CodeInvalidRequest, "limit must be greater than zero", nil)
+	}
+
+	disbursements, err := c.repoProvider.Disbursement().GetPendingOlderThan(ctx, cutoff, limit)
+	if err != nil {
+		return nil, ledgererr.NewError(ledgererr.CodeInternal, "failed to list pending disbursements", err)
+	}
+
+	return disbursements, nil
+}
+
+// replay applies the eligibility rules to a disbursement already read from storage, then
+// re-sends it. Split out of RetryDisbursement only so the rules live in one place.
+func (c *LedgerClient) replay(ctx context.Context, disbursement *domain.Disbursement) (*WithdrawResponse, error) {
 	if !disbursement.IsPending() && !disbursement.IsProcessing() {
 		return nil, ledgererr.NewError(ledgererr.CodeInvalidDisbursementStatus,
 			fmt.Sprintf("disbursement is %s and cannot be retried", disbursement.Status), nil)
