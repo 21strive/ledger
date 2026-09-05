@@ -104,6 +104,9 @@ type fakePayoutClient struct {
 	requestIDs []string
 	invoices   []string
 	amounts    []int
+	// bodies keeps each request whole, so a test can compare what was logged against
+	// what was actually handed to the client.
+	bodies []dokurequests.DokuSendPayoutSubAccountRequest
 
 	// beforeCall runs at the moment DOKU would be hit, so a test can inspect what the
 	// database already knows at that instant.
@@ -122,6 +125,7 @@ func (f *fakePayoutClient) SendPayoutSubAccount(requestId string, request dokure
 	f.requestIDs = append(f.requestIDs, requestId)
 	f.invoices = append(f.invoices, request.Payout.InvoiceNumber)
 	f.amounts = append(f.amounts, request.Payout.Amount)
+	f.bodies = append(f.bodies, request)
 	return f.response, f.errorLog
 }
 

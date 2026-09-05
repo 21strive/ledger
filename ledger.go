@@ -3,9 +3,11 @@ package ledger
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	dokumodels "github.com/21strive/doku/app/models"
@@ -697,14 +699,6 @@ func (c *LedgerClient) ensureReserved(ctx context.Context, account *domain.Accou
 //
 // The disbursement row already exists when this runs.
 func (c *LedgerClient) executePayout(ctx context.Context, account *domain.Account, disbursement *domain.Disbursement) (*WithdrawResponse, error) {
-	c.logger.InfoContext(ctx, "Calling DOKU SendPayoutSubAccount",
-		"disbursement_id", disbursement.UUID,
-		"account_id", account.UUID,
-		"doku_sub_account_id", account.DokuSubAccountID,
-		"amount", disbursement.Amount,
-		"payout_request_id", disbursement.PayoutRequestID,
-	)
-
 	dokuReq := requests.DokuSendPayoutSubAccountRequest{}
 	dokuReq.Account.ID = account.DokuSubAccountID
 	dokuReq.Payout.Amount = int(disbursement.Amount)
@@ -712,6 +706,22 @@ func (c *LedgerClient) executePayout(ctx context.Context, account *domain.Accoun
 	dokuReq.Beneficiary.BankCode = disbursement.BankAccount.BankCode
 	dokuReq.Beneficiary.BankAccountNumber = disbursement.BankAccount.AccountNumber
 	dokuReq.Beneficiary.BankAccountName = disbursement.BankAccount.AccountName
+
+	// The body is built before the log line, not after, so the line can carry it. A payout
+	// DOKU refuses is argued over the body it received, and until now the log described the
+	// call in our own field names and left the beneficiary out entirely.
+	c.logger.InfoContext(ctx, "Calling DOKU SendPayoutSubAccount",
+		"disbursement_id", disbursement.UUID,
+		"account_id", account.UUID,
+		"doku_sub_account_id", account.DokuSubAccountID,
+		// Empty is the failure worth spotting at a glance: the body still goes out with a
+		// blank account.id, and DOKU answers "Request or data not found".
+		"doku_sub_account_id_empty", account.DokuSubAccountID == "",
+		"amount", disbursement.Amount,
+		"payout_request_id", disbursement.PayoutRequestID,
+		"request_target", "/sac-merchant/v1/payouts",
+		"request_body", payoutRequestLogBody(dokuReq),
+	)
 
 	dokuResp, dokuErr := c.dokuClient.SendPayoutSubAccount(disbursement.PayoutRequestID, dokuReq)
 	if dokuErr != nil {
@@ -814,6 +824,46 @@ func (c *LedgerClient) executePayout(ctx context.Context, account *domain.Accoun
 		Currency:       string(disbursement.Currency),
 		Message:        fmt.Sprintf("Withdrawal %s", dokuStatus),
 	}, nil
+}
+
+// payoutRequestLogBody renders the payout request as the JSON body DOKU will receive.
+//
+// The individual fields are logged beside it, but a payout DOKU rejects is disputed over
+// the body it was sent, not over our field names. This marshals the very struct the client
+// marshals, so the log holds what went on the wire — reproduced verbatim, empty account.id
+// included, which is the shape "Request or data not found" comes back to.
+//
+// The one departure is the beneficiary account number, masked to its last four digits.
+// These logs are shipped off-process; a full account number does not need to travel with
+// them to answer the question a log line is asked, which is which of a seller's accounts
+// this went to.
+//
+// req is taken by value: the mask must not touch what is about to be sent.
+func payoutRequestLogBody(req requests.DokuSendPayoutSubAccountRequest) string {
+	req.Beneficiary.BankAccountNumber = maskAccountNumber(req.Beneficiary.BankAccountNumber)
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		// A struct of strings and ints cannot fail to marshal, but say so if it somehow
+		// does rather than returning an empty body that reads as one that was sent empty.
+		return fmt.Sprintf("<could not render payout body: %v>", err)
+	}
+	return string(body)
+}
+
+// maskAccountNumber keeps the last four digits of a bank account number and replaces
+// everything before them.
+//
+// Four is enough to tell two of a seller's accounts apart, which is all a log line is
+// asked. Anything four digits or shorter is masked whole instead of partially, because
+// "1234" masked to "1234" is not a mask.
+func maskAccountNumber(accountNumber string) string {
+	const visible = 4
+
+	if len(accountNumber) <= visible {
+		return strings.Repeat("*", len(accountNumber))
+	}
+	return strings.Repeat("*", len(accountNumber)-visible) + accountNumber[len(accountNumber)-visible:]
 }
 
 // recordPayoutFailure decides what a DOKU error means for the row, and it turns on one
